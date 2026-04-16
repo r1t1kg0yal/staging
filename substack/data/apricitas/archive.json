@@ -1,0 +1,793 @@
+[
+  {
+    "id": 185604955,
+    "editor_v2": false,
+    "publication_id": 377949,
+    "title": "Taiwan's Modern Miracle",
+    "social_title": "Taiwan's Modern Miracle",
+    "search_engine_title": null,
+    "search_engine_description": null,
+    "type": "newsletter",
+    "slug": "taiwans-modern-miracle",
+    "post_date": "2026-03-05T13:31:25.791Z",
+    "audience": "only_paid",
+    "podcast_duration": null,
+    "video_upload_id": null,
+    "podcast_upload_id": null,
+    "write_comment_permissions": "only_paid",
+    "should_send_free_preview": true,
+    "free_unlock_required": false,
+    "default_comment_sort": null,
+    "canonical_url": "https://www.apricitas.io/p/taiwans-modern-miracle",
+    "section_id": null,
+    "top_exclusions": [],
+    "pins": [],
+    "is_section_pinned": false,
+    "section_slug": null,
+    "section_name": null,
+    "reactions": {
+      "\u2764": 71
+    },
+    "restacks": 14,
+    "restacked_post_id": null,
+    "restacked_post_slug": null,
+    "restacked_pub_name": null,
+    "restacked_pub_logo_url": null,
+    "subtitle": "The AI Boom Has Delivered a Second Economic Miracle to Taiwan, Driving its Fastest Growth in Half a Century. It'll Have to Navigate Rising Geopolitical & Macroeconomic Tensions to Keep it.",
+    "cover_image": "https://substackcdn.com/image/fetch/$s_!KzVr!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F02221d07-d1e5-403f-9e1d-661e1ec0d14d_2886x1843.png",
+    "cover_image_is_square": false,
+    "cover_image_is_explicit": false,
+    "podcast_url": null,
+    "videoUpload": null,
+    "podcastFields": {
+      "post_id": 185604955,
+      "podcast_episode_number": null,
+      "podcast_season_number": null,
+      "podcast_episode_type": null,
+      "should_syndicate_to_other_feed": null,
+      "syndicate_to_section_id": null,
+      "hide_from_feed": false,
+      "free_podcast_url": null,
+      "free_podcast_duration": null,
+      "preview_contains_ad": false
+    },
+    "podcast_preview_upload_id": null,
+    "podcastUpload": null,
+    "podcastPreviewUpload": null,
+    "voiceover_upload_id": null,
+    "voiceoverUpload": null,
+    "has_voiceover": false,
+    "description": "The AI Boom Has Delivered a 2nd Economic Miracle to Taiwan, Pushing GDP Growth Above 23%. It Must Navigate Rising Geopolitical & Economic Tensions to Keep it.",
+    "body_json": null,
+    "body_html": null,
+    "truncated_body_text": "Thanks for reading! If you haven\u2019t subscribed, please click the button below:",
+    "wordcount": 2381,
+    "postTags": [
+      {
+        "id": "017ecacd-9cda-4ff6-be87-4df1b9169c95",
+        "publication_id": 377949,
+        "name": "taiwan",
+        "slug": "taiwan",
+        "hidden": false
+      },
+      {
+        "id": "35754034-e11a-40bf-8222-30c71f4d29be",
+        "publication_id": 377949,
+        "name": "AI",
+        "slug": "ai",
+        "hidden": false
+      },
+      {
+        "id": "4ae03e74-e84a-4eca-9d72-34a89eca44ad",
+        "publication_id": 377949,
+        "name": "economics",
+        "slug": "economics",
+        "hidden": false
+      },
+      {
+        "id": "7730f085-ca95-42f3-aa5d-644b171d24bd",
+        "publication_id": 377949,
+        "name": "Chips act",
+        "slug": "chips-act",
+        "hidden": false
+      },
+      {
+        "id": "8c8a4a04-c263-4d32-8a0e-5f2b8836e603",
+        "publication_id": 377949,
+        "name": "china",
+        "slug": "china",
+        "hidden": false
+      },
+      {
+        "id": "9921e438-e28c-4fa0-824d-84b0159ed06a",
+        "publication_id": 377949,
+        "name": "semiconductor",
+        "slug": "semiconductor",
+        "hidden": false
+      },
+      {
+        "id": "b5c3fd93-9fbb-4205-9d93-15231ddb5c97",
+        "publication_id": 377949,
+        "name": "gdp",
+        "slug": "gdp",
+        "hidden": false
+      },
+      {
+        "id": "c981402e-849c-41df-9092-8287b79bfb9e",
+        "publication_id": 377949,
+        "name": "computers",
+        "slug": "computers",
+        "hidden": false
+      },
+      {
+        "id": "cdbd3d82-6939-45c4-9c36-93e598be47de",
+        "publication_id": 377949,
+        "name": "Chips",
+        "slug": "chips",
+        "hidden": false
+      },
+      {
+        "id": "fdaa7aab-9616-486b-b917-d3bf88214d1c",
+        "publication_id": 377949,
+        "name": "artificial intellgence",
+        "slug": "artificial-intellgence",
+        "hidden": false
+      }
+    ],
+    "teaser_post_eligible": true,
+    "postCountryBlocks": [],
+    "headlineTest": null,
+    "coverImagePalette": {
+      "Vibrant": {
+        "rgb": [
+          5,
+          169,
+          154
+        ],
+        "population": 194
+      },
+      "DarkVibrant": {
+        "rgb": [
+          26,
+          120,
+          118
+        ],
+        "population": 61
+      },
+      "LightVibrant": {
+        "rgb": [
+          250,
+          234,
+          140
+        ],
+        "population": 348
+      },
+      "Muted": {
+        "rgb": [
+          168,
+          137,
+          105
+        ],
+        "population": 30
+      },
+      "DarkMuted": {
+        "rgb": [
+          40,
+          83,
+          87
+        ],
+        "population": 18
+      },
+      "LightMuted": {
+        "rgb": [
+          171,
+          176,
+          212
+        ],
+        "population": 106
+      }
+    },
+    "publishedBylines": [
+      {
+        "id": 4569696,
+        "name": "Joseph Politano",
+        "handle": "josephpolitano",
+        "previous_name": null,
+        "photo_url": "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/1e62a07a-be12-45d1-aea4-44d1c470bd3e_3000x3000.png",
+        "bio": "I write about monetary policy, labor markets, business, finance, and everything else that falls under macroeconomics. Subscribe to Apricitas and get data-driven economic insights delivered to your inbox every Saturday!",
+        "profile_set_up_at": "2021-06-06T14:15:39.882Z",
+        "reader_installed_at": "2022-08-04T16:45:04.533Z",
+        "publicationUsers": [
+          {
+            "id": 301238,
+            "user_id": 4569696,
+            "publication_id": 377949,
+            "role": "admin",
+            "public": true,
+            "is_primary": true,
+            "publication": {
+              "id": 377949,
+              "name": "Apricitas Economics",
+              "subdomain": "apricitas",
+              "custom_domain": "www.apricitas.io",
+              "custom_domain_optional": false,
+              "hero_text": "Data-driven Insights on Economics, Business, Finance, and Public Policy.",
+              "logo_url": "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/56bd9853-89e6-4345-87ee-cd32052bba73_1080x1080.png",
+              "author_id": 4569696,
+              "primary_user_id": 4569696,
+              "theme_var_background_pop": "#00C2FF",
+              "created_at": "2021-06-06T14:23:09.607Z",
+              "email_from_name": "Apricitas Economics",
+              "copyright": "Joseph Politano",
+              "founding_plan_name": "Institutional Plan",
+              "community_enabled": true,
+              "invite_only": false,
+              "payments_state": "enabled",
+              "language": null,
+              "explicit": false,
+              "homepage_type": "magaziney",
+              "is_personal_mode": false,
+              "logo_url_wide": null
+            }
+          }
+        ],
+        "twitter_screen_name": "JosephPolitano",
+        "is_guest": false,
+        "bestseller_tier": 100,
+        "status": {
+          "bestsellerTier": 100,
+          "subscriberTier": 5,
+          "leaderboard": null,
+          "vip": false,
+          "badge": {
+            "type": "bestseller",
+            "tier": 100
+          },
+          "paidPublicationIds": [
+            384640,
+            1543281,
+            26696,
+            1501429,
+            35345,
+            3279891,
+            2880588,
+            5247799,
+            2118966
+          ],
+          "subscriber": null
+        }
+      }
+    ],
+    "reaction": null,
+    "reaction_count": 71,
+    "comment_count": 1,
+    "child_comment_count": 1,
+    "audio_items": [
+      {
+        "post_id": 185604955,
+        "voice_id": "en-US-OnyxTurboMultilingualNeural",
+        "audio_url": null,
+        "type": "tts",
+        "status": "paywalled"
+      }
+    ],
+    "is_geoblocked": false,
+    "hidden": true,
+    "hasCashtag": false
+  },
+  {
+    "id": 188661544,
+    "editor_v2": false,
+    "publication_id": 377949,
+    "title": "The Supreme Court Ruled Against Trump's Tariffs. Now What?",
+    "social_title": null,
+    "search_engine_title": null,
+    "search_engine_description": null,
+    "type": "newsletter",
+    "slug": "the-supreme-court-ruled-against-trumps",
+    "post_date": "2026-02-21T17:41:03.466Z",
+    "audience": "everyone",
+    "podcast_duration": null,
+    "video_upload_id": null,
+    "podcast_upload_id": null,
+    "write_comment_permissions": "everyone",
+    "should_send_free_preview": false,
+    "free_unlock_required": false,
+    "default_comment_sort": null,
+    "canonical_url": "https://www.apricitas.io/p/the-supreme-court-ruled-against-trumps",
+    "section_id": null,
+    "top_exclusions": [],
+    "pins": [],
+    "is_section_pinned": false,
+    "section_slug": null,
+    "section_name": null,
+    "reactions": {
+      "\u2764": 158
+    },
+    "restacks": 16,
+    "restacked_post_id": null,
+    "restacked_post_slug": null,
+    "restacked_pub_name": null,
+    "restacked_pub_logo_url": null,
+    "subtitle": "Charting the Impact of the Supreme Court Ruling and What Comes Next",
+    "cover_image": "https://substackcdn.com/image/fetch/$s_!4mla!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8051a18f-6ce0-4f02-a583-7311f33ba549_2886x1843.png",
+    "cover_image_is_square": false,
+    "cover_image_is_explicit": false,
+    "podcast_url": null,
+    "videoUpload": null,
+    "podcastFields": {
+      "post_id": 188661544,
+      "podcast_episode_number": null,
+      "podcast_season_number": null,
+      "podcast_episode_type": null,
+      "should_syndicate_to_other_feed": null,
+      "syndicate_to_section_id": null,
+      "hide_from_feed": false,
+      "free_podcast_url": null,
+      "free_podcast_duration": null,
+      "preview_contains_ad": false
+    },
+    "podcast_preview_upload_id": null,
+    "podcastUpload": null,
+    "podcastPreviewUpload": null,
+    "voiceover_upload_id": null,
+    "voiceoverUpload": null,
+    "has_voiceover": false,
+    "description": "Charting the Impact of the Supreme Court Ruling and What Comes Next",
+    "body_json": null,
+    "body_html": null,
+    "truncated_body_text": "Thanks for reading! If you haven\u2019t subscribed, please click the button below:",
+    "wordcount": 1692,
+    "postTags": [
+      {
+        "id": "079dafae-21d4-4704-a192-f72646d0ded6",
+        "publication_id": 377949,
+        "name": "international trade",
+        "slug": "international-trade",
+        "hidden": false
+      },
+      {
+        "id": "0bb078b6-cce4-4269-acdd-64914787a9eb",
+        "publication_id": 377949,
+        "name": "Industrial policy",
+        "slug": "industrial-policy",
+        "hidden": false
+      },
+      {
+        "id": "32134427-6a08-44d1-9128-4bcca4969992",
+        "publication_id": 377949,
+        "name": "electronics",
+        "slug": "electronics",
+        "hidden": false
+      },
+      {
+        "id": "37a6eb7a-a3d6-48b3-8544-8605a0fcd921",
+        "publication_id": 377949,
+        "name": "Tariff",
+        "slug": "tariff",
+        "hidden": false
+      },
+      {
+        "id": "841575c9-75cf-4057-b480-65bccfc50967",
+        "publication_id": 377949,
+        "name": "supreme court",
+        "slug": "supreme-court",
+        "hidden": false
+      },
+      {
+        "id": "8dce4185-e7e8-448d-8d60-a61b7a6c75de",
+        "publication_id": 377949,
+        "name": "trump",
+        "slug": "trump",
+        "hidden": false
+      },
+      {
+        "id": "b7b529e6-6903-491e-b306-f0517bef5f1c",
+        "publication_id": 377949,
+        "name": "taxes",
+        "slug": "taxes",
+        "hidden": false
+      }
+    ],
+    "teaser_post_eligible": true,
+    "postCountryBlocks": [],
+    "headlineTest": null,
+    "coverImagePalette": {
+      "Vibrant": {
+        "rgb": [
+          244,
+          100,
+          84
+        ],
+        "population": 80
+      },
+      "DarkVibrant": {
+        "rgb": [
+          124.58571428571429,
+          19.671428571428567,
+          8.01428571428571
+        ],
+        "population": 0
+      },
+      "LightVibrant": {
+        "rgb": [
+          246,
+          230,
+          140
+        ],
+        "population": 660
+      },
+      "Muted": {
+        "rgb": [
+          176,
+          84,
+          76
+        ],
+        "population": 4
+      },
+      "DarkMuted": {
+        "rgb": [
+          36,
+          44,
+          52
+        ],
+        "population": 3569
+      },
+      "LightMuted": {
+        "rgb": [
+          180,
+          172,
+          116
+        ],
+        "population": 12
+      }
+    },
+    "publishedBylines": [
+      {
+        "id": 4569696,
+        "name": "Joseph Politano",
+        "handle": "josephpolitano",
+        "previous_name": null,
+        "photo_url": "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/1e62a07a-be12-45d1-aea4-44d1c470bd3e_3000x3000.png",
+        "bio": "I write about monetary policy, labor markets, business, finance, and everything else that falls under macroeconomics. Subscribe to Apricitas and get data-driven economic insights delivered to your inbox every Saturday!",
+        "profile_set_up_at": "2021-06-06T14:15:39.882Z",
+        "reader_installed_at": "2022-08-04T16:45:04.533Z",
+        "publicationUsers": [
+          {
+            "id": 301238,
+            "user_id": 4569696,
+            "publication_id": 377949,
+            "role": "admin",
+            "public": true,
+            "is_primary": true,
+            "publication": {
+              "id": 377949,
+              "name": "Apricitas Economics",
+              "subdomain": "apricitas",
+              "custom_domain": "www.apricitas.io",
+              "custom_domain_optional": false,
+              "hero_text": "Data-driven Insights on Economics, Business, Finance, and Public Policy.",
+              "logo_url": "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/56bd9853-89e6-4345-87ee-cd32052bba73_1080x1080.png",
+              "author_id": 4569696,
+              "primary_user_id": 4569696,
+              "theme_var_background_pop": "#00C2FF",
+              "created_at": "2021-06-06T14:23:09.607Z",
+              "email_from_name": "Apricitas Economics",
+              "copyright": "Joseph Politano",
+              "founding_plan_name": "Institutional Plan",
+              "community_enabled": true,
+              "invite_only": false,
+              "payments_state": "enabled",
+              "language": null,
+              "explicit": false,
+              "homepage_type": "magaziney",
+              "is_personal_mode": false,
+              "logo_url_wide": null
+            }
+          }
+        ],
+        "twitter_screen_name": "JosephPolitano",
+        "is_guest": false,
+        "bestseller_tier": 100,
+        "status": {
+          "bestsellerTier": 100,
+          "subscriberTier": 5,
+          "leaderboard": null,
+          "vip": false,
+          "badge": {
+            "type": "bestseller",
+            "tier": 100
+          },
+          "paidPublicationIds": [
+            384640,
+            1543281,
+            26696,
+            1501429,
+            35345,
+            3279891,
+            2880588,
+            5247799,
+            2118966
+          ],
+          "subscriber": null
+        }
+      }
+    ],
+    "reaction": null,
+    "reaction_count": 158,
+    "comment_count": 22,
+    "child_comment_count": 14,
+    "audio_items": [
+      {
+        "post_id": 188661544,
+        "voice_id": "en-US-OnyxTurboMultilingualNeural",
+        "audio_url": "https://substack-video.s3.amazonaws.com/video_upload/post/188661544/tts/ec352552-e99c-49ba-bbef-0da1befdf3b8/en-US-OnyxTurboMultilingualNeural.mp3",
+        "type": "tts",
+        "status": "completed"
+      }
+    ],
+    "is_geoblocked": false,
+    "hasCashtag": false
+  },
+  {
+    "id": 185134080,
+    "editor_v2": false,
+    "publication_id": 377949,
+    "title": "America's $1T AI Gamble",
+    "social_title": null,
+    "search_engine_title": null,
+    "search_engine_description": null,
+    "type": "newsletter",
+    "slug": "americas-1t-ai-gamble",
+    "post_date": "2026-02-10T13:30:25.351Z",
+    "audience": "everyone",
+    "podcast_duration": null,
+    "video_upload_id": null,
+    "podcast_upload_id": null,
+    "write_comment_permissions": "everyone",
+    "should_send_free_preview": false,
+    "free_unlock_required": false,
+    "default_comment_sort": null,
+    "canonical_url": "https://www.apricitas.io/p/americas-1t-ai-gamble",
+    "section_id": null,
+    "top_exclusions": [],
+    "pins": [],
+    "is_section_pinned": false,
+    "section_slug": null,
+    "section_name": null,
+    "reactions": {
+      "\u2764": 176
+    },
+    "restacks": 28,
+    "restacked_post_id": null,
+    "restacked_post_slug": null,
+    "restacked_pub_name": null,
+    "restacked_pub_logo_url": null,
+    "subtitle": "US AI-Related Investment Keeps Breaking Records, With Total Software, Computer, & Data Center Spending Now Exceeding $1T Per Year",
+    "cover_image": "https://substackcdn.com/image/fetch/$s_!nF_P!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F1c0b56f7-b0b4-429d-8d35-0a301466c076_2886x1843.png",
+    "cover_image_is_square": false,
+    "cover_image_is_explicit": false,
+    "podcast_url": null,
+    "videoUpload": null,
+    "podcastFields": {
+      "post_id": 185134080,
+      "podcast_episode_number": null,
+      "podcast_season_number": null,
+      "podcast_episode_type": null,
+      "should_syndicate_to_other_feed": null,
+      "syndicate_to_section_id": null,
+      "hide_from_feed": false,
+      "free_podcast_url": null,
+      "free_podcast_duration": null,
+      "preview_contains_ad": false
+    },
+    "podcast_preview_upload_id": null,
+    "podcastUpload": null,
+    "podcastPreviewUpload": null,
+    "voiceover_upload_id": null,
+    "voiceoverUpload": null,
+    "has_voiceover": false,
+    "description": "US AI-Related Investment Keeps Breaking Records, With Total Software, Computer, & Data Center Spending Now Exceeding $1T Per Year",
+    "body_json": null,
+    "body_html": null,
+    "truncated_body_text": "Thanks for reading! If you haven\u2019t subscribed, please click the button below:",
+    "wordcount": 1751,
+    "postTags": [
+      {
+        "id": "017ecacd-9cda-4ff6-be87-4df1b9169c95",
+        "publication_id": 377949,
+        "name": "taiwan",
+        "slug": "taiwan",
+        "hidden": false
+      },
+      {
+        "id": "2531b9e9-9503-4a01-a9e8-b19d84c09057",
+        "publication_id": 377949,
+        "name": "imports",
+        "slug": "imports",
+        "hidden": false
+      },
+      {
+        "id": "35754034-e11a-40bf-8222-30c71f4d29be",
+        "publication_id": 377949,
+        "name": "AI",
+        "slug": "ai",
+        "hidden": false
+      },
+      {
+        "id": "5a6b6fc0-74a5-464a-b6ee-1b6d5adc50a0",
+        "publication_id": 377949,
+        "name": "Charts",
+        "slug": "charts",
+        "hidden": false
+      },
+      {
+        "id": "a21bddd3-94f2-4f9d-8c6a-11a3fd4afaca",
+        "publication_id": 377949,
+        "name": "fixed investment",
+        "slug": "fixed-investment",
+        "hidden": false
+      },
+      {
+        "id": "afb7b982-2405-4132-94be-99eed88f916a",
+        "publication_id": 377949,
+        "name": "investment boom",
+        "slug": "investment-boom",
+        "hidden": false
+      },
+      {
+        "id": "c981402e-849c-41df-9092-8287b79bfb9e",
+        "publication_id": 377949,
+        "name": "computers",
+        "slug": "computers",
+        "hidden": false
+      },
+      {
+        "id": "fdaa7aab-9616-486b-b917-d3bf88214d1c",
+        "publication_id": 377949,
+        "name": "artificial intellgence",
+        "slug": "artificial-intellgence",
+        "hidden": false
+      }
+    ],
+    "teaser_post_eligible": true,
+    "postCountryBlocks": [],
+    "headlineTest": null,
+    "coverImagePalette": {
+      "Vibrant": {
+        "rgb": [
+          124.48818897637798,
+          126.49606299212599,
+          130.51181102362202
+        ],
+        "population": 0
+      },
+      "DarkVibrant": {
+        "rgb": [
+          64.73385826771654,
+          65.77795275590552,
+          67.86614173228347
+        ],
+        "population": 0
+      },
+      "LightVibrant": {
+        "rgb": [
+          187.13385826771656,
+          188.1779527559055,
+          190.26614173228344
+        ],
+        "population": 0
+      },
+      "Muted": {
+        "rgb": [
+          149,
+          144,
+          100
+        ],
+        "population": 37
+      },
+      "DarkMuted": {
+        "rgb": [
+          36,
+          44,
+          52
+        ],
+        "population": 4899
+      },
+      "LightMuted": {
+        "rgb": [
+          190,
+          191,
+          193
+        ],
+        "population": 24
+      }
+    },
+    "publishedBylines": [
+      {
+        "id": 4569696,
+        "name": "Joseph Politano",
+        "handle": "josephpolitano",
+        "previous_name": null,
+        "photo_url": "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/1e62a07a-be12-45d1-aea4-44d1c470bd3e_3000x3000.png",
+        "bio": "I write about monetary policy, labor markets, business, finance, and everything else that falls under macroeconomics. Subscribe to Apricitas and get data-driven economic insights delivered to your inbox every Saturday!",
+        "profile_set_up_at": "2021-06-06T14:15:39.882Z",
+        "reader_installed_at": "2022-08-04T16:45:04.533Z",
+        "publicationUsers": [
+          {
+            "id": 301238,
+            "user_id": 4569696,
+            "publication_id": 377949,
+            "role": "admin",
+            "public": true,
+            "is_primary": true,
+            "publication": {
+              "id": 377949,
+              "name": "Apricitas Economics",
+              "subdomain": "apricitas",
+              "custom_domain": "www.apricitas.io",
+              "custom_domain_optional": false,
+              "hero_text": "Data-driven Insights on Economics, Business, Finance, and Public Policy.",
+              "logo_url": "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/56bd9853-89e6-4345-87ee-cd32052bba73_1080x1080.png",
+              "author_id": 4569696,
+              "primary_user_id": 4569696,
+              "theme_var_background_pop": "#00C2FF",
+              "created_at": "2021-06-06T14:23:09.607Z",
+              "email_from_name": "Apricitas Economics",
+              "copyright": "Joseph Politano",
+              "founding_plan_name": "Institutional Plan",
+              "community_enabled": true,
+              "invite_only": false,
+              "payments_state": "enabled",
+              "language": null,
+              "explicit": false,
+              "homepage_type": "magaziney",
+              "is_personal_mode": false,
+              "logo_url_wide": null
+            }
+          }
+        ],
+        "twitter_screen_name": "JosephPolitano",
+        "is_guest": false,
+        "bestseller_tier": 100,
+        "status": {
+          "bestsellerTier": 100,
+          "subscriberTier": 5,
+          "leaderboard": null,
+          "vip": false,
+          "badge": {
+            "type": "bestseller",
+            "tier": 100
+          },
+          "paidPublicationIds": [
+            384640,
+            1543281,
+            26696,
+            1501429,
+            35345,
+            3279891,
+            2880588,
+            5247799,
+            2118966
+          ],
+          "subscriber": null
+        }
+      }
+    ],
+    "reaction": null,
+    "reaction_count": 176,
+    "comment_count": 31,
+    "child_comment_count": 10,
+    "audio_items": [
+      {
+        "post_id": 185134080,
+        "voice_id": "en-US-OnyxTurboMultilingualNeural",
+        "audio_url": "https://substack-video.s3.amazonaws.com/video_upload/post/185134080/tts/8d9b080c-39c0-406b-b6ea-76a73bd96937/en-US-OnyxTurboMultilingualNeural.mp3",
+        "type": "tts",
+        "status": "completed"
+      }
+    ],
+    "is_geoblocked": false,
+    "hasCashtag": false
+  }
+]

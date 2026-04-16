@@ -1,0 +1,457 @@
+{
+  "audience": "everyone",
+  "audience_before_archived": null,
+  "canonical_url": "https://www.apricitas.io/p/the-no-hire-economy",
+  "default_comment_sort": null,
+  "editor_v2": false,
+  "exempt_from_archive_paywall": false,
+  "free_unlock_required": false,
+  "id": 184066648,
+  "podcast_art_url": null,
+  "podcast_duration": null,
+  "podcast_preview_upload_id": null,
+  "podcast_upload_id": null,
+  "podcast_url": null,
+  "post_date": "2026-01-11T14:31:01.296Z",
+  "updated_at": "2026-01-11T15:09:08.462Z",
+  "publication_id": 377949,
+  "search_engine_description": null,
+  "search_engine_title": null,
+  "section_id": null,
+  "should_send_free_preview": false,
+  "show_guest_bios": true,
+  "slug": "the-no-hire-economy",
+  "social_title": null,
+  "subtitle": "US Job Growth has Zeroed Out as Hiring Rates Sink, Hitting Young & Low Income Workers the Hardest",
+  "teaser_post_eligible": true,
+  "title": "The 'No Hire' Economy",
+  "type": "newsletter",
+  "video_upload_id": null,
+  "write_comment_permissions": "everyone",
+  "meter_type": "none",
+  "live_stream_id": null,
+  "is_published": true,
+  "restacks": 32,
+  "reactions": {
+    "\u2764": 227
+  },
+  "top_exclusions": [],
+  "pins": [],
+  "section_pins": [],
+  "has_shareable_clips": false,
+  "previous_post_slug": "america-is-losing-blue-collar-jobs",
+  "next_post_slug": "the-economic-legacy-of-doge",
+  "cover_image": "https://substackcdn.com/image/fetch/$s_!Wy7H!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png",
+  "cover_image_is_square": false,
+  "cover_image_is_explicit": false,
+  "videoUpload": null,
+  "podcastFields": {
+    "post_id": 184066648,
+    "podcast_episode_number": null,
+    "podcast_season_number": null,
+    "podcast_episode_type": null,
+    "should_syndicate_to_other_feed": null,
+    "syndicate_to_section_id": null,
+    "hide_from_feed": false,
+    "free_podcast_url": null,
+    "free_podcast_duration": null,
+    "preview_contains_ad": false
+  },
+  "podcastUpload": null,
+  "podcastPreviewUpload": null,
+  "voiceover_upload_id": null,
+  "voiceoverUpload": null,
+  "has_voiceover": false,
+  "description": "US Job Growth has Zeroed Out as Hiring Rates Sink, Hitting Young & Low Income Workers the Hardest",
+  "body_html": "<p><strong>Thanks for reading! If you haven\u2019t subscribed, please click the button below:</strong></p><p class=\"button-wrapper\" data-attrs=\"{&quot;url&quot;:&quot;https://www.apricitas.io/subscribe?&quot;,&quot;text&quot;:&quot;Subscribe now&quot;,&quot;action&quot;:null,&quot;class&quot;:null}\" data-component-name=\"ButtonCreateButton\"><a class=\"button primary\" href=\"https://www.apricitas.io/subscribe?\"><span>Subscribe now</span></a></p><p><strong>By subscribing, you\u2019ll join over 75,000 people who read Apricitas!</strong></p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!Wy7H!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!Wy7H!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!Wy7H!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!Wy7H!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!Wy7H!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!Wy7H!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:203637,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:false,&quot;topImage&quot;:true,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!Wy7H!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!Wy7H!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!Wy7H!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!Wy7H!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F4022caac-6ea1-4230-bcee-0558fc278931_2886x1843.png 1456w\" sizes=\"100vw\" fetchpriority=\"high\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>The US job market slowed down significantly in the latter half of 2025, with the country <a href=\"https://fred.stlouisfed.org/graph/?g=1QlnC\">adding functionally zero jobs over the last 5 months</a> as the <a href=\"https://fred.stlouisfed.org/graph/?g=1Qglu\">unemployment rate ticked up to some of the highest levels since early 2021</a>. <a href=\"https://fred.stlouisfed.org/graph/?g=1Qil2\">Averaged across the entirety of 2025, the US added only 44k jobs per month</a>, the lowest since 2020 and lower than any year during the 2010s. It\u2019s a dramatic reversal for a labor market that was setting modern hiring records only a few years ago.</p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!WZPW!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!WZPW!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!WZPW!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!WZPW!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!WZPW!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!WZPW!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/dd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:299142,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:false,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!WZPW!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!WZPW!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!WZPW!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!WZPW!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Fdd1e2f90-0404-4961-a455-3c4cde72a2bd_2886x1843.png 1456w\" sizes=\"100vw\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>In 2021 and 2022, the US economy experienced the \u201cGreat Resignation\u201d (or perhaps more accurately the <a href=\"https://www.apricitas.io/p/americans-are-quitting-their-jobs\">\u201cGreat Reshuffling\u201d</a>), where tens of millions of workers quit their jobs and were hired into better-paid positions in other companies. Then, between 2023 and 2024, the US economy settled into a <a href=\"https://www.marketplace.org/story/2025/04/02/low-hiring-low-firing-economy-not-great-for-gen-z\">\u201clow hire, low fire\u201d equilibrium</a> as employers were not onboarding many new workers, but were also laying off fewer workers than pre-pandemic. That has now given way to a <a href=\"https://bsky.app/profile/claudia-sahm.bsky.social/post/3m7kxbj3vok22\">\u201cno-hire\u201d economy</a>\u2014layoffs have inched up towards their pre-pandemic average, but hiring has sunk all the way down to 2013 levels.</p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!o6Ym!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!o6Ym!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg 424w, https://substackcdn.com/image/fetch/$s_!o6Ym!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg 848w, https://substackcdn.com/image/fetch/$s_!o6Ym!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg 1272w, https://substackcdn.com/image/fetch/$s_!o6Ym!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!o6Ym!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/f76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:null,&quot;alt&quot;:&quot;Image&quot;,&quot;title&quot;:null,&quot;type&quot;:null,&quot;href&quot;:null,&quot;belowTheFold&quot;:false,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:null,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"Image\" title=\"Image\" srcset=\"https://substackcdn.com/image/fetch/$s_!o6Ym!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg 424w, https://substackcdn.com/image/fetch/$s_!o6Ym!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg 848w, https://substackcdn.com/image/fetch/$s_!o6Ym!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg 1272w, https://substackcdn.com/image/fetch/$s_!o6Ym!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff76ca950-642c-432e-a9e4-f2d2e9de61a8_2886x1843.jpeg 1456w\" sizes=\"100vw\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>Throughout this period, the <a href=\"https://fred.stlouisfed.org/series/UNRATE\">unemployment rate has crept up from a low of 3.4% in late 2023 to a recent high of 4.5% set in November 2025.</a> Looking at broader measures of underemployment\u2014including people who want a job but aren\u2019t in the labor force or who are part-time but want a full-time job\u2014the job market is in nearly the worst place since the early pandemic, with roughly 10.8% of the broader labor force looking for more work.</p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!uM9I!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!uM9I!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!uM9I!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!uM9I!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!uM9I!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!uM9I!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:223163,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:true,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!uM9I!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!uM9I!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!uM9I!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!uM9I!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F5f6291ed-b4a2-4662-9fbc-d953de1c9acf_2886x1843.png 1456w\" sizes=\"100vw\" loading=\"lazy\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>Today\u2019s labor market is perhaps most reminiscent of the \u201cjobless recovery\u201d that characterized the early 1990s or mid-2000s, where employment rates remained stagnant even as overall economic growth had already rebounded. The nearly three-year period from February 2023 to the present is the longest time since those previous \u201cjobless recoveries\u201d where employment rates for prime-age workers have stayed within a one percentage point range, never declining below 80.4% and never rising above 80.9%\u2014<a href=\"https://fred.stlouisfed.org/graph/?g=1QiiU\">despite a more-than-7% increase in US GDP over the same timeframe.</a></p><p>That does not reflect an economy at the apex of full employment, both because America has seen higher employment rates in its own past and because many countries (like <a href=\"https://fred.stlouisfed.org/graph/?g=1Qiih\">Canada</a>, <a href=\"https://fred.stlouisfed.org/graph/?g=1Qiij\">Australia</a>, <a href=\"https://fred.stlouisfed.org/graph/?g=1Qiil\">Japan</a>, and <a href=\"https://bsky.app/profile/josephpolitano.bsky.social/post/3m7ss2oa6pk2j\">the vast majority of EU member states</a>) all currently have noticeably higher employment rates than the US. But it does reflect a labor market continually stagnating in a \u201cno-hire\u201d equilibrium.</p><p class=\"button-wrapper\" data-attrs=\"{&quot;url&quot;:&quot;https://www.apricitas.io/subscribe?&quot;,&quot;text&quot;:&quot;Subscribe now&quot;,&quot;action&quot;:null,&quot;class&quot;:null}\" data-component-name=\"ButtonCreateButton\"><a class=\"button primary\" href=\"https://www.apricitas.io/subscribe?\"><span>Subscribe now</span></a></p><h2>Breaking Down the Job Slowdown</h2><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!xhBC!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!xhBC!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!xhBC!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!xhBC!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!xhBC!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!xhBC!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:255783,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:true,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!xhBC!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!xhBC!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!xhBC!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!xhBC!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F23868eaa-d086-4153-9aab-9271b035917c_2886x1843.png 1456w\" sizes=\"100vw\" loading=\"lazy\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>The <a href=\"https://fred.stlouisfed.org/graph/?g=1QkNp\">US has added only 525k jobs over the last year</a>, the slowest pace of job growth since 2020, and a number less than one-third of any period in the late 2010s. That slowdown has been spread across nearly all major industries, with government, professional &amp; business services, goods-producing industries, and the trade, transportation, &amp; utilities super-sectors all losing jobs. The main industry adding jobs is healthcare, which is on a long-run growth trend <a href=\"https://fred.stlouisfed.org/graph/?g=1QhHu\">amidst the rising medical needs of an aging population, and thus is almost always growing faster than the labor market as a whole</a>. </p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!e1PY!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!e1PY!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!e1PY!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!e1PY!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!e1PY!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!e1PY!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:252248,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:true,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!e1PY!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!e1PY!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!e1PY!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!e1PY!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8a8390ee-5fda-4ea2-87b0-377cdb5571e5_2886x1843.png 1456w\" sizes=\"100vw\" loading=\"lazy\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>Digging further, <a href=\"https://www.apricitas.io/p/america-is-losing-blue-collar-jobs\">the contraction in blue-collar jobs</a> continues to intensify, with their employment levels shrinking by more than 145k over the last year. Job growth in construction has functionally zeroed out, while manufacturing and logistics are each losing tens of thousands of jobs. <a href=\"https://fred.stlouisfed.org/graph/?g=1QkOg\">Warehouses alone have shrunk their workforce by more than 50k over the last year</a>, putting the sector <a href=\"https://fred.stlouisfed.org/graph/?g=1QkOj\">150k jobs below its early-2022 peak</a>.</p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!vtVn!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!vtVn!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!vtVn!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!vtVn!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!vtVn!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!vtVn!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:244808,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:true,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!vtVn!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!vtVn!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!vtVn!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!vtVn!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F48d1d599-ce55-47af-8b6e-ef483b41fc73_2886x1843.png 1456w\" sizes=\"100vw\" loading=\"lazy\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>Meanwhile, <a href=\"https://fred.stlouisfed.org/graph/?g=1QioD\">the US public sector lost more than 157k jobs over the last year</a>, primarily thanks to the DOGE cuts at the federal government. <a href=\"https://fred.stlouisfed.org/graph/?g=1Qipp\">Federal employees represent only 13% of all public-sector jobs</a>, yet the 277k jobs eliminated at the national level, <a href=\"https://fred.stlouisfed.org/graph/?g=1QjtX\">plus the 45k losses at the state level</a>, easily overwhelmed the slow growth at the local level. That local government job growth is roughly evenly split between <a href=\"https://fred.stlouisfed.org/graph/?g=1Qjw8\">public K-12 schools</a> and <a href=\"https://fred.stlouisfed.org/graph/?g=1QjvS\">all other local government functions</a>, while state government job losses are concentrated <a href=\"https://fred.stlouisfed.org/graph/?g=1QjvT\">entirely within public Colleges, Universities, &amp; other educational institutions</a>. </p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!a2gt!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!a2gt!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!a2gt!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!a2gt!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!a2gt!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!a2gt!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:253785,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:true,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!a2gt!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!a2gt!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!a2gt!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!a2gt!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F74ca58b1-12cf-403c-9c6a-ad8255354191_2886x1843.png 1456w\" sizes=\"100vw\" loading=\"lazy\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>Job growth in professional services industries also remains negative, with employment shrinking by roughly 62k over the last year. The high-paid white-collar sectors like law, accounting, architecture, and management consulting are still adding jobs, just at a much slower rate than pre-COVID, but employment levels at <a href=\"https://fred.stlouisfed.org/graph/?g=1Qlv6\">temp agencies</a> and <a href=\"https://fred.stlouisfed.org/graph/?g=1Qlvb\">administrative support firms</a> have been continually declining for years now.</p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!3ajl!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!3ajl!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!3ajl!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!3ajl!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!3ajl!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!3ajl!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:311366,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:true,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!3ajl!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!3ajl!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!3ajl!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!3ajl!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F92a83976-8db9-4b09-8b6f-0919d5e26f64_2886x1843.png 1456w\" sizes=\"100vw\" loading=\"lazy\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>Finally, the tech sector labor market remains extremely weak, with employment shrinking by more than 19k over the last year and down roughly 100k since late 2023. That\u2019s not as bad as the worst of the 2024 tech job market, but it is much worse than the 2022 boom or any period during the 2010s. At least during the 2008 financial crisis, it took only just over a year before tech employment began growing again\u2014today, employment continues falling nearly three years after the beginning of the tech-cession. If this decline persists through 2026, it will beat the dot-com bust for the longest period of tech job market losses in American history.</p><p class=\"button-wrapper\" data-attrs=\"{&quot;url&quot;:&quot;https://www.apricitas.io/subscribe?&quot;,&quot;text&quot;:&quot;Subscribe now&quot;,&quot;action&quot;:null,&quot;class&quot;:null}\" data-component-name=\"ButtonCreateButton\"><a class=\"button primary\" href=\"https://www.apricitas.io/subscribe?\"><span>Subscribe now</span></a></p><h2>The Victims of the No-Hire Economy</h2><p>Who has been most affected by this shift to the \u201cno-hire\u201d economy? Established workers with existing jobs can afford to wait out the current labor market slowdown, but early-career workers are finding it harder to land their first jobs, making young people among the hardest hit by today\u2019s job market weakness.</p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!IZTO!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!IZTO!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!IZTO!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!IZTO!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!IZTO!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!IZTO!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/ebbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:256076,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:true,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!IZTO!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!IZTO!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!IZTO!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!IZTO!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Febbb00b6-1bdd-4b28-8666-1e5d38a975ab_2886x1843.png 1456w\" sizes=\"100vw\" loading=\"lazy\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>Over the last year, <a href=\"https://fred.stlouisfed.org/graph/?g=1QkWH\">the unemployment rate for teenagers is up by 2.9</a> percentage points, <a href=\"https://fred.stlouisfed.org/graph/?g=1QkWH\">the unemployment rate for people in their early 20s is up by 0.7 percentage points</a>, but <a href=\"https://fred.stlouisfed.org/graph/?g=1QkXb\">the unemployment rate for those above 25 is up by only 0.2 percentage points.</a> This is also an increasingly bad labor market for recent graduates, as the <a href=\"https://fred.stlouisfed.org/graph/?g=1Ql0f\">unemployment rate for young college educated workers is up by a full 1.6 percentage points over the last year.</a> More broadly, the <a href=\"https://fred.stlouisfed.org/graph/?g=1Qlpn\">unemployment rate for new labor market entrants</a> (like young adults looking for their first paycheck) and <a href=\"https://fred.stlouisfed.org/graph/?g=1Qlpk\">labor market reentrants</a> (like stay-at-home parents going back to office work) are both hovering near their highest levels since 2016.</p><div class=\"captioned-image-container\"><figure><a class=\"image-link image2 is-viewable-img\" target=\"_blank\" href=\"https://substackcdn.com/image/fetch/$s_!L2r9!,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png\" data-component-name=\"Image2ToDOM\"><div class=\"image2-inset\"><picture><source type=\"image/webp\" srcset=\"https://substackcdn.com/image/fetch/$s_!L2r9!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!L2r9!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!L2r9!,w_1272,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!L2r9!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png 1456w\" sizes=\"100vw\"><img src=\"https://substackcdn.com/image/fetch/$s_!L2r9!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png\" width=\"1456\" height=\"930\" data-attrs=\"{&quot;src&quot;:&quot;https://substack-post-media.s3.amazonaws.com/public/images/87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png&quot;,&quot;srcNoWatermark&quot;:null,&quot;fullscreen&quot;:null,&quot;imageSize&quot;:null,&quot;height&quot;:930,&quot;width&quot;:1456,&quot;resizeWidth&quot;:null,&quot;bytes&quot;:386049,&quot;alt&quot;:null,&quot;title&quot;:null,&quot;type&quot;:&quot;image/png&quot;,&quot;href&quot;:null,&quot;belowTheFold&quot;:true,&quot;topImage&quot;:false,&quot;internalRedirect&quot;:&quot;https://www.apricitas.io/i/184066648?img=https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png&quot;,&quot;isProcessing&quot;:false,&quot;align&quot;:null,&quot;offset&quot;:false}\" class=\"sizing-normal\" alt=\"\" srcset=\"https://substackcdn.com/image/fetch/$s_!L2r9!,w_424,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png 424w, https://substackcdn.com/image/fetch/$s_!L2r9!,w_848,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png 848w, https://substackcdn.com/image/fetch/$s_!L2r9!,w_1272,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png 1272w, https://substackcdn.com/image/fetch/$s_!L2r9!,w_1456,c_limit,f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F87c18dbe-083a-4aa7-b084-7b576f61ca62_2886x1843.png 1456w\" sizes=\"100vw\" loading=\"lazy\"></picture><div class=\"image-link-expand\"><div class=\"pencraft pc-display-flex pc-gap-8 pc-reset\"><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container restack-image\"><svg role=\"img\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" stroke-width=\"1.5\" stroke=\"var(--color-fg-primary)\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><g><title></title><path d=\"M2.53001 7.81595C3.49179 4.73911 6.43281 2.5 9.91173 2.5C13.1684 2.5 15.9537 4.46214 17.0852 7.23684L17.6179 8.67647M17.6179 8.67647L18.5002 4.26471M17.6179 8.67647L13.6473 6.91176M17.4995 12.1841C16.5378 15.2609 13.5967 17.5 10.1178 17.5C6.86118 17.5 4.07589 15.5379 2.94432 12.7632L2.41165 11.3235M2.41165 11.3235L1.5293 15.7353M2.41165 11.3235L6.38224 13.0882\"></path></g></svg></button><button tabindex=\"0\" type=\"button\" class=\"pencraft pc-reset pencraft icon-container view-image\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-maximize2 lucide-maximize-2\"><polyline points=\"15 3 21 3 21 9\"></polyline><polyline points=\"9 21 3 21 3 15\"></polyline><line x1=\"21\" x2=\"14\" y1=\"3\" y2=\"10\"></line><line x1=\"3\" x2=\"10\" y1=\"21\" y2=\"14\"></line></svg></button></div></div></div></a></figure></div><p>The distribution of wage growth has also radically changed since amidst the \u201cno-hire\u201d economy. From 2021-2022, wage growth for the lowest-paid workers accelerated to the fastest pace in a generation, amidst the <a href=\"https://www.apricitas.io/p/americans-are-quitting-their-jobs\">Great Reshuffling</a> of those employees into higher-paid fields and companies, and the US economy experienced a rapid decrease in wage inequality as pay growth for the bottom quintile of workers significantly exceeded growth for the top quintile. </p><p>Yet wage growth for these lowest-paid workers has ground to a halt over the last two years, and they are now seeing much lower raises than their higher-paid counterparts. In fact, this is now the largest gap in wage growth favoring high earners since the early 2010s, showing just how hard today\u2019s \u201cno-hire\u201d labor market has hit low-income workers. </p><p class=\"button-wrapper\" data-attrs=\"{&quot;url&quot;:&quot;https://www.apricitas.io/subscribe?&quot;,&quot;text&quot;:&quot;Subscribe now&quot;,&quot;action&quot;:null,&quot;class&quot;:null}\" data-component-name=\"ButtonCreateButton\"><a class=\"button primary\" href=\"https://www.apricitas.io/subscribe?\"><span>Subscribe now</span></a></p><h2>Conclusions</h2><p>The 2025 slowdown in job growth is clearly not just a story about the US population shrinking amidst a rapid decline in immigration. <a href=\"https://www.apricitas.io/p/america-is-flying-blind-on-immigration\">We still don\u2019t have good data on how many foreign-born workers have left the US since Trump\u2019s immigration crackdown, but we do know that employment rates for native-born Americans are slowly falling.</a> <a href=\"https://budgetlab.yale.edu/research/evaluating-impact-ai-labor-market-september-cps-update\">Nor is this entirely a story about AI-driven disemployment</a>\u2014sectors extremely insulated from computer technology are some of those with the fastest job declines.</p><p>Instead, it\u2019s a combination of factors\u2014tighter monetary policy and contractionary fiscal impulses, higher tariffs and lower immigration, technological shifts and rising uncertainty\u2014all chipping away at job growth from different angles. This leaves the labor market on an uneasy precipice, since employment will begin to decline outright unless hiring rates pick up in the near future. In other words, today\u2019s jobless recovery risks hardening into an outright labor market decline.</p><div class=\"subscription-widget-wrap-editor\" data-attrs=\"{&quot;url&quot;:&quot;https://www.apricitas.io/subscribe?&quot;,&quot;text&quot;:&quot;Subscribe&quot;,&quot;language&quot;:&quot;en&quot;}\" data-component-name=\"SubscribeWidgetToDOM\"><div class=\"subscription-widget show-subscribe\"><div class=\"preamble\"><p class=\"cta-caption\">Thanks for reading! To receive more new posts on economic data analysis, consider subscribing!</p></div><form class=\"subscription-widget-subscribe\"><input type=\"email\" class=\"email-input\" name=\"email\" placeholder=\"Type your email\u2026\" tabindex=\"-1\"><input type=\"submit\" class=\"button primary\" value=\"Subscribe\"><div class=\"fake-input-wrapper\"><div class=\"fake-input\"></div><div class=\"fake-button\"></div></div></form></div></div>",
+  "truncated_body_text": "Thanks for reading! If you haven\u2019t subscribed, please click the button below:",
+  "wordcount": 1321,
+  "postTags": [
+    {
+      "id": "003f79de-eed8-445d-81d0-1e3bd7e02ae8",
+      "publication_id": 377949,
+      "name": "jobs",
+      "slug": "jobs",
+      "hidden": false
+    },
+    {
+      "id": "18704758-91a7-45f5-81b2-aba16cd84895",
+      "publication_id": 377949,
+      "name": "blue-collar",
+      "slug": "blue-collar",
+      "hidden": false
+    },
+    {
+      "id": "30754ca0-b9b1-41d3-b366-c86b561503cf",
+      "publication_id": 377949,
+      "name": "economic data",
+      "slug": "economic-data",
+      "hidden": false
+    },
+    {
+      "id": "4ae03e74-e84a-4eca-9d72-34a89eca44ad",
+      "publication_id": 377949,
+      "name": "economics",
+      "slug": "economics",
+      "hidden": false
+    },
+    {
+      "id": "4d6ee1cf-8559-4459-96d9-bea61cc350e6",
+      "publication_id": 377949,
+      "name": "unemployment",
+      "slug": "unemployment",
+      "hidden": false
+    },
+    {
+      "id": "b9c4d7c6-5b41-41ee-aa2e-34b75c021430",
+      "publication_id": 377949,
+      "name": "tech-cession",
+      "slug": "tech-cession",
+      "hidden": false
+    },
+    {
+      "id": "c57e1d3e-cd95-416a-bc28-cc6750c32596",
+      "publication_id": 377949,
+      "name": "employment",
+      "slug": "employment",
+      "hidden": false
+    }
+  ],
+  "postCountryBlocks": [],
+  "headlineTest": null,
+  "coverImagePalette": {
+    "Vibrant": {
+      "rgb": [
+        240,
+        140,
+        108
+      ],
+      "population": 4
+    },
+    "DarkVibrant": {
+      "rgb": [
+        120.32222222222224,
+        38.470370370370375,
+        12.277777777777768
+      ],
+      "population": 0
+    },
+    "LightVibrant": {
+      "rgb": [
+        247,
+        201,
+        129
+      ],
+      "population": 19
+    },
+    "Muted": {
+      "rgb": [
+        158,
+        149,
+        100
+      ],
+      "population": 21
+    },
+    "DarkMuted": {
+      "rgb": [
+        36,
+        44,
+        52
+      ],
+      "population": 4191
+    },
+    "LightMuted": {
+      "rgb": [
+        186,
+        175,
+        115
+      ],
+      "population": 141
+    }
+  },
+  "publishedBylines": [
+    {
+      "id": 4569696,
+      "name": "Joseph Politano",
+      "handle": "josephpolitano",
+      "previous_name": null,
+      "photo_url": "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/1e62a07a-be12-45d1-aea4-44d1c470bd3e_3000x3000.png",
+      "bio": "I write about monetary policy, labor markets, business, finance, and everything else that falls under macroeconomics. Subscribe to Apricitas and get data-driven economic insights delivered to your inbox every Saturday!",
+      "profile_set_up_at": "2021-06-06T14:15:39.882Z",
+      "reader_installed_at": "2022-08-04T16:45:04.533Z",
+      "publicationUsers": [
+        {
+          "id": 301238,
+          "user_id": 4569696,
+          "publication_id": 377949,
+          "role": "admin",
+          "public": true,
+          "is_primary": true,
+          "publication": {
+            "id": 377949,
+            "name": "Apricitas Economics",
+            "subdomain": "apricitas",
+            "custom_domain": "www.apricitas.io",
+            "custom_domain_optional": false,
+            "hero_text": "Data-driven Insights on Economics, Business, Finance, and Public Policy.",
+            "logo_url": "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/56bd9853-89e6-4345-87ee-cd32052bba73_1080x1080.png",
+            "author_id": 4569696,
+            "primary_user_id": 4569696,
+            "theme_var_background_pop": "#00C2FF",
+            "created_at": "2021-06-06T14:23:09.607Z",
+            "email_from_name": "Apricitas Economics",
+            "copyright": "Joseph Politano",
+            "founding_plan_name": "Institutional Plan",
+            "community_enabled": true,
+            "invite_only": false,
+            "payments_state": "enabled",
+            "language": null,
+            "explicit": false,
+            "homepage_type": "magaziney",
+            "is_personal_mode": false,
+            "logo_url_wide": null
+          }
+        }
+      ],
+      "twitter_screen_name": "JosephPolitano",
+      "is_guest": false,
+      "bestseller_tier": 100,
+      "status": {
+        "bestsellerTier": 100,
+        "subscriberTier": 5,
+        "leaderboard": null,
+        "vip": false,
+        "badge": {
+          "type": "bestseller",
+          "tier": 100
+        },
+        "paidPublicationIds": [
+          384640,
+          1543281,
+          26696,
+          1501429,
+          35345,
+          3279891,
+          2880588,
+          5247799,
+          2118966
+        ],
+        "subscriber": null
+      }
+    }
+  ],
+  "reaction": null,
+  "reaction_count": 227,
+  "comment_count": 20,
+  "child_comment_count": 15,
+  "audio_items": [
+    {
+      "post_id": 184066648,
+      "voice_id": "en-US-OnyxTurboMultilingualNeural",
+      "audio_url": "https://substack-video.s3.amazonaws.com/video_upload/post/184066648/tts/22d39feb-31cf-4fe1-9db4-d0ffc74821ca/en-US-OnyxTurboMultilingualNeural.mp3",
+      "type": "tts",
+      "status": "completed"
+    }
+  ],
+  "is_geoblocked": false,
+  "hasCashtag": false,
+  "unlockedWithIP": false,
+  "themeVariables": {
+    "color_theme_bg_pop": "#fFe98F",
+    "background_pop": "#fFe98F",
+    "color_theme_bg_web": "#504746",
+    "cover_bg_color": "#504746",
+    "cover_bg_color_secondary": "#5a5251",
+    "background_pop_darken": "#ffe475",
+    "print_on_pop": "#363737",
+    "color_theme_bg_pop_darken": "#ffe475",
+    "color_theme_print_on_pop": "#363737",
+    "color_theme_bg_pop_20": "rgba(255, 233, 143, 0.2)",
+    "color_theme_bg_pop_30": "rgba(255, 233, 143, 0.3)",
+    "print_pop": "hsl(48.214285714285715, 100%, 40%)",
+    "color_theme_accent": "hsl(48.214285714285715, 100%, 40%)",
+    "cover_print_primary": "#ffffff",
+    "cover_print_secondary": "#d9d9d9",
+    "cover_print_tertiary": "#d9d9d9",
+    "cover_border_color": "#ffffff",
+    "font_family_headings_preset": "Lora,sans-serif",
+    "font_weight_headings_preset": 600,
+    "font_family_body_preset": "Lora,sans-serif",
+    "font_weight_body_preset": 400,
+    "font_size_body_offset": "1px",
+    "font_preset_heading": "fancy_serif",
+    "font_preset_body": "fancy_serif",
+    "home_hero": "magaziney",
+    "home_posts": "list",
+    "web_bg_color": "#504746",
+    "background_contrast_1": "#5a5251",
+    "background_contrast_2": "#68605f",
+    "background_contrast_3": "#817b7a",
+    "background_contrast_4": "#9b9595",
+    "background_contrast_5": "#c8c5c5",
+    "color_theme_bg_contrast_1": "#5a5251",
+    "color_theme_bg_contrast_2": "#68605f",
+    "color_theme_bg_contrast_3": "#817b7a",
+    "color_theme_bg_contrast_4": "#9b9595",
+    "color_theme_bg_contrast_5": "#c8c5c5",
+    "color_theme_bg_elevated": "#5a5251",
+    "color_theme_bg_elevated_secondary": "#68605f",
+    "color_theme_bg_elevated_tertiary": "#817b7a",
+    "color_theme_detail": "#625959",
+    "background_contrast_pop": "rgba(255, 233, 143, 0.4)",
+    "color_theme_bg_contrast_pop": "rgba(255, 233, 143, 0.4)",
+    "theme_bg_is_dark": "1",
+    "print_on_web_bg_color": "#ffffff",
+    "print_secondary_on_web_bg_color": "#b9b5b5",
+    "background_pop_rgb": "255, 233, 143",
+    "color_theme_bg_pop_rgb": "255, 233, 143"
+  },
+  "comments": [
+    {
+      "id": 198397138,
+      "body": "Hang on! Wasn't Trump going to fix this? He wouldn't have lied to me would he?",
+      "body_json": {
+        "type": "doc",
+        "attrs": {
+          "schemaVersion": "v1"
+        },
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "Hang on! Wasn't Trump going to fix this? He wouldn't have lied to me would he?"
+              }
+            ]
+          }
+        ]
+      },
+      "publication_id": 377949,
+      "post_id": 184066648,
+      "user_id": 343820887,
+      "ancestor_path": "",
+      "type": "comment",
+      "deleted": false,
+      "date": "2026-01-11T18:25:11.556Z",
+      "edited_at": null,
+      "status": "published",
+      "pinned_by_user_id": null,
+      "restacks": 0,
+      "name": "Dave NZ",
+      "photo_url": "https://substack-post-media.s3.amazonaws.com/public/images/78846d69-d07f-41cb-b96e-cfe1b961bef1_96x96.jpeg",
+      "handle": "davenz1",
+      "reactor_names": [],
+      "reaction": null,
+      "reactions": {
+        "\u2764": 13
+      },
+      "reaction_count": 13,
+      "children": [],
+      "bans": [],
+      "suppressed": false,
+      "user_banned": false,
+      "user_banned_for_comment": false,
+      "user_slug": "davenz1",
+      "metadata": {
+        "is_author": false,
+        "membership_state": null,
+        "eligibleForGift": true,
+        "author_on_other_pub": {
+          "name": "Dave NZ",
+          "id": 5871567,
+          "base_url": "https://davenz1.substack.com"
+        }
+      },
+      "user_bestseller_tier": null,
+      "can_dm": true,
+      "userStatus": {
+        "bestsellerTier": null,
+        "subscriberTier": null,
+        "leaderboard": null,
+        "vip": false,
+        "badge": null,
+        "subscriber": null
+      },
+      "score": 14,
+      "children_count": 0,
+      "reported_by_user": false,
+      "restacked": false
+    },
+    {
+      "id": 198458079,
+      "body": "Nice read. Really helpful framing with the \u201cno-hire\u201d equilibrium because it matches what I\u2019m hearing anecdotally (few layoffs, but hiring pipelines frozen). Curious what indicator you\u2019d watch as the earliest sign it\u2019s thawing: JOLTS hires rate, temp staffing stabilization, quit rate, or something like small biz hiring intentions?",
+      "body_json": {
+        "type": "doc",
+        "attrs": {
+          "schemaVersion": "v1"
+        },
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "Nice read. Really helpful framing with the \u201cno-hire\u201d equilibrium because it matches what I\u2019m hearing anecdotally (few layoffs, but hiring pipelines frozen). Curious what indicator you\u2019d watch as the earliest sign it\u2019s thawing: JOLTS hires rate, temp staffing stabilization, quit rate, or something like small biz hiring intentions?"
+              }
+            ]
+          }
+        ]
+      },
+      "publication_id": 377949,
+      "post_id": 184066648,
+      "user_id": 79013085,
+      "ancestor_path": "",
+      "type": "comment",
+      "deleted": false,
+      "date": "2026-01-11T20:49:26.348Z",
+      "edited_at": null,
+      "status": "published",
+      "pinned_by_user_id": null,
+      "restacks": 0,
+      "name": "Quy Ma",
+      "photo_url": "https://substack-post-media.s3.amazonaws.com/public/images/b33ce77d-e2f8-41f8-b82f-d647d315f4e8_666x670.png",
+      "handle": "quyma",
+      "reactor_names": [],
+      "reaction": null,
+      "reactions": {
+        "\u2764": 9
+      },
+      "reaction_count": 9,
+      "children": [],
+      "bans": [],
+      "suppressed": false,
+      "user_banned": false,
+      "user_banned_for_comment": false,
+      "user_slug": "quyma",
+      "metadata": {
+        "is_author": false,
+        "membership_state": null,
+        "eligibleForGift": true,
+        "author_on_other_pub": {
+          "name": "The Marketplace by Quy Ma",
+          "id": 1212715,
+          "base_url": "https://quyma.substack.com"
+        }
+      },
+      "user_bestseller_tier": null,
+      "can_dm": true,
+      "userStatus": {
+        "bestsellerTier": null,
+        "subscriberTier": 1,
+        "leaderboard": null,
+        "vip": false,
+        "badge": {
+          "type": "subscriber",
+          "tier": 1,
+          "accent_colors": null
+        },
+        "subscriber": null
+      },
+      "score": 10,
+      "children_count": 0,
+      "reported_by_user": false,
+      "restacked": false
+    }
+  ]
+}
