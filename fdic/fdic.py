@@ -34,15 +34,30 @@ Endpoints (8 total)
                ~80,000+ active branch records.
 
 /financials    The deepest dataset: quarterly Call Report data from the RISVIEW system.
-               1,000+ fields covering every line item on a bank's balance sheet, income
+               2,377 fields covering every line item on a bank's balance sheet, income
                statement, and regulatory schedules. This includes:
                  - Balance sheet: assets, liabilities, equity, securities (HTM/AFS)
                  - Income: NII, non-interest income/expense, provisions, net income
                  - Loans: granular by type (CRE, C&I, consumer, credit card, resi, ag)
-                 - Credit quality: NCLs, past-dues, non-accruals, TDRs, reserves
-                 - Capital: Tier 1, Total RBC, Leverage ratio, risk-weighted assets
-                 - Ratios: ROA, ROE, NIM, efficiency ratio, loan-to-deposit, etc.
-                 - Liquidity: brokered deposits, FHLB borrowings, fed funds
+                   including 15+ RE sub-categories and size buckets
+                 - Credit quality: NCLs, gross charge-offs, recoveries, past-dues
+                   (30-89 and 90+), non-accruals, TDRs, reserves - all by loan type
+                 - Capital: Basel III - CET1, Tier 1, Tier 2, Total, Leverage, RWA
+                 - Ratios: ROA, ROE, NIM, efficiency, NCL rate, loan-to-deposit, etc.
+                 - Liquidity: brokered deposits, FHLB borrowings (by maturity), repos
+                 - Deposits: transaction/non-transaction, by counterparty, by insurance
+                   tier ($250K threshold), maturity buckets, core vs. volatile
+                 - Securities: UST, agency, muni, MBS (residential + commercial),
+                   ABS, equity, structured products, by AFS/HTM/trading classification
+                 - Off-balance-sheet: unused commitments, standby LOCs, credit
+                   derivatives, revaluation gains
+                 - Trading: trading assets/liabilities, trading revenue (rate, FX,
+                   equity, commodity, credit exposure), derivative contracts
+                 - Fiduciary: trust accounts by type (personal, employee benefit,
+                   foundation, corporate trust, custody, investment agency, IRA),
+                   fee income
+                 - Securitization: sold/serviced loans, past dues, charge-offs,
+                   recoveries, credit exposure, unused commitments by asset type
                Each record keyed by CERT (institution) + REPDTE (quarter end YYYYMMDD).
                History typically goes back 60-80+ quarters per institution.
 
@@ -142,47 +157,53 @@ BASE = "https://api.fdic.gov/banks"
 
 # ── Field presets per endpoint ────────────────────────────────────────────────
 #
-# Each endpoint has a curated set of field presets for common use cases.
-# The /financials endpoint has 1000+ fields (full RISVIEW schema); these presets
-# select the most commonly needed subsets. You can always pass custom field lists.
+# Each endpoint has a curated set of field presets for common analytical tasks.
+# The /financials endpoint draws from the full RISVIEW schema with 2,377 fields
+# covering every line item from the quarterly Call Report (FFIEC 031/041/051).
+# Full schema: https://api.fdic.gov/banks/docs/risview_properties.yaml
+# Any valid RISVIEW field name can be passed in `fields`; presets are curated
+# subsets for common balance sheet, income, credit quality, and off-balance
+# sheet workflows.
 #
-# Field name reference (RISVIEW / Call Report fields):
-#   CERT       FDIC certificate number (primary key for institutions)
-#   REPDTE     Report date YYYYMMDD (quarter end: 0331/0630/0930/1231)
-#   ASSET      Total assets ($000s)
-#   DEP        Total deposits ($000s)
-#   DEPDOM     Domestic deposits ($000s)
-#   EQTOT      Total equity capital ($000s)
-#   SC         Total securities ($000s)
-#   LNLSNET    Net loans and leases ($000s)
-#   INTINC     Total interest income (YTD, $000s)
-#   EINTEXP    Total interest expense (YTD, $000s)
-#   NETINC     Net income (YTD, $000s)
-#   NIMY       Net interest margin (annualized %)
-#   ELNATR     Provision for loan/lease losses (YTD, $000s)
-#   ROA        Return on assets (annualized %)
-#   ROE        Return on equity (annualized %)
-#   EEFFR      Efficiency ratio (%)
-#   LNRE       Real estate loans ($000s)
-#   LNRECONS   Construction & land development loans ($000s)
-#   LNCI       Commercial & industrial loans ($000s)
-#   LNCRCD     Credit card loans ($000s)
-#   LNCONOTH   Other consumer loans ($000s)
-#   NCLNLS     Net charge-offs on loans ($000s)
-#   NCLNLSR    Net charge-off rate (%)
-#   NTLNLSR    Net loan loss rate (%)
-#   LNATRES    Allowance for loan losses ($000s)
-#   LNLSDEPR   Loans-to-deposits ratio (%)
-#   IDT1CER    Tier 1 capital ratio (%)
-#   EQCDIV     Cash dividends declared ($000s)
-#   INTBLIB    Interest-bearing liabilities ($000s)
-#   FRETEFN    Fed funds purchased + repos ($000s)
-#   NONII      Total non-interest income (YTD, $000s)
-#   NONIX      Total non-interest expense (YTD, $000s)
-#   NITEFN     Net interest income (YTD, $000s)
-#   ACTIVE     1 = open and insured, 0 = closed/not insured
-#   BKCLASS    Charter class (N=national, SM=state member, NM=state nonmember, etc.)
-#   CB         Community bank flag (1=yes, 0=no)
+# The RISVIEW field namespace follows a prefix convention:
+#   ASSET/DEP/LIAB    Top-level balance sheet ($000s unless noted)
+#   LN*               Loans by type (272 fields) - RE, C&I, consumer, ag, etc.
+#   DEP*              Deposits by type (93 fields) - demand, MMDA, time, foreign
+#   SC*               Securities by type (118 fields) - UST, agency, MBS, muni
+#   EQ*               Equity capital components (26 fields)
+#   RBC*/IDT1*        Capital ratios (12 fields) - Tier 1, Total, Leverage, CET1
+#   INT*/NON*/NET*    Income statement (57 fields)
+#   ILN*/ISC*/IFR*/II* Interest income by asset type
+#   EDEP*/EFR*/ESAL*/EOTH* Expense categories
+#   NC*/NT*           Non-current / Net charge-offs by loan type (144 fields)
+#   P3*/P9*           Past-due 30-89 / 90+ by loan type (107 fields)
+#   NA*               Non-accrual by loan type (55 fields)
+#   DR*               Gross charge-offs by loan type (54 fields)
+#   CR*               Loan recoveries by loan type (54 fields)
+#   RS*               Restructured loans by type (7 fields)
+#   UC*               Unused commitments (16 fields)
+#   LOC*              Standby letters of credit (7 fields)
+#   SZ*               Securitization exposures (68 fields)
+#   FX*/RT*/OTH*      Derivative contracts (30+ fields)
+#   TRADE*/TR*        Trading accounts and revenue
+#   TC*/TE*/TF*/TI*/T[MOP]* Fiduciary / trust accounts (~150 fields)
+#   OTB*/OTHB*        FHLB advances and other borrowings by maturity
+#   CR* repricing     Not to be confused with CR* recoveries; see CD* for time
+#                     deposit maturity buckets
+#   CH*               Cash and balances due
+#   ORE*              Other real estate owned (foreclosed)
+#   INTAN*            Intangibles (goodwill, servicing rights, other)
+#   OA/OALI*          Other assets (incl. bank-owned life insurance)
+#   BKPREM            Premises & fixed assets
+#
+# Field suffix convention:
+#   ""     Base dollar value (thousands of USD)
+#   "R"    Ratio (%, typically as % of assets or base)
+#   "Q"    Quarterly (vs default YTD cumulative)
+#   "A"    Annualized
+#   "J"    Adjusted (e.g. LNATRESJ includes allocated transfer risk)
+#   "FOR"  Foreign offices
+#   "DOM"  Domestic offices
 
 INSTITUTION_FIELDS = {
     "default": "CERT,NAME,STALP,CITY,ACTIVE,ASSET,DEP,NETINC,ROE,ROA,BKCLASS,DATEUPDT",
@@ -196,22 +217,118 @@ LOCATION_FIELDS = {
     "minimal": "CERT,NAME,CITY,STALP,MAINOFF",
 }
 
-# Financial presets organized by analytical theme. The full RISVIEW schema has 1000+
-# fields; see https://api.fdic.gov/banks/docs/risview_properties.yaml for the
-# complete list. Any valid RISVIEW field name can be passed in the fields parameter.
+# ── FINANCIAL_FIELDS: 40+ curated presets covering the full RISVIEW universe ──
+# Every field below has been verified to exist in the current risview_properties.yaml
+# schema. Presets are grouped by analytical theme: overview, balance sheet, income
+# statement, loans, deposits, securities, capital, credit quality, CRE, off-balance
+# sheet, trading/derivatives, securitization, borrowings, fiduciary, and ratios.
 FINANCIAL_FIELDS = {
+    # === OVERVIEW ===
     "default": "CERT,REPDTE,ASSET,DEP,NETINC,ROA,ROE,NIMY,ELNATR",
-    "balance_sheet": "CERT,REPDTE,ASSET,DEP,DEPDOM,EQTOT,SC,LNLSNET,INTBLIB,FRETEFN",
-    "income": "CERT,REPDTE,INTINC,EINTEXP,NITEFN,NONII,NONIX,NETINC,ELNATR",
-    "ratios": "CERT,REPDTE,ROA,ROE,NIMY,EEFFR,NTLNLSR,NCLNLSR,LNLSDEPR,EQCDIV,IDT1CER",
-    "loans": "CERT,REPDTE,LNLSNET,LNRE,LNRECONS,LNCI,LNCONOTH,LNCRCD,LNATRES,NCLNLS",
-    "deposits": "CERT,REPDTE,DEP,DEPDOM,DEPFOR,DDT,NTRSMMDA,NTRTMLG,NTRSOTH,DEPUNA,BRO,EDEPDOM",
-    "credit_quality": "CERT,REPDTE,NCLNLS,NTRE,NTCI,NTCON,NTCRCD,P3ASSET,P9ASSET,NAESSION,LNATRES,LNLSNTV",
-    "capital": "CERT,REPDTE,EQTOT,EQPP,IDT1CER,RBCT1J,RBCT2,IDT1LER,RBCRWAJ,EQCDIV",
-    "securities": "CERT,REPDTE,SC,SCUS,SCMUNI,SCMBS,SCABS",
-    "cre": "CERT,REPDTE,LNRE,LNRECONS,LNRENRES,LNREMULT,LNRERES,LNREAG,ASSET,EQTOT,IDT1CER",
-    "past_due": "CERT,REPDTE,P3ASSET,P9ASSET,NAESSION,P3RE,P9RE,P3CI,P9CI",
     "minimal": "CERT,REPDTE,ASSET,DEP,NETINC",
+
+    # === BALANCE SHEET ===
+    "balance_sheet": "CERT,REPDTE,ASSET,DEP,DEPDOM,DEPFOR,EQTOT,SC,LNLSNET,FREPP,OBOR,SUBND,LIAB,LIABEQ",
+    "assets": "CERT,REPDTE,ASSET,CHBAL,CHFRB,SC,LNLSNET,LNLSGR,TRADE,BKPREM,INTAN,ORE,OA,AOA,ERNAST,ASSTLT",
+    "liabilities": "CERT,REPDTE,LIAB,DEP,DEPI,DEPNI,FREPP,REPOPUR,OBOR,OTHBFHLB,OTHBOR,TRADEL,SUBND,SUBLLPF,ALLOTHL",
+    "equity": "CERT,REPDTE,EQTOT,EQCS,EQPP,EQSUR,EQUPTOT,EQUP,EQCCOMPI,EQCTRSTX,EQOTHCC,EQCONSUB,EQCDIV,EQCDIVC,EQCDIVP,EQNWCERT",
+
+    # === INCOME STATEMENT ===
+    "income": "CERT,REPDTE,INTINC,EINTEXP,NIM,NONII,NONIX,ELNATR,IGLSEC,ITAX,IBEFTAX,EXTRA,NETINC,NOIJ,PTAXNETINC",
+    "interest_income": "CERT,REPDTE,INTINC,ILNLS,ILNDOM,ILNFOR,ILS,ISC,ITRADE,IFREPO,ICHBAL,IOTHII,NIM",
+    "interest_expense": "CERT,REPDTE,EINTEXP,EDEP,EDEPDOM,EDEPFOR,EFREPP,EFHLBADV,ESUBND,ETRANDEP,ESAVDP,EOTHTIME,EOTHINT,EMTGLS,INTEXPY",
+    "noninterest_income": "CERT,REPDTE,NONII,IFIDUC,ISERCHG,ISERFEE,IGLTRAD,ISECZ,IINVFEE,IINSCOM,IINSUND,IVENCAP,IOTHFEE,IOTNII,NETGNSLN,NETGNAST,NETGNSRE",
+    "noninterest_expense": "CERT,REPDTE,NONIX,ESAL,EPREMAGG,EINTGW,EINTOTH,EAMINTAN,EOTHNINT",
+    "income_quarterly": "CERT,REPDTE,INTINQ,EINTXQ,NIMQ,NONIIQ,NONIXQ,ELNATQ,IGLSECQ,ITAXQ,NOIQ,NETINCQ,PTAXNETINCQ",
+
+    # === LOAN COMPOSITION ===
+    "loans": "CERT,REPDTE,LNLSNET,LNLSGR,LNRE,LNCI,LNCON,LNCRCD,LNCONOTH,LNAG,LNMUNI,LS,LNATRES,NCLNLS,UNINC",
+    "loans_re": "CERT,REPDTE,LNRE,LNRECONS,LNRECNFM,LNRECNOT,LNREMULT,LNRENRES,LNRENROW,LNRENROT,LNRERES,LNRERSFM,LNRERSF2,LNRELOC,LNREAG,LNREFOR,LNCOMRE",
+    "loans_commercial": "CERT,REPDTE,LNCI,LNCI1,LNCI2,LNCI3,LNCI4,LNCINUS,LNCIFOR,LNNDEPD,LNOTCI,LNCOMRE,LNDEP,LNDEPCB",
+    "loans_consumer": "CERT,REPDTE,LNCON,LNCRCD,LNAUTO,LNCONOTH,LNCONORP,LNCONRP,LNCRCDRP",
+    "loans_ag": "CERT,REPDTE,LNAG,LNREAG,LNAG1,LNAG2,LNAG3,LNAG4,LNAGFOR",
+    "loans_small_business": "CERT,REPDTE,LNCI1,LNCI2,LNCI3,LNCI4,LNRENR1,LNRENR2,LNRENR3,LNRENR4,LNAG1,LNAG2,LNAG3,LNAG4,LNSB",
+    "loans_maturity": "CERT,REPDTE,LNRS3LES,LNRS3T12,LNRS1T3,LNRS3T5,LNRS5T15,LNRSOV15,LNOT3LES,LNOT3T12,LNOT1T3,LNOT3T5,LNOT5T15,LNOTOV15",
+    "loans_other": "CERT,REPDTE,LNFG,LNMUNI,LNDEPAC,LNACOTH,LNOTHER,LNPLEDGE,LNLSSALE,LNSERV,LSALNLS",
+
+    # === DEPOSITS ===
+    "deposits": "CERT,REPDTE,DEP,DEPDOM,DEPFOR,DDT,NTRSMMDA,NTRTMLG,NTRSOTH,DEPUNA,BRO,EDEPDOM,COREDEP",
+    "deposits_detail": "CERT,REPDTE,DEP,DEPI,DEPIDOM,DEPIFOR,DEPNI,DEPNIDOM,DEPNIFOR,DEPDOM,DEPFOR,COREDEP,VOLIAB,IRAKEOGH",
+    "deposits_transaction": "CERT,REPDTE,TRN,DDT,TRNIPC,TRNIPCOC,TRNUSGOV,TRNMUNI,TRNCBO,TRNFC,TRNFG,TRNNIA",
+    "deposits_nontransaction": "CERT,REPDTE,NTR,NTRSMMDA,NTRSOTH,NTRTIME,NTRTMLG,NTRTMLGJ,NTRTMMED,NTRCDSM,NTRIPC,NTRUSGOV,NTRMUNI,NTRCOMOT,NTRFC",
+    "deposits_maturity": "CERT,REPDTE,CD3LES,CD3LESS,CD3T12,CD3T12S,CD1T3,CD1T3S,CDOV3,CDOV3S",
+    "deposits_insurance": "CERT,REPDTE,DEPINS,DEPUNA,DEPUNINS,DEPLGAMT,DEPLGB,DEPSMAMT,DEPSMB,ESTINS",
+    "deposits_brokered": "CERT,REPDTE,BRO,BROINS,BROINSLG,DEPLSNB",
+    "deposits_foreign": "CERT,REPDTE,DEPFOR,DEPIFOR,DEPNIFOR,DEPFBKF,DEPFGOVF,DEPIPCCF,DEPIPCF,DEPUSBKF,DEPUSMF,EDEPFOR",
+
+    # === SECURITIES ===
+    "securities": "CERT,REPDTE,SC,SCUST,SCUSO,SCAGE,SCMUNI,SCMTGBK,SCABS,SCEQ,SCFORD,SCDOMO",
+    "securities_detail": "CERT,REPDTE,SC,SCUST,SCUSO,SCAGE,SCAOT,SCGTY,SCGNM,SCFMN,SCCOL,SCMUNI,SCMTGBK,SCCMMB,SCCMPT,SCCMOS,SCRMBPI,SCABS,SCEQ,SCEQFV,SCFORD,SCDOMO,SCSFP",
+    "securities_classification": "CERT,REPDTE,SC,SCAA,SCAF,SCHA,SCHF,SCMV,SCPLEDGE,SCLENT,SCHTMRES,SCRDEBT",
+    "securities_mbs": "CERT,REPDTE,SCMTGBK,SCCMMB,SCCMPT,SCCMOS,SCCMOG,SCCPTG,SCRMBPI,SCCOL,SCGTY,SCFMN,SCGNM",
+    "securities_maturity": "CERT,REPDTE,SC1LES,SCNM3LES,SCNM3T12,SCNM1T3,SCNM3T5,SCNM5T15,SCNMOV15,SCPT3LES,SCPT3T12,SCPT1T3,SCPT3T5,SCPT5T15,SCPTOV15,SCO3YLES,SCOOV3Y",
+
+    # === CAPITAL ===
+    "capital": "CERT,REPDTE,EQTOT,EQPP,EQCS,EQSUR,EQUPTOT,EQCCOMPI,IDT1CER,RBCT1J,RBCT1,RBCT2,RBCRWAJ,RBC1AAJ,EQCDIV,RWAJT",
+    "capital_basel": "CERT,REPDTE,RBCT1C,RBCT1CER,RBCT1J,RBCT1JR,RBCT1W,RBCT1,RBCT2,RBCRWAJ,RBC1AAJ,RWAJT,RWAJ,CT1AJTOT,CT1BADJ,RB2LNRES",
+    "capital_dividends": "CERT,REPDTE,EQCDIV,EQCDIVC,EQCDIVP,EQCDIVQ,EQCDIVNTINC,EQCSTKRX,EQCTRSTX,EQCMRG,EQCREST,EQCFCTA",
+
+    # === CREDIT QUALITY ===
+    "credit_quality": "CERT,REPDTE,NCLNLS,NTLNLS,NTRE,NTCI,NTCON,NTCRCD,NALNLS,P3ASSET,P9ASSET,LNATRES,LNLSNTV,NPERF,ELNATR",
+    "non_accrual": "CERT,REPDTE,NALNLS,NAASSET,NARE,NACI,NACON,NACRCD,NAAG,NAAUTO,NADEP,NAFG,NALS,NASCDEBT,NAOTHLN,NARSLNLT",
+    "non_accrual_re": "CERT,REPDTE,NARE,NAREAG,NARECONS,NARECNFM,NARECNOT,NAREMULT,NARENRES,NARENROW,NARENROT,NARERES,NARERSFM,NARERSF2,NARELOC,NAREFOR",
+    "past_due_30": "CERT,REPDTE,P3ASSET,P3LNLS,P3RE,P3CI,P3CON,P3CRCD,P3AG,P3AUTO,P3LS,P3SCDEBT,P3OTHLN,P3LNSALE,P3RSLNLT",
+    "past_due_30_re": "CERT,REPDTE,P3RE,P3REAG,P3RECONS,P3RECNFM,P3RECNOT,P3REMULT,P3RENRES,P3RENROW,P3RENROT,P3RERES,P3RERSFM,P3RERSF2,P3RELOC,P3REFOR",
+    "past_due_90": "CERT,REPDTE,P9ASSET,P9LNLS,P9RE,P9CI,P9CON,P9CRCD,P9AG,P9AUTO,P9LS,P9SCDEBT,P9OTHLN,P9LNSALE,P9RSLNLT",
+    "past_due_90_re": "CERT,REPDTE,P9RE,P9REAG,P9RECONS,P9RECNFM,P9RECNOT,P9REMULT,P9RENRES,P9RENROW,P9RENROT,P9RERES,P9RERSFM,P9RERSF2,P9RELOC,P9REFOR",
+    "charge_offs": "CERT,REPDTE,DRLNLS,DRRE,DRCI,DRCON,DRCRCD,DRAG,DRAUTO,DRLS,DROTHER,DRREAG,DRRECONS,DRRENRES,DRREMULT,DRRERES,DRRELOC",
+    "recoveries": "CERT,REPDTE,CRLNLS,CRRE,CRCI,CRCON,CRCRCD,CRAG,CRAUTO,CRLS,CROTHER,CRREAG,CRRECONS,CRRENRES,CRREMULT,CRRERES,CRRELOC",
+    "net_charge_offs": "CERT,REPDTE,NTLNLS,NTRE,NTCI,NTCON,NTCRCD,NTAG,NTAUTO,NTLS,NTOTHER,NTREAG,NTRECONS,NTRENRES,NTREMULT,NTRERES,NTRELOC",
+    "past_due_detail": "CERT,REPDTE,P3ASSET,P9ASSET,NALNLS,P3RE,P9RE,NARE,P3CI,P9CI,NACI,P3CON,P9CON,NACON,P3CRCD,P9CRCD,NACRCD,P3AG,P9AG,NAAG",
+    "restructured": "CERT,REPDTE,RSLNLTOT,RSCI,RSCONS,RSMULT,RSNRES,RSLNREFM,RSOTHER,RSLNLS,NARSLNLT,NARSCI,NARSCONS,NARSMULT,NARSNRES,NARSLNFM,P9RSLNLT,P3RSLNLT",
+    "reserves": "CERT,REPDTE,LNATRES,LNATRESJ,LNLSRES,LNRESRE,LNRESNCR,SCHTMRES,RB2LNRES,ELNATR,ELNANTR,ELNLOS",
+
+    # === CRE CONCENTRATION ===
+    "cre": "CERT,REPDTE,LNRE,LNRECONS,LNRENRES,LNRENROT,LNRENROW,LNREMULT,LNRERES,LNRERSFM,LNRERSF2,LNRELOC,LNREAG,LNCOMRE,ASSET,EQTOT,IDT1CER,LNCDT1R,LNRERT1R",
+
+    # === OFF-BALANCE SHEET ===
+    "off_balance_sheet": "CERT,REPDTE,UC,UCLN,UCCOMRE,UCCRCD,UCLOC,UCSC,UCOTHER,LOCCOM,LOCFSB,LOCPSB,LOCFPSB,OBSDIR,NACDIR,OTHOFFBS,TRREVALSUM",
+    "unused_commitments": "CERT,REPDTE,UC,UCLN,UCCOMRE,UCCOMRES,UCCOMREU,UCCRCD,UCLOC,UCSC,UCOTHER,UCOVER1,UCSZAUTO,UCSZCI,UCSZCON,UCSZCRCD,UCSZHEL,UCSZRES,UCSZOTH",
+    "standby_letters": "CERT,REPDTE,LOCCOM,LOCFSB,LOCFSBK,LOCPSB,LOCPSBK,LOCFPSB,LOCFPSBK",
+
+    # === TRADING AND DERIVATIVES ===
+    "trading": "CERT,REPDTE,TRADE,TRADEL,TRFOR,SCTATFR,ITRADE,IGLTRAD,IGLRTEX,IGLFXEX,IGLEDEX,IGLCMEX,IGLCREX",
+    "derivatives": "CERT,REPDTE,FX,FXFFC,FXNVS,FXSPOT,FXPOC,FXWOC,RT,RTFFC,RTNVS,RTPOC,RTWOC,OTHFFC,OTHNVS,OTHPOC,OTHWOC,CTDERBEN,CTDERGTY,NACDIR,TRREVALSUM,TRLREVAL",
+
+    # === SECURITIZATION ===
+    "securitization": "CERT,REPDTE,SZCRAUTO,SZCRCI,SZCRCON,SZCRCRCD,SZCRHEL,SZCRRES,SZCROTH,SZCRCDFE,SZ30AUTO,SZ30CI,SZ30CON,SZ30CRCD,SZ30HEL,SZ30RES,SZ90AUTO,SZ90CI,SZ90CON,SZ90CRCD,SZ90HEL,SZ90RES",
+
+    # === BORROWINGS ===
+    "borrowings": "CERT,REPDTE,FFPUR,FREPP,FREPO,REPOPUR,OBOR,OTHBOR,OTHBRF,OTHBFHLB,OTBFH1L,OTBFH1T3,OTBFH3T5,OTBFHOV5,OTBFHSTA,OTBOT1L,OTBOT1T3,OTBOT3T5,OTBOTOV5,SUBND,SUBLLPF,TTL,TTLOTBOR",
+    "fhlb_advances": "CERT,REPDTE,OTHBFHLB,OTBFH1L,OTBFH1T3,OTBFH3T5,OTBFHOV5,OTBFHSTA,OTHBFH03,OTHBFH13,OTHBFH1L",
+
+    # === FIDUCIARY / TRUST ===
+    "fiduciary": "CERT,REPDTE,TFRA,NFAA,TPMA,TEBMA,TEBNMA,TFEMA,TCAMA,TCSNMA,TIMMA,TIMNMA,TOFMA,TORMA,TRHMA,TMAF,TTMA,TTNMA",
+    "fiduciary_income": "CERT,REPDTE,IFIDUC,TNI,TETOT,TICA,TICS,TIEB,TIEC,TIFE,TIMA,TIOR,TIP,TIR,TIOF,TITOTF,TINTRA",
+
+    # === CASH AND EARNING ASSETS ===
+    "cash": "CERT,REPDTE,CHBAL,CHBALI,CHBALNI,CHFRB,CHCOIN,CHUS,CHNUS,CHCIC,CHITEM",
+    "earning_assets": "CERT,REPDTE,ERNAST,ASSET,ERNASTR,SC,LNLSNET,TRADE,CHBALI,ASSTLT",
+
+    # === OTHER ASSETS ===
+    "premises_intangibles": "CERT,REPDTE,BKPREM,INTAN,INTANGW,INTANGCC,INTANMSR,INTANOTH",
+    "ore": "CERT,REPDTE,ORE,OREAG,ORECONS,OREMULT,ORENRES,ORERES,OREOTH,OREOTHF,OREGNMA,OREINV",
+    "other_assets": "CERT,REPDTE,OA,AOA,OAIENC,OALIFINS,OALIFGEN,OALIFSEP,OALIFHYB,INVSUB,INVSUORE",
+
+    # === RATIOS ===
+    "ratios": "CERT,REPDTE,ROA,ROAQ,ROE,ROEQ,NIMY,NIMYQ,EEFFR,NTLNLSR,NCLNLSR,LNLSDEPR,LNLSNTV,IDT1CER,RBCRWAJ,RBC1AAJ,INTEXPY,INTINCY",
+    "ratios_profitability": "CERT,REPDTE,ROA,ROAQ,ROAPTX,ROAPTXQ,ROE,ROEQ,NIMY,NIMYQ,EEFFR,EEFFQR,NOIJY,NOIJYQ,PTAXNETINCR",
+    "ratios_credit": "CERT,REPDTE,NCLNLSR,NTLNLSR,P3ASSETR,P9ASSETR,NAASSETR,LNRESNCR,LNLSNTV,NPERF",
+    "ratios_capital": "CERT,REPDTE,IDT1CER,RBCT1JR,RBCRWAJ,RBC1AAJ,EQV",
+    "ratios_funding": "CERT,REPDTE,LNLSDEPR,INTEXPY,INTEXPYQ,INTINCY,INTINCYQ,ERNASTR,DEPDASTR",
+
+    # === BACKWARD-COMPAT (original presets, keep names) ===
+    "past_due": "CERT,REPDTE,P3ASSET,P9ASSET,NALNLS,P3RE,P9RE,P3CI,P9CI",
 }
 
 SUMMARY_FIELDS = {
@@ -256,7 +373,7 @@ FIELD_CATALOGS = {
 ENDPOINT_DESCRIPTIONS = {
     "institutions": "Financial institution demographics, location, charter, assets",
     "locations": "Branch/office locations with addresses, lat/lng, service types",
-    "financials": "Quarterly Call Report data (balance sheet, income, ratios) - 1000+ fields",
+    "financials": "Quarterly Call Report data (balance sheet, income, ratios) - 2,377 RISVIEW fields",
     "summary": "Historical aggregate data from 1934 onward, subtotaled by year",
     "failures": "Bank failures from 1934 to present with resolution details and costs",
     "history": "Structure change events (mergers, name changes, charter conversions)",
@@ -536,7 +653,7 @@ def cmd_locations():
 def cmd_financials():
     """GET /financials -- quarterly Call Report data (RISVIEW).
     curl: curl 'https://api.fdic.gov/banks/financials?filters=CERT:628&fields=CERT,REPDTE,ASSET,DEP,NETINC,ROA,ROE&sort_by=REPDTE&sort_order=DESC&limit=10'
-    This is the deepest dataset with 1000+ fields covering balance sheet, income statement,
+    This is the deepest dataset with 2,377 fields covering balance sheet, income statement,
     loan composition, capital adequacy, asset quality, and performance ratios.
     Key fields: CERT, REPDTE (report date YYYYMMDD), ASSET, DEP, NETINC, ROA, ROE, NIMY (NIM),
     LNLSNET (net loans), EQTOT (total equity), INTINC, EINTEXP, ELNATR (provision expense)."""
@@ -657,7 +774,9 @@ def cmd_recipe_bank_financials_ts():
     if not cert:
         return
     quarters = int(_prompt("How many quarters", "20"))
-    field_choice = _prompt("Preset (default/balance_sheet/income/ratios/loans)", "default")
+    available = ", ".join(sorted(FINANCIAL_FIELDS.keys()))
+    print(f"  Available presets: {available}")
+    field_choice = _prompt("Preset", "default")
     fields = FINANCIAL_FIELDS.get(field_choice, FINANCIAL_FIELDS["default"])
     resp = _get("financials", {
         "filters": f"CERT:{cert}",
@@ -949,7 +1068,7 @@ def cmd_macro_credit_cycle():
     repdte = _prompt("Report date YYYYMMDD", "20251231")
     resp = _get("financials", {
         "filters": f"REPDTE:{repdte} AND ASSET:[{min_assets} TO *]",
-        "fields": "CERT,REPDTE,ASSET,NCLNLS,NCLNLSR,NTLNLSR,ELNATR,LNATRES,P3ASSET,P9ASSET,NAESSION,LNLSNTV",
+        "fields": "CERT,REPDTE,ASSET,NCLNLS,NCLNLSR,NTLNLSR,ELNATR,LNATRES,P3ASSET,P9ASSET,NALNLS,LNLSNTV",
         "sort_by": "ASSET",
         "sort_order": "DESC",
         "limit": 100,
@@ -979,7 +1098,7 @@ def cmd_macro_capital_distribution():
     repdte = _prompt("Report date YYYYMMDD", "20251231")
     resp = _get("financials", {
         "filters": f"REPDTE:{repdte} AND ASSET:[{min_assets} TO *]",
-        "fields": "CERT,REPDTE,ASSET,EQTOT,IDT1CER,RBCRWAJ,IDT1LER,EQCDIV,RBCT1J",
+        "fields": "CERT,REPDTE,ASSET,EQTOT,IDT1CER,RBCRWAJ,RBC1AAJ,EQCDIV,RBCT1J",
         "sort_by": "IDT1CER",
         "sort_order": "ASC",
         "limit": 100,
@@ -1032,7 +1151,7 @@ def cmd_economist_reserve_adequacy():
     repdte = _prompt("Report date YYYYMMDD", "20251231")
     resp = _get("financials", {
         "filters": f"REPDTE:{repdte} AND ASSET:[{min_assets} TO *]",
-        "fields": "CERT,REPDTE,ASSET,LNATRES,LNLSNTV,NCLNLS,NCLNLSR,P9ASSET,NAESSION,ELNATR",
+        "fields": "CERT,REPDTE,ASSET,LNATRES,LNLSNTV,NCLNLS,NCLNLSR,P9ASSET,NALNLS,ELNATR",
         "sort_by": "ASSET",
         "sort_order": "DESC",
         "limit": 100,
@@ -1051,7 +1170,7 @@ def cmd_economist_securities_portfolio():
         filt = "REPDTE:20251231"
     resp = _get("financials", {
         "filters": filt,
-        "fields": "CERT,REPDTE,ASSET,SC,SCUS,SCMUNI,SCMBS,SCABS,DEP,EQTOT",
+        "fields": "CERT,REPDTE,ASSET,SC,SCUST,SCUSO,SCMUNI,SCMTGBK,SCABS,DEP,EQTOT",
         "sort_by": "REPDTE" if cert else "ASSET",
         "sort_order": "DESC",
         "limit": quarters if cert else 50,
@@ -1066,7 +1185,9 @@ def cmd_economist_peer_comparison():
     if not certs:
         return
     repdte = _prompt("Report date YYYYMMDD", "20251231")
-    preset = _prompt("Preset (default/balance_sheet/income/ratios/loans/deposits/credit_quality/capital/cre)", "default")
+    available = ", ".join(sorted(FINANCIAL_FIELDS.keys()))
+    print(f"  Available presets: {available}")
+    preset = _prompt("Preset", "default")
     fields = FINANCIAL_FIELDS.get(preset, FINANCIAL_FIELDS["default"])
     cert_filter = " OR ".join(f"CERT:{c.strip()}" for c in certs.split(","))
     resp = _get("financials", {
@@ -1088,7 +1209,7 @@ def cmd_economist_past_due_detail():
     quarters = int(_prompt("How many quarters", "12"))
     resp = _get("financials", {
         "filters": f"CERT:{cert}",
-        "fields": "CERT,REPDTE,ASSET,P3ASSET,P9ASSET,NAESSION,P3RE,P9RE,P3CI,P9CI,NCLNLS,LNATRES",
+        "fields": "CERT,REPDTE,ASSET,P3ASSET,P9ASSET,NALNLS,P3RE,P9RE,P3CI,P9CI,NCLNLS,LNATRES",
         "sort_by": "REPDTE",
         "sort_order": "DESC",
         "limit": quarters,
@@ -1189,7 +1310,7 @@ def interactive_loop():
         print("\n  ENDPOINTS (full query builder):")
         print("    1.  Institutions     - bank demographics, charter, assets")
         print("    2.  Locations        - branch/office locations, lat/lng")
-        print("    3.  Financials       - quarterly Call Report data (1000+ fields)")
+        print("    3.  Financials       - quarterly Call Report data (2,377 fields, 60+ presets)")
         print("    4.  Summary          - historical aggregates by year (from 1934)")
         print("    5.  Failures         - bank failures with resolution details")
         print("    6.  History          - structure changes (mergers, name changes)")
@@ -1702,7 +1823,7 @@ def run_noninteractive(args):
     elif cmd == "credit-cycle":
         resp = _get("financials", {
             "filters": f"REPDTE:{args.repdte} AND ASSET:[{args.min_assets} TO *]",
-            "fields": "CERT,REPDTE,ASSET,NCLNLS,NCLNLSR,NTLNLSR,ELNATR,LNATRES,P3ASSET,P9ASSET,NAESSION,LNLSNTV",
+            "fields": "CERT,REPDTE,ASSET,NCLNLS,NCLNLSR,NTLNLSR,ELNATR,LNATRES,P3ASSET,P9ASSET,NALNLS,LNLSNTV",
             "sort_by": "ASSET", "sort_order": "DESC", "limit": 100,
         })
         _ni_output(resp, args, f"credit_cycle_{args.repdte}")
@@ -1718,7 +1839,7 @@ def run_noninteractive(args):
     elif cmd == "capital-distribution":
         resp = _get("financials", {
             "filters": f"REPDTE:{args.repdte} AND ASSET:[{args.min_assets} TO *]",
-            "fields": "CERT,REPDTE,ASSET,EQTOT,IDT1CER,RBCRWAJ,IDT1LER,EQCDIV,RBCT1J",
+            "fields": "CERT,REPDTE,ASSET,EQTOT,IDT1CER,RBCRWAJ,RBC1AAJ,EQCDIV,RBCT1J",
             "sort_by": "IDT1CER", "sort_order": "ASC", "limit": 100,
         })
         _ni_output(resp, args, f"capital_dist_{args.repdte}")
@@ -1743,7 +1864,7 @@ def run_noninteractive(args):
     elif cmd == "reserve-adequacy":
         resp = _get("financials", {
             "filters": f"REPDTE:{args.repdte} AND ASSET:[{args.min_assets} TO *]",
-            "fields": "CERT,REPDTE,ASSET,LNATRES,LNLSNTV,NCLNLS,NCLNLSR,P9ASSET,NAESSION,ELNATR",
+            "fields": "CERT,REPDTE,ASSET,LNATRES,LNLSNTV,NCLNLS,NCLNLSR,P9ASSET,NALNLS,ELNATR",
             "sort_by": "ASSET", "sort_order": "DESC", "limit": 100,
         })
         _ni_output(resp, args, f"reserve_adequacy_{args.repdte}")
@@ -1757,7 +1878,7 @@ def run_noninteractive(args):
             sort_by, limit = "ASSET", 50
         resp = _get("financials", {
             "filters": filt,
-            "fields": "CERT,REPDTE,ASSET,SC,SCUS,SCMUNI,SCMBS,SCABS,DEP,EQTOT",
+            "fields": "CERT,REPDTE,ASSET,SC,SCUST,SCUSO,SCMUNI,SCMTGBK,SCABS,DEP,EQTOT",
             "sort_by": sort_by, "sort_order": "DESC", "limit": limit,
         })
         _ni_output(resp, args, "securities_portfolio")
@@ -1775,7 +1896,7 @@ def run_noninteractive(args):
     elif cmd == "past-due-detail":
         resp = _get("financials", {
             "filters": f"CERT:{args.cert}",
-            "fields": "CERT,REPDTE,ASSET,P3ASSET,P9ASSET,NAESSION,P3RE,P9RE,P3CI,P9CI,NCLNLS,LNATRES",
+            "fields": "CERT,REPDTE,ASSET,P3ASSET,P9ASSET,NALNLS,P3RE,P9RE,P3CI,P9CI,NCLNLS,LNATRES",
             "sort_by": "REPDTE", "sort_order": "DESC", "limit": args.quarters,
         })
         _ni_output(resp, args, f"past_due_{args.cert}")

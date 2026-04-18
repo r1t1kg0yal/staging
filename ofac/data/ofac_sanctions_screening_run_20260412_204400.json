@@ -1,0 +1,519 @@
+{
+  "stats": {
+    "total_entities": 18699,
+    "by_type": {
+      "(unspecified)": 9519,
+      "individual": 7386,
+      "vessel": 1452,
+      "aircraft": 342
+    },
+    "top_programs": [
+      [
+        "RUSSIA-EO14024",
+        6393
+      ],
+      [
+        "SDGT",
+        3068
+      ],
+      [
+        "IFSR",
+        1468
+      ],
+      [
+        "SDNTK",
+        1412
+      ],
+      [
+        "NPWMD",
+        1141
+      ],
+      [
+        "GLOMAG",
+        742
+      ],
+      [
+        "IRAN",
+        669
+      ],
+      [
+        "IRAN-EO13902",
+        604
+      ],
+      [
+        "ILLICIT-DRUGS-EO14059",
+        589
+      ],
+      [
+        "UKRAINE-EO13662",
+        534
+      ],
+      [
+        "IRAN-EO13846",
+        445
+      ],
+      [
+        "TCO",
+        386
+      ],
+      [
+        "IRGC",
+        282
+      ],
+      [
+        "CYBER2",
+        260
+      ],
+      [
+        "IRAN-HR",
+        222
+      ],
+      [
+        "UKRAINE-EO13661",
+        196
+      ],
+      [
+        "DPRK4",
+        196
+      ],
+      [
+        "IRAQ2",
+        190
+      ],
+      [
+        "BELARUS-EO14038",
+        187
+      ],
+      [
+        "VENEZUELA-EO13850",
+        177
+      ],
+      [
+        "PAARSSR-EO13894",
+        174
+      ],
+      [
+        "VENEZUELA",
+        167
+      ],
+      [
+        "BALKANS",
+        164
+      ],
+      [
+        "SDNT",
+        162
+      ],
+      [
+        "DPRK3",
+        160
+      ]
+    ],
+    "top_countries": [
+      [
+        "Russia",
+        5229
+      ],
+      [
+        "Iran",
+        1519
+      ],
+      [
+        "Mexico",
+        1085
+      ],
+      [
+        "China",
+        1072
+      ],
+      [
+        "United Arab Emirates",
+        665
+      ],
+      [
+        "Colombia",
+        382
+      ],
+      [
+        "Turkey",
+        350
+      ],
+      [
+        "Lebanon",
+        343
+      ],
+      [
+        "Syria",
+        305
+      ],
+      [
+        "Belarus",
+        258
+      ],
+      [
+        "Venezuela",
+        253
+      ],
+      [
+        "Ukraine",
+        239
+      ],
+      [
+        "Korea, North",
+        233
+      ],
+      [
+        "Burma",
+        191
+      ],
+      [
+        "United Kingdom",
+        190
+      ],
+      [
+        "Iraq",
+        171
+      ],
+      [
+        "Pakistan",
+        169
+      ],
+      [
+        "Panama",
+        144
+      ],
+      [
+        "India",
+        140
+      ],
+      [
+        "Yemen",
+        138
+      ],
+      [
+        "Germany",
+        129
+      ],
+      [
+        "Cyprus",
+        128
+      ],
+      [
+        "Cambodia",
+        122
+      ],
+      [
+        "Marshall Islands",
+        121
+      ],
+      [
+        "Singapore",
+        110
+      ],
+      [
+        "Bulgaria",
+        92
+      ],
+      [
+        "Congo, Democratic Republic of the",
+        84
+      ],
+      [
+        "Afghanistan",
+        82
+      ],
+      [
+        "Switzerland",
+        81
+      ],
+      [
+        "Italy",
+        78
+      ],
+      [
+        "United States",
+        74
+      ],
+      [
+        "Thailand",
+        71
+      ],
+      [
+        "Hong Kong",
+        71
+      ],
+      [
+        "Somalia",
+        68
+      ],
+      [
+        "Nicaragua",
+        67
+      ],
+      [
+        "Guatemala",
+        62
+      ],
+      [
+        "Netherlands",
+        58
+      ],
+      [
+        "Malta",
+        56
+      ],
+      [
+        "Maldives",
+        50
+      ],
+      [
+        "Spain",
+        49
+      ],
+      [
+        "Serbia",
+        49
+      ],
+      [
+        "South Africa",
+        48
+      ],
+      [
+        "Liberia",
+        48
+      ],
+      [
+        "Virgin Islands, British",
+        46
+      ],
+      [
+        "Sudan",
+        43
+      ],
+      [
+        "Seychelles",
+        43
+      ],
+      [
+        "France",
+        42
+      ],
+      [
+        "Malaysia",
+        42
+      ],
+      [
+        "Canada",
+        40
+      ],
+      [
+        "Belgium",
+        38
+      ]
+    ],
+    "unique_programs": 73,
+    "unique_countries": 190
+  },
+  "country_exposure_top50": [
+    {
+      "country": "Russia",
+      "entities": 5229
+    },
+    {
+      "country": "Iran",
+      "entities": 1519
+    },
+    {
+      "country": "Mexico",
+      "entities": 1085
+    },
+    {
+      "country": "China",
+      "entities": 1072
+    },
+    {
+      "country": "United Arab Emirates",
+      "entities": 665
+    },
+    {
+      "country": "Colombia",
+      "entities": 382
+    },
+    {
+      "country": "Turkey",
+      "entities": 350
+    },
+    {
+      "country": "Lebanon",
+      "entities": 343
+    },
+    {
+      "country": "Syria",
+      "entities": 305
+    },
+    {
+      "country": "Belarus",
+      "entities": 258
+    },
+    {
+      "country": "Venezuela",
+      "entities": 253
+    },
+    {
+      "country": "Ukraine",
+      "entities": 239
+    },
+    {
+      "country": "Korea, North",
+      "entities": 233
+    },
+    {
+      "country": "Burma",
+      "entities": 191
+    },
+    {
+      "country": "United Kingdom",
+      "entities": 190
+    },
+    {
+      "country": "Iraq",
+      "entities": 171
+    },
+    {
+      "country": "Pakistan",
+      "entities": 169
+    },
+    {
+      "country": "Panama",
+      "entities": 144
+    },
+    {
+      "country": "India",
+      "entities": 140
+    },
+    {
+      "country": "Yemen",
+      "entities": 138
+    },
+    {
+      "country": "Germany",
+      "entities": 129
+    },
+    {
+      "country": "Cyprus",
+      "entities": 128
+    },
+    {
+      "country": "Cambodia",
+      "entities": 122
+    },
+    {
+      "country": "Marshall Islands",
+      "entities": 121
+    },
+    {
+      "country": "Singapore",
+      "entities": 110
+    },
+    {
+      "country": "Bulgaria",
+      "entities": 92
+    },
+    {
+      "country": "Congo, Democratic Republic of the",
+      "entities": 84
+    },
+    {
+      "country": "Afghanistan",
+      "entities": 82
+    },
+    {
+      "country": "Switzerland",
+      "entities": 81
+    },
+    {
+      "country": "Italy",
+      "entities": 78
+    },
+    {
+      "country": "United States",
+      "entities": 74
+    },
+    {
+      "country": "Thailand",
+      "entities": 71
+    },
+    {
+      "country": "Hong Kong",
+      "entities": 71
+    },
+    {
+      "country": "Somalia",
+      "entities": 68
+    },
+    {
+      "country": "Nicaragua",
+      "entities": 67
+    },
+    {
+      "country": "Guatemala",
+      "entities": 62
+    },
+    {
+      "country": "Netherlands",
+      "entities": 58
+    },
+    {
+      "country": "Malta",
+      "entities": 56
+    },
+    {
+      "country": "Maldives",
+      "entities": 50
+    },
+    {
+      "country": "Spain",
+      "entities": 49
+    },
+    {
+      "country": "Serbia",
+      "entities": 49
+    },
+    {
+      "country": "South Africa",
+      "entities": 48
+    },
+    {
+      "country": "Liberia",
+      "entities": 48
+    },
+    {
+      "country": "Virgin Islands, British",
+      "entities": 46
+    },
+    {
+      "country": "Sudan",
+      "entities": 43
+    },
+    {
+      "country": "Seychelles",
+      "entities": 43
+    },
+    {
+      "country": "France",
+      "entities": 42
+    },
+    {
+      "country": "Malaysia",
+      "entities": 42
+    },
+    {
+      "country": "Canada",
+      "entities": 40
+    },
+    {
+      "country": "Belgium",
+      "entities": 38
+    }
+  ]
+}
