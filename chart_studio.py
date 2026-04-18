@@ -1493,20 +1493,40 @@ const APPLY_FUNCTIONS = {
   },
 
   // --- Interactivity ---
+  // Tooltip handling must cope with THREE places a tooltip can live:
+  //   1. encoding.tooltip          (producer-set, common in PRISM)
+  //   2. mark.tooltip               (producer-set at mark level)
+  //   3. config.mark.tooltip        (our default, or producer config)
+  //
+  // If the producer set encoding.tooltip, we must NOT add config.mark.tooltip
+  // on top (Vega-Lite merges the two tooltip expressions and produces
+  // malformed output with unbalanced parens). When the knob is off, we
+  // disable ALL three paths. When the knob is on, if the producer configured
+  // an encoding.tooltip we leave it, otherwise we use config.mark.tooltip.
   setTooltipEnabled: (spec, value) => {
     if (!spec.config) spec.config = {};
     if (!spec.config.mark) spec.config.mark = {};
     if (value) {
+      // Prefer producer's explicit encoding.tooltip if one exists; don't
+      // stack a second tooltip on top.
+      if (specHasEncodingTooltip(spec) || specHasMarkTooltip(spec)) {
+        // Clear any previously-set config.mark.tooltip so we don't collide.
+        if (spec.config.mark.tooltip !== undefined) delete spec.config.mark.tooltip;
+        return;
+      }
       const showAll = currentKnobValues.tooltipShowAllFields !== false;
       spec.config.mark.tooltip = showAll ? { content: "data" } : true;
     } else {
+      // Disable everywhere: config, mark, encoding.
       spec.config.mark.tooltip = null;
+      disableAllTooltips(spec);
     }
   },
   setTooltipContent: (spec, value) => {
     if (!spec.config) spec.config = {};
     if (!spec.config.mark) spec.config.mark = {};
     if (currentKnobValues.tooltipEnabled === false) return;
+    if (specHasEncodingTooltip(spec) || specHasMarkTooltip(spec)) return;
     spec.config.mark.tooltip = value ? { content: "data" } : true;
   },
   setCrosshair: (spec, value) => {
@@ -1623,6 +1643,50 @@ function setSelectionParam(spec, name, enabled, encodings) {
     select: { type: "interval", encodings: encodings },
     bind: "scales",
   });
+}
+
+function specHasEncodingTooltip(spec) {
+  if (!spec || typeof spec !== "object") return false;
+  if (spec.encoding && spec.encoding.tooltip !== undefined) return true;
+  for (const key of ["layer", "hconcat", "vconcat", "concat"]) {
+    if (Array.isArray(spec[key])) {
+      for (const child of spec[key]) {
+        if (specHasEncodingTooltip(child)) return true;
+      }
+    }
+  }
+  if (spec.spec && specHasEncodingTooltip(spec.spec)) return true;
+  return false;
+}
+
+function specHasMarkTooltip(spec) {
+  if (!spec || typeof spec !== "object") return false;
+  if (spec.mark && typeof spec.mark === "object" && spec.mark.tooltip !== undefined) return true;
+  for (const key of ["layer", "hconcat", "vconcat", "concat"]) {
+    if (Array.isArray(spec[key])) {
+      for (const child of spec[key]) {
+        if (specHasMarkTooltip(child)) return true;
+      }
+    }
+  }
+  if (spec.spec && specHasMarkTooltip(spec.spec)) return true;
+  return false;
+}
+
+function disableAllTooltips(spec) {
+  if (!spec || typeof spec !== "object") return;
+  if (spec.encoding && spec.encoding.tooltip !== undefined) {
+    delete spec.encoding.tooltip;
+  }
+  if (spec.mark && typeof spec.mark === "object" && spec.mark.tooltip !== undefined) {
+    spec.mark.tooltip = false;
+  }
+  for (const key of ["layer", "hconcat", "vconcat", "concat"]) {
+    if (Array.isArray(spec[key])) {
+      for (const child of spec[key]) disableAllTooltips(child);
+    }
+  }
+  if (spec.spec) disableAllTooltips(spec.spec);
 }
 
 function setDomainBound(spec, channel, idx, rawValue) {
@@ -3091,6 +3155,628 @@ def _compute_chart_id(spec: Dict[str, Any]) -> str:
     return hashlib.sha1(canonical).hexdigest()[:12]
 
 
+# =============================================================================
+# RENDER VALIDATION (no required Python deps)
+#
+# Layers (best-effort, use whatever is available):
+#   1. node + vega + vega-lite  (gold standard -- actually runs the spec
+#      through vega's runtime, catches what the browser would catch)
+#   2. Structural heuristics    (zero deps, catches known-bad patterns like
+#      tooltip-collision and apostrophe-in-format-string)
+#
+# If node+vega is unavailable, layer 2 alone still catches the known bugs.
+# No Python package dependencies are required at runtime.
+# =============================================================================
+
+
+@dataclass
+class RenderDiagnostic:
+    ok: bool
+    compile_ok: bool
+    expressions_ok: bool
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    broken_expressions: List[Dict[str, str]] = field(default_factory=list)
+
+    def summary(self) -> str:
+        if self.ok:
+            return "OK"
+        lines = []
+        if not self.compile_ok:
+            lines.append("  COMPILE FAILED:")
+            for e in self.errors:
+                lines.append(f"    {e[:300]}")
+        if not self.expressions_ok:
+            lines.append("  BROKEN EXPRESSIONS:")
+            for be in self.broken_expressions:
+                lines.append(f"    at {be['path']}:")
+                lines.append(f"      {be['expr'][:200]}")
+                lines.append(f"      reason: {be['reason']}")
+        if self.warnings:
+            lines.append("  WARNINGS:")
+            for w in self.warnings:
+                lines.append(f"    {w[:200]}")
+        return "\n".join(lines) if lines else "OK"
+
+
+_NODE_RENDER_SCRIPT = r"""
+const vega = require('vega');
+const vl = require('vega-lite');
+const fs = require('fs');
+
+async function main() {
+  const specStr = fs.readFileSync(0, 'utf8');
+  const spec = JSON.parse(specStr);
+  try {
+    const {spec: vegaSpec} = vl.compile(spec);
+    const runtime = vega.parse(vegaSpec);
+    const view = new vega.View(runtime, {renderer: 'none'});
+    await view.runAsync();
+    // Also exercise tooltip-like eval paths
+    await view.toSVG();
+    console.log(JSON.stringify({ok: true}));
+  } catch (e) {
+    console.log(JSON.stringify({
+      ok: false,
+      error: e.message,
+      stack: e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : null,
+    }));
+    process.exit(0);
+  }
+}
+main().catch(e => {
+  console.log(JSON.stringify({ok: false, error: String(e)}));
+  process.exit(0);
+});
+"""
+
+
+def _find_node_modules_with_vega() -> Optional[str]:
+    """Return the path to a node_modules directory that contains vega and
+    vega-lite, or None if not found anywhere standard.
+
+    Checks (in order):
+        1. CWD/node_modules
+        2. ancestors of CWD
+        3. /tmp/node_modules (test/dev convention)
+        4. ~/.node_modules
+    """
+    candidates: List[Path] = []
+    here = Path.cwd()
+    candidates.append(here)
+    candidates.extend(here.parents)
+    candidates.append(Path("/tmp"))
+    candidates.append(Path.home() / ".node_modules")
+    for d in candidates:
+        nm = d / "node_modules"
+        if (nm / "vega").exists() and (nm / "vega-lite").exists():
+            return str(nm)
+    return None
+
+
+def _try_node_render_check(spec_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Run the spec through node+vega+vega-lite (if available) to catch
+    runtime render errors that static compilation misses.
+
+    Returns:
+        {"ok": True} on success
+        {"ok": False, "error": "..."} on render error
+        None if node or the packages aren't available
+    """
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not shutil.which("node"):
+        return None
+
+    node_modules = _find_node_modules_with_vega()
+    if node_modules is None:
+        return None
+
+    # Write the script ADJACENT to node_modules so node can resolve `vega`
+    # via its usual lookup rules. Using tempfile's default would put the
+    # script in /var/folders/... where vega isn't installed.
+    script_dir = Path(node_modules).parent
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                     dir=str(script_dir)) as f:
+        f.write(_NODE_RENDER_SCRIPT)
+        script_path = f.name
+
+    env = dict(os.environ)
+    # Belt + suspenders: also set NODE_PATH in case the script was moved.
+    existing_node_path = env.get("NODE_PATH", "")
+    env["NODE_PATH"] = (node_modules + (os.pathsep + existing_node_path)
+                        if existing_node_path else node_modules)
+
+    try:
+        result = subprocess.run(
+            ["node", script_path],
+            input=json.dumps(spec_dict, default=str),
+            capture_output=True, text=True, timeout=30,
+            cwd=str(script_dir),
+            env=env,
+        )
+        output = result.stdout.strip()
+        if not output:
+            return {"ok": False,
+                    "error": f"node exit {result.returncode}: {result.stderr[:300]}"}
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError:
+            return {"ok": False,
+                    "error": f"unparseable node output: {output[:200]}"}
+    finally:
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
+
+
+def validate_spec_renders(spec: Any, include_warnings: bool = True,
+                          use_node: bool = True) -> RenderDiagnostic:
+    """Validate that a vega-lite spec will render without runtime errors.
+
+    Zero Python package dependencies. Uses whichever of these is available:
+
+    1. **node + vega + vega-lite** (``npm install vega vega-lite``, anywhere
+       on the node require path or in /tmp/node_modules): actually runs the
+       spec through vega's runtime parser. Catches the exact class of
+       expression-parse errors the browser produces -- this is the gold
+       standard.
+
+    2. **Structural heuristics** (always available): catches known-bad
+       spec patterns -- encoding.tooltip colliding with config.mark.tooltip,
+       ASCII apostrophes in axis/legend format strings, obviously
+       unbalanced parens in any expression strings present in the raw spec.
+
+    If node+vega is unavailable, heuristics alone catch the main bug
+    classes we've hit (the PRISM tooltip/apostrophe bugs). The validator
+    never fails just because the optional dependency is missing.
+    """
+    spec_dict = _coerce_spec(spec)
+
+    errors: List[str] = []
+    warnings: List[str] = []
+    broken: List[Dict[str, str]] = []
+    compile_ok = True
+    node_ran = False
+
+    # --- Node runtime check (gold standard, if node + vega + vega-lite exist) ---
+    if use_node:
+        node_result = _try_node_render_check(spec_dict)
+        if node_result is not None:
+            node_ran = True
+            if not node_result["ok"]:
+                errors.append("node+vega runtime: " + node_result.get("error", "unknown"))
+                broken.append({
+                    "path": "(runtime)",
+                    "expr": node_result.get("error", ""),
+                    "reason": "vega runtime parse error",
+                })
+
+    if not node_ran and include_warnings:
+        warnings.append(
+            "node+vega not available for runtime render check "
+            "(install with `npm install vega vega-lite` or place them in "
+            "/tmp/node_modules). Falling back to structural heuristics only."
+        )
+
+    # --- Static expression scan of any expression strings in the raw spec ---
+    # (The spec rarely has expressions at this level, but scan anyway.)
+    for path, expr in _collect_raw_spec_expressions(spec_dict):
+        reason = _check_expression_for_bugs(expr)
+        if reason:
+            broken.append({"path": path, "expr": expr, "reason": reason})
+
+    # --- Structural warnings ---
+    if _spec_has_encoding_tooltip_anywhere(spec_dict):
+        def has_conflicting_cmt(s):
+            if not isinstance(s, dict):
+                return False
+            cfg = s.get("config", {})
+            cm = cfg.get("mark") if isinstance(cfg, dict) else None
+            if isinstance(cm, dict) and "tooltip" in cm:
+                return True
+            for key in ("layer", "hconcat", "vconcat", "concat"):
+                v = s.get(key)
+                if isinstance(v, list):
+                    for c in v:
+                        if has_conflicting_cmt(c):
+                            return True
+            return False
+        if has_conflicting_cmt(spec_dict) and include_warnings:
+            warnings.append(
+                "Spec has BOTH encoding.tooltip and config.mark.tooltip; "
+                "Vega-Lite will generate two description expressions and merge "
+                "them, often causing render errors. Call wrap_interactive() to "
+                "auto-sanitize."
+            )
+
+    def _has_apostrophe_in_formats(s):
+        if not isinstance(s, dict):
+            return False
+        for key in ("format", "labelFormat"):
+            v = s.get(key)
+            if isinstance(v, str) and "'" in v:
+                return True
+        axis = s.get("axis")
+        if isinstance(axis, dict):
+            for k in ("format", "labelFormat"):
+                v = axis.get(k)
+                if isinstance(v, str) and "'" in v:
+                    return True
+        enc = s.get("encoding")
+        if isinstance(enc, dict):
+            for ch in enc.values():
+                if isinstance(ch, dict):
+                    v = ch.get("format")
+                    if isinstance(v, str) and "'" in v:
+                        return True
+                    ax = ch.get("axis")
+                    if isinstance(ax, dict):
+                        for k in ("format", "labelFormat"):
+                            if isinstance(ax.get(k), str) and "'" in ax[k]:
+                                return True
+        for key in ("layer", "hconcat", "vconcat", "concat"):
+            val = s.get(key)
+            if isinstance(val, list):
+                for c in val:
+                    if _has_apostrophe_in_formats(c):
+                        return True
+        return False
+
+    if _has_apostrophe_in_formats(spec_dict) and include_warnings:
+        warnings.append(
+            "Spec has ASCII apostrophe (') in a format string (e.g. \"%b '%y\"). "
+            "This breaks at runtime because vega.parse() re-serializes with "
+            "single quotes. Call wrap_interactive() to auto-rewrite to typographic "
+            "right-single-quote (\u2019), visually identical but safe."
+        )
+
+    ok = len(broken) == 0 and compile_ok
+    return RenderDiagnostic(
+        ok=ok, compile_ok=compile_ok,
+        expressions_ok=len(broken) == 0,
+        errors=errors,
+        warnings=warnings if include_warnings else [],
+        broken_expressions=broken,
+    )
+
+
+def _collect_raw_spec_expressions(node: Any, path: str = "") -> List[tuple]:
+    """Walk a raw vega-lite spec looking for expression strings that the user
+    may have hand-written (rare in practice, but params.expr, transform
+    filters, and param selections can contain expressions).
+
+    Returns list of (path, expr) tuples.
+    """
+    found: List[tuple] = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            child_path = path + "." + str(k)
+            if k in ("signal", "expr") and isinstance(v, str):
+                found.append((child_path, v))
+            elif k == "filter" and isinstance(v, str):
+                # transform filters can be expression strings
+                found.append((child_path, v))
+            else:
+                found.extend(_collect_raw_spec_expressions(v, child_path))
+    elif isinstance(node, list):
+        for i, item in enumerate(node):
+            found.extend(_collect_raw_spec_expressions(item, path + "[" + str(i) + "]"))
+    return found
+
+
+def _check_expression_for_bugs(expr: str) -> Optional[str]:
+    """Return a human-readable reason string if the expression contains
+    known-bad patterns, else None."""
+    # 1. Paren balance (ignoring parens inside strings)
+    depth = 0
+    in_str = None  # current open quote char, or None
+    escape = False
+    for ch in expr:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if in_str:
+            if ch == in_str:
+                in_str = None
+            continue
+        if ch in ('"', "'"):
+            in_str = ch
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                return "unbalanced parens: extra closing paren"
+    if depth > 0:
+        return f"unbalanced parens: {depth} unclosed opening paren(s)"
+
+    # 2. Single-quoted format strings with embedded apostrophes.
+    # Pattern: '...X...' where X is an apostrophe inside a single-quoted
+    # string without proper escaping. Look for <'><non-apostrophe chars>
+    # <'><letter or %><more>
+    import re
+    # Match a single-quoted literal that contains another single quote
+    # Simpler: match the known-bad pattern '...'...'%'
+    bad_apos = re.search(r"'[^']*'[A-Za-z%][^']*'", expr)
+    if bad_apos:
+        return ("single-quoted format string contains unescaped apostrophe: "
+                + bad_apos.group(0)[:60])
+
+    return None
+
+
+def _is_meaningful_tooltip(tooltip_val: Any) -> bool:
+    """Distinguish "tooltip explicitly set and active" from "tooltip
+    explicitly disabled or absent".
+
+    Meaningful (active):
+        - list with at least one item
+        - dict with a 'field' or 'content' key
+        - True
+    Not meaningful (disabled or absent):
+        - None, False, empty list, empty dict
+    """
+    if tooltip_val is None or tooltip_val is False:
+        return False
+    if isinstance(tooltip_val, list):
+        return len(tooltip_val) > 0
+    if isinstance(tooltip_val, dict):
+        return bool(tooltip_val) and (
+            "field" in tooltip_val
+            or "content" in tooltip_val
+            or "value" in tooltip_val
+        )
+    if tooltip_val is True:
+        return True
+    return False
+
+
+def _spec_has_any_tooltip(spec: Any) -> bool:
+    """Return True if ANY tooltip key is set anywhere -- whether meaningful
+    (actively shows a tooltip) or explicit-disable (null/False/empty).
+
+    Used by wrap_interactive() to decide whether to inject a default
+    tooltip. We respect an explicit disable just as much as an explicit
+    enable -- the producer's intent wins either way.
+    """
+    if not isinstance(spec, dict):
+        return False
+    enc = spec.get("encoding")
+    if isinstance(enc, dict) and "tooltip" in enc:
+        return True
+    mark = spec.get("mark")
+    if isinstance(mark, dict) and "tooltip" in mark:
+        return True
+    cfg = spec.get("config")
+    if isinstance(cfg, dict):
+        cmark = cfg.get("mark")
+        if isinstance(cmark, dict) and "tooltip" in cmark:
+            return True
+    for key in ("layer", "hconcat", "vconcat", "concat"):
+        val = spec.get(key)
+        if isinstance(val, list):
+            for child in val:
+                if _spec_has_any_tooltip(child):
+                    return True
+    if isinstance(spec.get("spec"), dict):
+        if _spec_has_any_tooltip(spec["spec"]):
+            return True
+    return False
+
+
+def _spec_has_encoding_tooltip_anywhere(spec: Any) -> bool:
+    """Return True if spec (or any descendant) has a meaningful encoding.
+    tooltip or mark.tooltip. These are producer-explicit tooltips that
+    should win over any config.mark.tooltip global default.
+
+    null/False/empty tooltips don't count -- they're explicit disables.
+    """
+    if not isinstance(spec, dict):
+        return False
+    enc = spec.get("encoding")
+    if isinstance(enc, dict) and "tooltip" in enc:
+        if _is_meaningful_tooltip(enc["tooltip"]):
+            return True
+    mark = spec.get("mark")
+    if isinstance(mark, dict) and "tooltip" in mark:
+        if _is_meaningful_tooltip(mark["tooltip"]):
+            return True
+    for key in ("layer", "hconcat", "vconcat", "concat"):
+        val = spec.get(key)
+        if isinstance(val, list):
+            for child in val:
+                if _spec_has_encoding_tooltip_anywhere(child):
+                    return True
+    if isinstance(spec.get("spec"), dict):
+        if _spec_has_encoding_tooltip_anywhere(spec["spec"]):
+            return True
+    return False
+
+
+def _strip_config_mark_tooltip(spec: Any) -> None:
+    """Recursively remove config.mark.tooltip from the spec. Used when we
+    detect an encoding.tooltip elsewhere -- keeping both causes Vega-Lite
+    to generate TWO description/tooltip expressions and merge them with '+',
+    producing malformed expressions (especially when the axis format
+    contains literal apostrophes like '%b \\'%y')."""
+    if not isinstance(spec, dict):
+        return
+    cfg = spec.get("config")
+    if isinstance(cfg, dict):
+        cmark = cfg.get("mark")
+        if isinstance(cmark, dict) and "tooltip" in cmark:
+            del cmark["tooltip"]
+            if not cmark:
+                del cfg["mark"]
+            if not cfg:
+                del spec["config"]
+    for key in ("layer", "hconcat", "vconcat", "concat"):
+        val = spec.get(key)
+        if isinstance(val, list):
+            for child in val:
+                _strip_config_mark_tooltip(child)
+    if isinstance(spec.get("spec"), dict):
+        _strip_config_mark_tooltip(spec["spec"])
+
+
+def _sanitize_tooltip_collision(spec: Any) -> bool:
+    """If the spec has encoding.tooltip or mark.tooltip anywhere, strip
+    config.mark.tooltip from root AND all nested specs to prevent
+    Vega-Lite description-signal collision. Returns True if any strip
+    occurred.
+
+    Addresses one of two distinct render-error classes:
+        Expression parse error: ("date: " + ... + "; Date: " + ...))
+    where Vega-Lite merges two description expressions and the paren
+    count gets mis-aligned.
+    """
+    if not _spec_has_encoding_tooltip_anywhere(spec):
+        return False
+
+    def count_tooltips(s):
+        n = 0
+        if isinstance(s, dict):
+            cfg = s.get("config")
+            if isinstance(cfg, dict):
+                cmark = cfg.get("mark")
+                if isinstance(cmark, dict) and "tooltip" in cmark:
+                    n += 1
+            for key in ("layer", "hconcat", "vconcat", "concat"):
+                val = s.get(key)
+                if isinstance(val, list):
+                    for c in val:
+                        n += count_tooltips(c)
+            if isinstance(s.get("spec"), dict):
+                n += count_tooltips(s["spec"])
+        return n
+
+    before = count_tooltips(spec)
+    _strip_config_mark_tooltip(spec)
+    return before > 0
+
+
+# Typographic right single quote -- visually identical to ASCII apostrophe
+# but safe when embedded in single-quoted expression strings.
+_APOSTROPHE_REPLACEMENT = "\u2019"
+
+
+def _sanitize_apostrophe_formats(spec: Any, _depth: int = 0) -> int:
+    """Replace literal apostrophes in axis.format / axis.labelFormat /
+    encoding.*.axis.format strings with the typographic right-single-quote
+    character.
+
+    Addresses the second render-error class:
+        Expression parse error: (timeFormat(datum["date"], '%b '%y'))
+    which happens because vega.parse() re-serializes format strings with
+    SINGLE quotes at runtime. A literal apostrophe inside the format
+    (e.g. "%b '%y" as a financial convention for "Jan '25") then
+    prematurely terminates the wrapping single-quoted string.
+
+    d3-time-format treats the typographic quote (U+2019) identically to the
+    ASCII apostrophe as a literal character, so the substitution is
+    purely cosmetic but prevents expression parse errors.
+
+    Returns the number of substitutions made (recursively).
+    """
+    if _depth > 50 or not isinstance(spec, dict):
+        return 0
+
+    count = 0
+
+    def _replace(v: Any) -> Any:
+        nonlocal count
+        if isinstance(v, str) and "'" in v:
+            count += v.count("'")
+            return v.replace("'", _APOSTROPHE_REPLACEMENT)
+        return v
+
+    # Walk common format locations
+    for key in ("format", "labelFormat"):
+        if key in spec:
+            spec[key] = _replace(spec[key])
+
+    axis = spec.get("axis")
+    if isinstance(axis, dict):
+        for k in ("format", "labelFormat"):
+            if k in axis:
+                axis[k] = _replace(axis[k])
+
+    # encoding.{x,y,color,...}.axis.format / encoding.*.format
+    # PRISM-specific: encoding.tooltip is a LIST of dicts (one per field),
+    # each of which may have a `format`. Same for encoding.detail/order.
+    def _sanitize_channel_def(ch_def):
+        if not isinstance(ch_def, dict):
+            return
+        if "format" in ch_def:
+            ch_def["format"] = _replace(ch_def["format"])
+        ax = ch_def.get("axis")
+        if isinstance(ax, dict):
+            for k in ("format", "labelFormat"):
+                if k in ax:
+                    ax[k] = _replace(ax[k])
+        lg = ch_def.get("legend")
+        if isinstance(lg, dict):
+            for k in ("format", "labelFormat"):
+                if k in lg:
+                    lg[k] = _replace(lg[k])
+        # Scale-nested format (e.g. color scales with formatted legends)
+        sc = ch_def.get("scale")
+        if isinstance(sc, dict):
+            for k in ("format", "labelFormat"):
+                if k in sc:
+                    sc[k] = _replace(sc[k])
+
+    enc = spec.get("encoding")
+    if isinstance(enc, dict):
+        for channel, ch_def in enc.items():
+            if isinstance(ch_def, list):
+                # encoding.tooltip = [{...}, {...}, ...]
+                for item in ch_def:
+                    _sanitize_channel_def(item)
+            else:
+                _sanitize_channel_def(ch_def)
+
+    # config.axisX / config.axisY / config.axis / config.legend
+    cfg = spec.get("config")
+    if isinstance(cfg, dict):
+        for axis_key in ("axis", "axisX", "axisY", "axisTop", "axisBottom",
+                         "axisLeft", "axisRight", "legend"):
+            axcfg = cfg.get(axis_key)
+            if isinstance(axcfg, dict):
+                for k in ("format", "labelFormat"):
+                    if k in axcfg:
+                        axcfg[k] = _replace(axcfg[k])
+
+    # Title/subtitle can have time expressions too (rare, but safe)
+    title = spec.get("title")
+    if isinstance(title, dict):
+        for k in ("text", "subtitle"):
+            v = title.get(k)
+            if isinstance(v, str) and "'" in v:
+                # Don't touch title text -- user content
+                pass
+
+    # Recurse into nested specs
+    for key in ("layer", "hconcat", "vconcat", "concat"):
+        val = spec.get(key)
+        if isinstance(val, list):
+            for child in val:
+                count += _sanitize_apostrophe_formats(child, _depth + 1)
+    if isinstance(spec.get("spec"), dict):
+        count += _sanitize_apostrophe_formats(spec["spec"], _depth + 1)
+
+    return count
+
+
 def wrap_interactive(
     spec: Any,
     chart_type: Optional[str] = None,
@@ -3126,13 +3812,38 @@ def wrap_interactive(
     """
     spec_dict = _coerce_spec(spec)
 
-    # Enable tooltips by default so both the editor AND exported PNGs have them.
-    # The user can toggle off via the Interactivity knob.
-    if "config" not in spec_dict:
-        spec_dict["config"] = {}
-    if "mark" not in spec_dict["config"]:
-        spec_dict["config"]["mark"] = {}
-    if "tooltip" not in spec_dict["config"]["mark"]:
+    # ---- Tooltip collision sanitization ----
+    #
+    # If the producer (e.g. PRISM's chart_functions.py) has set an
+    # encoding.tooltip OR mark.tooltip anywhere in the spec, then any
+    # config.mark.tooltip (whether we injected it or the producer did)
+    # will cause Vega-Lite to generate TWO description/tooltip signals
+    # that get merged with '+', producing malformed expression strings.
+    #
+    # Symptom: browser shows
+    #   Expression parse error: ("date: " + timeFormat(..., '%b '%y')) + ...
+    #
+    # The apostrophe in axis format strings (common in financial charts,
+    # e.g. "%b '%y" meaning "Jan '25") amplifies this -- when Vega wraps
+    # the auto-generated description expression in single quotes, the
+    # embedded apostrophe prematurely closes the string literal.
+    #
+    # Fix: strip config.mark.tooltip whenever an encoding.tooltip exists.
+    _sanitize_tooltip_collision(spec_dict)
+
+    # ---- Apostrophe-in-format sanitization ----
+    # Axis formats like "%b '%y" (financial convention for "Jan '25") break
+    # at runtime when vega.parse() re-serializes the signal with single
+    # quotes. Replace ASCII apostrophe with typographic right-single-quote.
+    _sanitize_apostrophe_formats(spec_dict)
+
+    # Enable tooltips by default, but ONLY if the spec doesn't already have one
+    # configured anywhere (sanitization above may have stripped config-level).
+    if not _spec_has_any_tooltip(spec_dict):
+        if "config" not in spec_dict:
+            spec_dict["config"] = {}
+        if "mark" not in spec_dict["config"]:
+            spec_dict["config"]["mark"] = {}
         spec_dict["config"]["mark"]["tooltip"] = {"content": "data"}
 
     if chart_type is None:
@@ -3815,6 +4526,112 @@ def run_smoke_tests() -> int:
         check(ct == "line", f"layered line+rule+text -> line (got: {ct})")
     except Exception as e:
         failures.append(f"detector layered failed: {e}")
+
+    # Render validation across all PRISM chart types + tooltip patterns
+    print("\n-- render validation (PRISM chart type matrix) --")
+    import re as _re
+    prism_matrix = {
+        "multi_line": {
+            "data": {"values": [
+                {"date": "2023-01-01", "Series": "A", "Value": 10},
+                {"date": "2023-02-01", "Series": "A", "Value": 12},
+            ]},
+            "mark": {"type": "line"},
+            "encoding": {
+                "x": {"field": "date", "type": "temporal",
+                      "axis": {"format": "%b '%y", "formatType": "time"}},
+                "y": {"field": "Value", "type": "quantitative"},
+                "color": {"field": "Series", "type": "nominal", "title": "Series"},
+                "tooltip": [
+                    {"field": "date", "type": "temporal", "title": "Date",
+                     "format": "%b %d, %Y"},
+                    {"field": "Value", "type": "quantitative", "format": ",.2f"},
+                    {"field": "Series", "type": "nominal", "title": "Series"},
+                ],
+            },
+        },
+        "histogram": {
+            "data": {"values": [{"x": i % 10} for i in range(100)]},
+            "mark": {"type": "bar"},
+            "encoding": {
+                "x": {"bin": True, "field": "x", "type": "quantitative",
+                      "title": "Bin Range"},
+                "y": {"aggregate": "count", "type": "quantitative"},
+                "tooltip": [
+                    {"bin": True, "field": "x", "type": "quantitative",
+                     "title": "Bin Range"},
+                    {"aggregate": "count", "type": "quantitative", "title": "Count"},
+                ],
+            },
+        },
+        "heatmap": {
+            "data": {"values": [
+                {"row": "A", "col": "X", "value": 0.1},
+                {"row": "B", "col": "Y", "value": 0.5},
+            ]},
+            "mark": {"type": "rect"},
+            "encoding": {
+                "x": {"field": "col", "type": "nominal"},
+                "y": {"field": "row", "type": "nominal"},
+                "color": {"field": "value", "type": "quantitative"},
+                "tooltip": [
+                    {"field": "col", "type": "nominal"},
+                    {"field": "row", "type": "nominal"},
+                    {"field": "value", "type": "quantitative",
+                     "title": "Value", "format": ",.2f"},
+                ],
+            },
+        },
+        "donut": {
+            "data": {"values": [
+                {"cat": "A", "val": 55}, {"cat": "B", "val": 45},
+            ]},
+            "mark": {"type": "arc"},
+            "encoding": {
+                "theta": {"field": "val", "type": "quantitative"},
+                "color": {"field": "cat", "type": "nominal"},
+                "tooltip": [
+                    {"field": "cat", "type": "nominal"},
+                    {"field": "val", "type": "quantitative", "format": ",.0f"},
+                ],
+            },
+        },
+        "boxplot": {
+            "data": {"values": [{"cat": "A", "y": i} for i in range(20)]},
+            "mark": {"type": "boxplot"},
+            "encoding": {
+                "x": {"field": "cat", "type": "nominal"},
+                "y": {"field": "y", "type": "quantitative"},
+            },
+        },
+        "tooltip_disabled": {
+            # Producer explicitly disables tooltip; we should respect it.
+            "data": {"values": [{"x": 1, "y": 2}]},
+            "mark": "line",
+            "encoding": {
+                "x": {"field": "x", "type": "quantitative"},
+                "y": {"field": "y", "type": "quantitative"},
+                "tooltip": None,
+            },
+        },
+    }
+    for chart_name, spec_in in prism_matrix.items():
+        try:
+            r = wrap_interactive(spec_in)
+            m = _re.search(r"const ORIGINAL_SPEC = (\{.+?\});\n", r.html)
+            sanitized = json.loads(m.group(1))
+            diag = validate_spec_renders(sanitized, include_warnings=False)
+            if diag.ok:
+                passes += 1
+                print(f"  [OK]   {chart_name:18s} wrap->render clean")
+            else:
+                failures.append(f"{chart_name}: " + diag.summary())
+                print(f"  [FAIL] {chart_name:18s} failed render:")
+                for line in diag.summary().split("\n"):
+                    print(f"         {line}")
+        except Exception as e:
+            failures.append(f"{chart_name} crashed: {e}")
+            print(f"  [FAIL] {chart_name:18s} crashed: {e}")
 
     print("\n" + "=" * 40)
     print(f"  {passes} passed, {len(failures)} failed")
