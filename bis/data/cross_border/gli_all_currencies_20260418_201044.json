@@ -1,0 +1,230 @@
+{
+  "generated_at": "2026-04-19T00:10:40.621242+00:00",
+  "start_period": "2024",
+  "series": {
+    "USD_credit": [
+      {
+        "key": "Q.USD.3P.N.A.I.B.USD",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "CURR_DENOM": {
+            "id": "USD",
+            "name": "US dollar"
+          },
+          "BORROWERS_CTY": {
+            "id": "3P",
+            "name": "All countries excluding residents"
+          },
+          "BORROWERS_SECTOR": {
+            "id": "N",
+            "name": "Non-banks, total"
+          },
+          "LENDERS_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_POS_TYPE": {
+            "id": "I",
+            "name": "Cross-border & Local in FCY"
+          },
+          "L_INSTR": {
+            "id": "B",
+            "name": "Credit (loans & debt securities)"
+          },
+          "UNIT_MEASURE": {
+            "id": "USD",
+            "name": "US dollar"
+          }
+        },
+        "attributes": {
+          "TITLE": "USD denominated credit (bank loans & debt securities) to non-bank borrowers located outside the US",
+          "UNIT_MULT": "Millions",
+          "DECIMALS": "Zero",
+          "AVAILABILITY": "All users"
+        },
+        "observations": {
+          "2024-Q1": "13057530.599",
+          "2024-Q2": "13161155.445",
+          "2024-Q3": "13257736.844",
+          "2024-Q4": "13141077.33",
+          "2025-Q1": "13732231.529",
+          "2025-Q2": "13976598.234",
+          "2025-Q3": "14224948.598"
+        }
+      }
+    ],
+    "EUR_credit": [],
+    "JPY_credit": [],
+    "USD_growth": [
+      {
+        "key": "Q.USD.3P.N.A.I.B.771",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "CURR_DENOM": {
+            "id": "USD",
+            "name": "US dollar"
+          },
+          "BORROWERS_CTY": {
+            "id": "3P",
+            "name": "All countries excluding residents"
+          },
+          "BORROWERS_SECTOR": {
+            "id": "N",
+            "name": "Non-banks, total"
+          },
+          "LENDERS_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_POS_TYPE": {
+            "id": "I",
+            "name": "Cross-border & Local in FCY"
+          },
+          "L_INSTR": {
+            "id": "B",
+            "name": "Credit (loans & debt securities)"
+          },
+          "UNIT_MEASURE": {
+            "id": "771",
+            "name": "Year-on-year changes, in per cent"
+          }
+        },
+        "attributes": {
+          "TITLE": "USD denominated credit (bank loans & debt securities) to non-bank borrowers located outside the US",
+          "UNIT_MULT": "Units",
+          "DECIMALS": "Two",
+          "AVAILABILITY": "All users"
+        },
+        "observations": {
+          "2024-Q1": "2.593",
+          "2024-Q2": "2.542",
+          "2024-Q3": "2.985",
+          "2024-Q4": "2.805",
+          "2025-Q1": "5.153",
+          "2025-Q2": "6.165",
+          "2025-Q3": "7.279"
+        }
+      }
+    ],
+    "EUR_growth": [
+      {
+        "key": "Q.EUR.3P.N.A.I.B.771",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "CURR_DENOM": {
+            "id": "EUR",
+            "name": "Euro"
+          },
+          "BORROWERS_CTY": {
+            "id": "3P",
+            "name": "All countries excluding residents"
+          },
+          "BORROWERS_SECTOR": {
+            "id": "N",
+            "name": "Non-banks, total"
+          },
+          "LENDERS_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_POS_TYPE": {
+            "id": "I",
+            "name": "Cross-border & Local in FCY"
+          },
+          "L_INSTR": {
+            "id": "B",
+            "name": "Credit (loans & debt securities)"
+          },
+          "UNIT_MEASURE": {
+            "id": "771",
+            "name": "Year-on-year changes, in per cent"
+          }
+        },
+        "attributes": {
+          "TITLE": "EUR denominated credit (bank loans & debt securities) to non-bank borrowers located outside the euro area",
+          "UNIT_MULT": "Units",
+          "DECIMALS": "Two",
+          "AVAILABILITY": "All users"
+        },
+        "observations": {
+          "2024-Q1": "4.963",
+          "2024-Q2": "4.967",
+          "2024-Q3": "7.994",
+          "2024-Q4": "8.769",
+          "2025-Q1": "9.835",
+          "2025-Q2": "12.878",
+          "2025-Q3": "11.393"
+        }
+      }
+    ],
+    "JPY_growth": [
+      {
+        "key": "Q.JPY.3P.N.A.I.B.771",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "CURR_DENOM": {
+            "id": "JPY",
+            "name": "Yen"
+          },
+          "BORROWERS_CTY": {
+            "id": "3P",
+            "name": "All countries excluding residents"
+          },
+          "BORROWERS_SECTOR": {
+            "id": "N",
+            "name": "Non-banks, total"
+          },
+          "LENDERS_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_POS_TYPE": {
+            "id": "I",
+            "name": "Cross-border & Local in FCY"
+          },
+          "L_INSTR": {
+            "id": "B",
+            "name": "Credit (loans & debt securities)"
+          },
+          "UNIT_MEASURE": {
+            "id": "771",
+            "name": "Year-on-year changes, in per cent"
+          }
+        },
+        "attributes": {
+          "TITLE": "JPY denominated credit (bank loans & debt securities) to non-bank borrowers located outside Japan",
+          "UNIT_MULT": "Units",
+          "DECIMALS": "Two",
+          "AVAILABILITY": "All users"
+        },
+        "observations": {
+          "2024-Q1": "12.464",
+          "2024-Q2": "14.456",
+          "2024-Q3": "19.113",
+          "2024-Q4": "11.111",
+          "2025-Q1": "6.517",
+          "2025-Q2": "-0.426",
+          "2025-Q3": "-3.359"
+        }
+      }
+    ]
+  },
+  "summary": {
+    "USD": {
+      "value": 14224948.598,
+      "period": "2025-Q3"
+    }
+  }
+}

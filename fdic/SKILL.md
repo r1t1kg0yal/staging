@@ -10,7 +10,7 @@ Dependencies: `requests`
 
 ## Triggers
 
-Use for: individual bank financials (balance sheet, income, credit quality, deposits, capital), banking system aggregates (1934-present), bank failures and resolution details, CRE concentration screening, uninsured deposit risk, NIM and funding cost analysis, peer comparison across any Call Report field, branch locations with lat/lng, M&A and structure change history, deposit market share (SOD), state-level and community bank analysis.
+Use for: individual bank financials (balance sheet, income, credit quality, deposits, capital), banking system aggregates (1934-present), bank failures and resolution details, CRE concentration screening, uninsured deposit risk, NIM and funding cost analysis, peer comparison across any Call Report field, branch locations with lat/lng, M&A and structure change history, deposit market share (SOD), state-level and community bank analysis, HTM/AFS unrealized securities losses (the SVB-style interest rate risk indicator), interest-rate repricing gap analysis, holding company linkage (CERT to HC and all subsidiary roster), Minority Depository Institutions (MDIs), de novo / newly chartered banks, Community Bank Leverage Ratio (CBLR) qualified banks, Federal Reserve district breakdown, specialty bank categorization (agricultural, credit card monoline, trust, mortgage originators), PPP loan exposure, foreign office exposure, asset-size distribution, efficiency ratio distribution, charge-off waterfall by loan type, non-performing asset ratio screen, structure change aggregation by CHANGECODE, M&A wave analysis by year, comprehensive multi-section bank profile ("snapshot").
 
 Not for: bank holding company consolidated data (FFIEC FR Y-9C), weekly banking aggregates (FRED H.8), bank stock prices (market data), 10-K/10-Q text (SEC EDGAR), non-US banks (BIS), Treasury auctions (TreasuryDirect), overnight funding rates (NY Fed), commercial paper / CD rates (FRED).
 
@@ -1122,6 +1122,40 @@ Full field schema: `https://api.fdic.gov/banks/docs/risview_properties.yaml`
 | ratios_capital | Regulatory capital ratios only |
 | ratios_funding | Funding cost, yield on earning assets, loan/deposit, earning asset share |
 
+**Interest Rate Risk / Securities Stress**
+
+| Preset | Concept |
+|--------|---------|
+| unrealized_securities | HTM/AFS amortized vs fair value (SCHA/SCHF and SCAA/SCAF) - the metric that blew up SVB. Implied unrealized loss = amortized cost - fair value |
+| securities_fair_value | Compact HTM/AFS book vs fair value for time series analysis |
+| interest_rate_risk | Full repricing gap: loans (LN*RS*, LNOT*), securities (SC*), and deposits (CD*) by maturity bucket |
+
+**Institutional Metadata / Structure**
+
+| Preset | Concept |
+|--------|---------|
+| institution_profile | Holding company lineage + demographics: NAMEHCR, RSSDHCR, STALPHCR, CITYHCR, PARCERT, HCTONE/MULT/NONE, NUMEMP, DENOVO, NEWINST, MINORITY, MNRTYCDE, SPECGRP, CB, BKCLASS, FED, REGAGNT |
+| supervisory | Chartering + regulatory metadata: BKCLASS, CLCODE, FED, REGAGNT, CHRTAGNT, FDICDBS/SUPV, OCCDIST, STCHRTR/FEDCHRTR/FORCHRTR, INSDIF/BIF/SAIF, CONSERVE, CLOSED, FAILED, MUTUAL, TRUST, SUBCHAPS |
+| cblr | Community Bank Leverage Ratio (CBLRIND), AVASSETJ, EQTOT, IDT1CER |
+
+**COVID Emergency Programs**
+
+| Preset | Concept |
+|--------|---------|
+| ppp_mmlf | PPP loan balances (PPPLNBAL, PPPLNNUM, PPPLNPLG), MMLF usage (MMLFBAL, AVMMLF), PPP liquidity facility advances by maturity |
+
+**Specialty / Structural**
+
+| Preset | Concept |
+|--------|---------|
+| mortgage_servicing | MSR detail: INTANMSR, MSRECE, MSRESFCL, MSRNRECE, LNSERV, LNLSSALE, MTGLS |
+| foreign_offices | Foreign office exposure: ASSETFOR, LIABFOR, DEPFOR, DEPIFOR/NIFOR, LNCIFOR, LNREFOR, EDEPFOR, TRFOR, OREOTHF |
+| size_buckets | Asset size bucket flags (SZ25, SZ100, SZ1BP, SZ10BP, SZ250BP, etc.) for distribution analysis |
+| staff_size | Employee count + compensation: NUMEMP, ESAL, EEFFR, NONIX |
+| own_securitizations | Bank-originated (own) securitizations of C&I, credit card, HEL with past-due + charge-off + recoveries |
+| npa | Composite non-performing assets: NALNLS, P9ASSET, ORE, NPERF, LNRESNCR, NCLNLSR |
+| charge_offs_quarterly | Quarterly NCO and recovery rates (Q-suffix) for all loan types (run-rate analysis) |
+
 For any field not in a preset, pass `--fields FIELD1,FIELD2,...` directly. The argparse `--preset` flag exposes all preset names as typed choices. Full RISVIEW schema with descriptions: `https://api.fdic.gov/banks/docs/risview_properties.yaml`
 
 ### Notable CERT Numbers
@@ -1459,6 +1493,131 @@ python fdic.py past-due-detail --cert 628 --quarters 12
 python fdic.py past-due-detail --cert 628 --quarters 12 --json
 ```
 
+### Rate Risk / Capital / Credit Deep-Dive Recipes
+
+```bash
+# HTM unrealized loss screen (SVB-style interest rate risk)
+# Reveals implied unrealized loss = SCHA (book) - SCHF (fair value)
+python fdic.py htm-stress --min-assets 10000000 --repdte 20251231
+python fdic.py htm-stress --min-assets 10000000 --repdte 20251231 --json
+
+# AFS unrealized loss screen (AOCI hit)
+python fdic.py afs-stress --min-assets 10000000 --repdte 20251231
+python fdic.py afs-stress --min-assets 10000000 --repdte 20251231 --json
+
+# Single-bank securities fair value time series (HTM + AFS + municipal + structured)
+python fdic.py securities-fair-value --cert 628 --quarters 20
+python fdic.py securities-fair-value --cert 3510 --quarters 20 --json
+
+# Interest rate risk / repricing gap for one bank
+# Combines loan (LN*RS*, LNOT*), securities (SC*), and deposit (CD*) maturity buckets
+python fdic.py interest-rate-risk --cert 628 --quarters 8
+python fdic.py interest-rate-risk --cert 628 --quarters 8 --json
+
+# Community Bank Leverage Ratio opt-in roster (post-2020 simplified capital rule)
+python fdic.py cblr-screen --repdte 20251231
+python fdic.py cblr-screen --repdte 20251231 --json
+
+# Non-performing asset ratio screen
+python fdic.py npf-screen --min-assets 1000000 --repdte 20251231
+python fdic.py npf-screen --min-assets 1000000 --repdte 20251231 --json
+
+# Detailed net charge-off waterfall for a single bank (by loan type, YTD + Q)
+python fdic.py charge-off-waterfall --cert 4297 --quarters 8
+python fdic.py charge-off-waterfall --cert 4297 --quarters 8 --json
+
+# Efficiency ratio distribution (sorted worst first)
+python fdic.py efficiency-distribution --min-assets 1000000 --repdte 20251231
+python fdic.py efficiency-distribution --min-assets 1000000 --repdte 20251231 --json
+
+# Banks with largest foreign office asset exposure
+python fdic.py foreign-exposure --min-foreign 100000 --repdte 20251231
+python fdic.py foreign-exposure --min-foreign 100000 --repdte 20251231 --json
+
+# System-wide asset size distribution (count by bucket)
+python fdic.py asset-size-distribution --repdte 20251231
+python fdic.py asset-size-distribution --repdte 20251231 --json
+```
+
+### Institutional Structure / Demographics
+
+```bash
+# Holding company lineage + all bank subsidiaries under the same HC
+python fdic.py holding-company --cert 628
+python fdic.py holding-company --cert 33124 --json
+
+# Roster of all banks under a specific holding company (by name or RSSD ID)
+python fdic.py holding-company-roster --hcr 'JPMORGAN CHASE&CO'
+python fdic.py holding-company-roster --hcr 1039502 --json
+
+# Newly chartered institutions in a reporting period
+python fdic.py new-banks --repdte 20251231
+python fdic.py new-banks --repdte 20251231 --json
+
+# De novo banks (DENOVO=1, new charters - not recharters)
+python fdic.py de-novo --repdte 20251231
+python fdic.py de-novo --repdte 20251231 --json
+
+# Minority Depository Institutions (MDIs)
+# MNRTYCDE: 1=Black, 2=Asian, 3=Chinese, 4=Korean, 5=Japanese,
+# 6=Indian/Arabic, 7=Hispanic, 8=Multi-racial, 9=Native American
+python fdic.py minority-banks --repdte 20251231
+python fdic.py minority-banks --repdte 20251231 --json
+
+# Structure change events aggregated by CHANGECODE
+# 110/120=acquisition, 211-224=merger, 310/320=consolidation,
+# 420/430=relocation, 470=name change, 510+=branch events
+python fdic.py structure-changes --start 2020-01-01 --end 2024-12-31
+python fdic.py structure-changes --start 2023-01-01 --end 2023-12-31 --json
+
+# M&A activity aggregated by year
+python fdic.py mergers-by-year --start-year 2000 --end-year 2025
+python fdic.py mergers-by-year --start-year 2020 --end-year 2024 --json
+
+# Bank count + total assets by Federal Reserve district
+# 1=Boston, 2=NY, 3=Philadelphia, 4=Cleveland, 5=Richmond,
+# 6=Atlanta, 7=Chicago, 8=St. Louis, 9=Minneapolis, 10=KC, 11=Dallas, 12=SF
+python fdic.py fed-district-banks --repdte 20251231
+python fdic.py fed-district-banks --repdte 20251231 --json
+```
+
+### Specialty / Sector Recipes
+
+```bash
+# Banking system breakdown by SPECGRP (specialty group)
+# 1=International, 2=Agricultural, 3=Credit Card, 4=Commercial Lending,
+# 5=Mortgage Lending, 6=Consumer Lending, 7=Other Specialized,
+# 8=All Other <$1B, 9=All Other >$1B
+python fdic.py specialty-breakdown --repdte 20251231
+python fdic.py specialty-breakdown --repdte 20251231 --json
+
+# Agricultural banks (SPECGRP=2) with ag loan + credit-quality detail
+python fdic.py ag-banks --min-assets 100000 --repdte 20251231
+python fdic.py ag-banks --min-assets 500000 --repdte 20251231 --json
+
+# Credit card monoline banks (SPECGRP=3)
+python fdic.py credit-card-banks --repdte 20251231
+python fdic.py credit-card-banks --repdte 20251231 --json
+
+# Banks with significant fiduciary / trust activities (IFIDUC threshold)
+python fdic.py trust-banks --min-ifiduc 10000 --repdte 20251231
+python fdic.py trust-banks --min-ifiduc 10000 --repdte 20251231 --json
+
+# Banks with material mortgage servicing portfolios (INTANMSR threshold)
+python fdic.py mortgage-originators --min-msr 10000 --repdte 20251231
+python fdic.py mortgage-originators --min-msr 10000 --repdte 20251231 --json
+
+# PPP loan balances outstanding across banks (residual from 2020-2023 program)
+python fdic.py ppp-exposure --min-ppp 1000 --repdte 20251231
+python fdic.py ppp-exposure --min-ppp 1000 --repdte 20251231 --json
+
+# Comprehensive multi-section bank profile in one command (~200 fields across 11 sections)
+# Covers: institution profile, balance sheet, income, deposits, loans, credit quality,
+# capital (Basel III), CRE, securities (incl. unrealized), derivatives, ratios
+python fdic.py bank-snapshot --cert 628
+python fdic.py bank-snapshot --cert 628 --repdte 20251231 --json
+```
+
 ### Bulk Export
 
 ```bash
@@ -1705,6 +1864,45 @@ pastdue = fdic_query("past-due-detail", "--cert 628 --quarters 12")
 
 # Funding costs
 funding = fdic_query("funding-costs", "--certs '628,3510,7213,3511,33124'")
+
+# HTM/AFS unrealized loss screens (interest rate risk)
+htm = fdic_query("htm-stress", "--min-assets 10000000 --repdte 20251231")
+afs = fdic_query("afs-stress", "--min-assets 10000000 --repdte 20251231")
+sec_fv = fdic_query("securities-fair-value", "--cert 628 --quarters 20")
+
+# Interest rate risk / repricing gap
+irr = fdic_query("interest-rate-risk", "--cert 628 --quarters 8")
+
+# Holding company analysis
+hc = fdic_query("holding-company", "--cert 33124")
+hc_roster = fdic_query("holding-company-roster", "--hcr 1039502")
+
+# Industry structure
+mdi = fdic_query("minority-banks", "--repdte 20251231")
+new = fdic_query("new-banks", "--repdte 20251231")
+denovo = fdic_query("de-novo", "--repdte 20251231")
+cblr = fdic_query("cblr-screen", "--repdte 20251231")
+structure = fdic_query("structure-changes", "--start 2020-01-01 --end 2024-12-31")
+mergers = fdic_query("mergers-by-year", "--start-year 2000 --end-year 2025")
+fed_dist = fdic_query("fed-district-banks", "--repdte 20251231")
+size_dist = fdic_query("asset-size-distribution", "--repdte 20251231")
+
+# Specialty banking
+spec = fdic_query("specialty-breakdown", "--repdte 20251231")
+ag = fdic_query("ag-banks", "--min-assets 100000 --repdte 20251231")
+cc = fdic_query("credit-card-banks", "--repdte 20251231")
+trust = fdic_query("trust-banks", "--min-ifiduc 10000 --repdte 20251231")
+msr = fdic_query("mortgage-originators", "--min-msr 10000 --repdte 20251231")
+ppp = fdic_query("ppp-exposure", "--min-ppp 1000 --repdte 20251231")
+foreign = fdic_query("foreign-exposure", "--min-foreign 100000 --repdte 20251231")
+
+# Comprehensive 11-section bank profile in one call
+snapshot = fdic_query("bank-snapshot", "--cert 628")
+
+# Operational / credit distribution
+eff = fdic_query("efficiency-distribution", "--min-assets 1000000 --repdte 20251231")
+npf = fdic_query("npf-screen", "--min-assets 1000000 --repdte 20251231")
+nco = fdic_query("charge-off-waterfall", "--cert 4297 --quarters 8")
 ```
 
 
@@ -1796,6 +1994,58 @@ python fdic.py bank-financials --cert 3510 --quarters 20 --preset credit_quality
 
 PRISM receives: system-wide NCL rates, provisions, past-dues for large banks, reserve coverage ratios (allowance vs NCLs vs past-dues), 20Q credit quality time series for JPMorgan and BofA as bellwethers.
 
+### Securities / Rate Shock Stress (SVB-Style Analysis)
+
+```bash
+python fdic.py htm-stress --min-assets 10000000 --repdte 20251231 --json
+python fdic.py afs-stress --min-assets 10000000 --repdte 20251231 --json
+python fdic.py securities-fair-value --cert 628 --quarters 20 --json
+python fdic.py securities-fair-value --cert 3510 --quarters 20 --json
+python fdic.py interest-rate-risk --cert 628 --quarters 8 --json
+```
+
+PRISM receives: cross-sectional HTM and AFS amortized-cost vs fair-value snapshots for large banks (reveals implied unrealized losses as SCHA-SCHF and SCAA-SCAF), 20Q time series of HTM/AFS position and fair value marks for bellwether banks, 8Q repricing gap analysis (loans, deposits, securities by maturity bucket) showing interest rate sensitivity.
+
+### Institutional Structure / Industry Evolution
+
+```bash
+python fdic.py holding-company --cert 33124 --json
+python fdic.py holding-company-roster --hcr 'JPMORGAN CHASE&CO' --json
+python fdic.py new-banks --repdte 20251231 --json
+python fdic.py de-novo --repdte 20251231 --json
+python fdic.py minority-banks --repdte 20251231 --json
+python fdic.py structure-changes --start 2023-01-01 --end 2025-12-31 --json
+python fdic.py mergers-by-year --start-year 2000 --end-year 2025 --json
+python fdic.py fed-district-banks --repdte 20251231 --json
+python fdic.py asset-size-distribution --repdte 20251231 --json
+```
+
+PRISM receives: bank-to-holding-company mapping with sibling roster (all subs under the same RSSDHCR), current newly chartered + de novo institutions, full Minority Depository Institution (MDI) roster with minority type code, aggregated structure events by CHANGECODE for policy / M&A wave analysis, 25+ year merger-and-acquisition activity trend, Federal Reserve district-level bank counts and assets, system-wide asset size distribution (count of banks in each tier from <$25M to $250B+).
+
+### Specialty Banking Sectors
+
+```bash
+python fdic.py specialty-breakdown --repdte 20251231 --json
+python fdic.py ag-banks --min-assets 100000 --repdte 20251231 --json
+python fdic.py credit-card-banks --repdte 20251231 --json
+python fdic.py trust-banks --min-ifiduc 10000 --repdte 20251231 --json
+python fdic.py mortgage-originators --min-msr 10000 --repdte 20251231 --json
+python fdic.py ppp-exposure --min-ppp 1000 --repdte 20251231 --json
+python fdic.py foreign-exposure --min-foreign 100000 --repdte 20251231 --json
+```
+
+PRISM receives: specialty group asset distribution (how many banks specialize in what), agricultural bank roster with ag loan + credit quality detail (NCOs, past-dues, non-accrual on ag book), credit card monoline roster with CC loan composition and NCOs, trust bank roster with fiduciary assets under management + fee income, mortgage originator roster with MSR assets and loans serviced for others, PPP loan residual balances (program ended in 2023 but balances remain), banks with material foreign office exposure.
+
+### Comprehensive Single-Bank Profile
+
+```bash
+python fdic.py bank-snapshot --cert 628 --json
+python fdic.py bank-snapshot --cert 33124 --repdte 20251231 --json
+python fdic.py bank-snapshot --cert 24735 --repdte 20221231 --json
+```
+
+PRISM receives: 11-section multi-dimensional profile for a single bank in one command: institution profile (holding company, regulators, demographics), balance sheet, income statement, deposits detail, loans, credit quality, Basel III capital, CRE concentration, securities with unrealized losses, derivatives, key ratios. Automatic latest-REPDTE lookup if date not specified.
+
 
 ## Cross-Source Recipes
 
@@ -1876,12 +2126,17 @@ PRISM receives: quarterly deposit composition from Call Reports + holding compan
 
 ```
 fdic.py
-  Constants       BASE, FIELD_CATALOGS (8 endpoints), FINANCIAL_FIELDS (60+ presets
+  Constants       BASE, FIELD_CATALOGS (8 endpoints), FINANCIAL_FIELDS (75+ presets
                   covering balance sheet, income, loans, deposits, securities,
                   capital, credit quality, off-balance sheet, trading, derivatives,
-                  securitization, borrowings, fiduciary, ratios),
-                  INSTITUTION_FIELDS, LOCATION_FIELDS, SUMMARY_FIELDS,
-                  FAILURE_FIELDS, HISTORY_FIELDS, SOD_FIELDS, DEMOGRAPHICS_FIELDS
+                  securitization, borrowings, fiduciary, ratios, plus:
+                  unrealized_securities, interest_rate_risk, institution_profile,
+                  supervisory, cblr, ppp_mmlf, mortgage_servicing, foreign_offices,
+                  size_buckets, staff_size, own_securitizations, npa,
+                  charge_offs_quarterly),
+                  INSTITUTION_FIELDS (6 presets incl. holding_company, regulatory,
+                  demographics), LOCATION_FIELDS, SUMMARY_FIELDS, FAILURE_FIELDS,
+                  HISTORY_FIELDS, SOD_FIELDS, DEMOGRAPHICS_FIELDS
   HTTP            _get() single request, _get_all() auto-paginating bulk fetcher
   Extraction      _extract_rows() flattens FDIC response wrapper
   Display         _print_table(), _prompt(), _prompt_fields(), _display_response()
@@ -1896,9 +2151,19 @@ fdic.py
                   nim-regime, capital-distribution
   Balance (6)     cre-screen, loan-growth, reserve-adequacy,
                   securities-portfolio, peer-comparison, past-due-detail
+  Rate Risk (10)  htm-stress, afs-stress, securities-fair-value,
+                  interest-rate-risk, cblr-screen, npf-screen,
+                  charge-off-waterfall, efficiency-distribution,
+                  foreign-exposure, asset-size-distribution
+  Structure (8)   holding-company, holding-company-roster, new-banks,
+                  de-novo, minority-banks, structure-changes,
+                  mergers-by-year, fed-district-banks
+  Specialty (7)   specialty-breakdown, ag-banks, credit-card-banks,
+                  trust-banks, mortgage-originators, ppp-exposure,
+                  bank-snapshot (comprehensive 11-section profile)
   Tools (2)       raw-query (interactive only), field-catalog
   Interactive     Full menu-driven CLI (runs without arguments)
-  Argparse        35+ subcommands, all with --json
+  Argparse        60+ subcommands, all with --json
 ```
 
 API endpoints:

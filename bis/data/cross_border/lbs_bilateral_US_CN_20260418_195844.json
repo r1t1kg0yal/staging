@@ -1,0 +1,76 @@
+{
+  "query": "lbs/Q.S.C.A.TO1.A.5J.A.US.A.CN.N",
+  "series": [
+    {
+      "key": "Q.S.C.A.TO1.A.5J.A.US.A.CN.N",
+      "dimensions": {
+        "FREQ": {
+          "id": "Q",
+          "name": "Quarterly"
+        },
+        "L_MEASURE": {
+          "id": "S",
+          "name": "Amounts outstanding / Stocks"
+        },
+        "L_POSITION": {
+          "id": "C",
+          "name": "Total claims"
+        },
+        "L_INSTR": {
+          "id": "A",
+          "name": "All instruments"
+        },
+        "L_DENOM": {
+          "id": "TO1",
+          "name": "All currencies"
+        },
+        "L_CURR_TYPE": {
+          "id": "A",
+          "name": "All currencies (=D+F+U)"
+        },
+        "L_PARENT_CTY": {
+          "id": "5J",
+          "name": "All countries"
+        },
+        "L_REP_BANK_TYPE": {
+          "id": "A",
+          "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+        },
+        "L_REP_CTY": {
+          "id": "US",
+          "name": "United States"
+        },
+        "L_CP_SECTOR": {
+          "id": "A",
+          "name": "All sectors"
+        },
+        "L_CP_COUNTRY": {
+          "id": "CN",
+          "name": "China"
+        },
+        "L_POS_TYPE": {
+          "id": "N",
+          "name": "Cross-border"
+        }
+      },
+      "attributes": {
+        "COLLECTION": "End of period",
+        "ORG_VISIBILITY": "Public",
+        "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+      },
+      "observations": {
+        "2023-Q1": "21326.0",
+        "2023-Q2": "20223.0",
+        "2023-Q3": "27703.0",
+        "2023-Q4": "22135.0",
+        "2024-Q1": "24754.0",
+        "2024-Q2": "19068.0",
+        "2024-Q3": "14443.0",
+        "2024-Q4": "13070.0",
+        "2025-Q1": "12130.0",
+        "2025-Q2": "11281.0",
+        "2025-Q3": "9696.0"
+      }
+    }
+  ]
+}

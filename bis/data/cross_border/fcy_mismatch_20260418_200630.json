@@ -1,0 +1,1075 @@
+{
+  "generated_at": "2026-04-19T00:06:16.690418+00:00",
+  "start_period": "2024",
+  "series": {
+    "US_all": [
+      {
+        "key": "Q.S.C.A.TO1.A.5J.A.US.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "A",
+            "name": "All currencies (=D+F+U)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "US",
+            "name": "United States"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "3766780.0",
+          "2024-Q2": "3762630.0",
+          "2024-Q3": "3733061.0",
+          "2024-Q4": "3614173.0",
+          "2025-Q1": "4002044.0",
+          "2025-Q2": "4099821.0",
+          "2025-Q3": "4239382.0"
+        }
+      }
+    ],
+    "US_dom": [
+      {
+        "key": "Q.S.C.A.TO1.D.5J.A.US.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "D",
+            "name": "Domestic currency (ie currency of bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "US",
+            "name": "United States"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "3258718.0",
+          "2024-Q2": "3277070.0",
+          "2024-Q3": "3209920.0",
+          "2024-Q4": "3098617.0",
+          "2025-Q1": "3458308.0",
+          "2025-Q2": "3519540.0",
+          "2025-Q3": "3671154.0"
+        }
+      }
+    ],
+    "US_fgn": [
+      {
+        "key": "Q.S.C.A.TO1.F.5J.A.US.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "F",
+            "name": "Foreign currency (ie currencies foreign to bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "US",
+            "name": "United States"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "508062.0",
+          "2024-Q2": "485560.0",
+          "2024-Q3": "523141.0",
+          "2024-Q4": "515556.0",
+          "2025-Q1": "543736.0",
+          "2025-Q2": "580281.0",
+          "2025-Q3": "568228.0"
+        }
+      }
+    ],
+    "GB_all": [
+      {
+        "key": "Q.S.C.A.TO1.A.5J.A.GB.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "A",
+            "name": "All currencies (=D+F+U)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "GB",
+            "name": "United Kingdom"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "5765712.0",
+          "2024-Q2": "5714227.0",
+          "2024-Q3": "6013720.0",
+          "2024-Q4": "5854511.0",
+          "2025-Q1": "6124239.0",
+          "2025-Q2": "6469130.0",
+          "2025-Q3": "6668292.0"
+        }
+      }
+    ],
+    "GB_dom": [
+      {
+        "key": "Q.S.C.A.TO1.D.5J.A.GB.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "D",
+            "name": "Domestic currency (ie currency of bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "GB",
+            "name": "United Kingdom"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "533181.0",
+          "2024-Q2": "575239.0",
+          "2024-Q3": "653974.0",
+          "2024-Q4": "609920.0",
+          "2025-Q1": "649207.0",
+          "2025-Q2": "696443.0",
+          "2025-Q3": "700574.0"
+        }
+      }
+    ],
+    "GB_fgn": [
+      {
+        "key": "Q.S.C.A.TO1.F.5J.A.GB.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "F",
+            "name": "Foreign currency (ie currencies foreign to bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "GB",
+            "name": "United Kingdom"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "5232531.0",
+          "2024-Q2": "5138988.0",
+          "2024-Q3": "5359746.0",
+          "2024-Q4": "5244591.0",
+          "2025-Q1": "5475032.0",
+          "2025-Q2": "5772687.0",
+          "2025-Q3": "5967718.0"
+        }
+      }
+    ],
+    "JP_all": [
+      {
+        "key": "Q.S.C.A.TO1.A.5J.A.JP.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "A",
+            "name": "All currencies (=D+F+U)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "JP",
+            "name": "Japan"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "4720725.883",
+          "2024-Q2": "4534231.419",
+          "2024-Q3": "4794565.664",
+          "2024-Q4": "4710702.065",
+          "2025-Q1": "4843127.494",
+          "2025-Q2": "4918248.064",
+          "2025-Q3": "5029670.156"
+        }
+      }
+    ],
+    "JP_dom": [
+      {
+        "key": "Q.S.C.A.TO1.D.5J.A.JP.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "D",
+            "name": "Domestic currency (ie currency of bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "JP",
+            "name": "Japan"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "977758.138",
+          "2024-Q2": "929101.629",
+          "2024-Q3": "1038405.229",
+          "2024-Q4": "963031.205",
+          "2025-Q1": "992364.252",
+          "2025-Q2": "1033637.491",
+          "2025-Q3": "1011564.839"
+        }
+      }
+    ],
+    "JP_fgn": [
+      {
+        "key": "Q.S.C.A.TO1.F.5J.A.JP.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "F",
+            "name": "Foreign currency (ie currencies foreign to bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "JP",
+            "name": "Japan"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "3742967.777",
+          "2024-Q2": "3605129.821",
+          "2024-Q3": "3756160.469",
+          "2024-Q4": "3747670.889",
+          "2025-Q1": "3850763.273",
+          "2025-Q2": "3884610.614",
+          "2025-Q3": "4018105.337"
+        }
+      }
+    ],
+    "DE_all": [
+      {
+        "key": "Q.S.C.A.TO1.A.5J.A.DE.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "A",
+            "name": "All currencies (=D+F+U)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "DE",
+            "name": "Germany"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "3637169.0",
+          "2024-Q2": "3584764.0",
+          "2024-Q3": "3692365.0",
+          "2024-Q4": "3930316.0",
+          "2025-Q1": "3875340.0",
+          "2025-Q2": "4228731.0",
+          "2025-Q3": "4380629.0"
+        }
+      }
+    ],
+    "DE_dom": [
+      {
+        "key": "Q.S.C.A.TO1.D.5J.A.DE.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "D",
+            "name": "Domestic currency (ie currency of bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "DE",
+            "name": "Germany"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "2472530.0",
+          "2024-Q2": "2419524.0",
+          "2024-Q3": "2522015.0",
+          "2024-Q4": "2681732.0",
+          "2025-Q1": "2650274.0",
+          "2025-Q2": "2975904.0",
+          "2025-Q3": "3123104.0"
+        }
+      }
+    ],
+    "DE_fgn": [
+      {
+        "key": "Q.S.C.A.TO1.F.5J.A.DE.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "F",
+            "name": "Foreign currency (ie currencies foreign to bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "DE",
+            "name": "Germany"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "1164585.0",
+          "2024-Q2": "1165171.0",
+          "2024-Q3": "1170291.0",
+          "2024-Q4": "1248531.0",
+          "2025-Q1": "1224996.0",
+          "2025-Q2": "1252764.0",
+          "2025-Q3": "1257474.0"
+        }
+      }
+    ],
+    "HK_all": [
+      {
+        "key": "Q.S.C.A.TO1.A.5J.A.HK.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "A",
+            "name": "All currencies (=D+F+U)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "HK",
+            "name": "Hong Kong SAR"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "1862200.3",
+          "2024-Q2": "1924588.307",
+          "2024-Q3": "2023259.781",
+          "2024-Q4": "2064416.722",
+          "2025-Q1": "2101614.433",
+          "2025-Q2": "2175061.762",
+          "2025-Q3": "2228926.817"
+        }
+      }
+    ],
+    "HK_dom": [
+      {
+        "key": "Q.S.C.A.TO1.D.5J.A.HK.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "D",
+            "name": "Domestic currency (ie currency of bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "HK",
+            "name": "Hong Kong SAR"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "169431.568",
+          "2024-Q2": "170415.236",
+          "2024-Q3": "166900.153",
+          "2024-Q4": "172928.395",
+          "2025-Q1": "179144.503",
+          "2025-Q2": "187484.287",
+          "2025-Q3": "205112.733"
+        }
+      }
+    ],
+    "HK_fgn": [
+      {
+        "key": "Q.S.C.A.TO1.F.5J.A.HK.A.5J.N",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_POSITION": {
+            "id": "C",
+            "name": "Total claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "L_DENOM": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CURR_TYPE": {
+            "id": "F",
+            "name": "Foreign currency (ie currencies foreign to bank location country)"
+          },
+          "L_PARENT_CTY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_REP_BANK_TYPE": {
+            "id": "A",
+            "name": "All reporting banks/institutions (domestic, foreign, consortium and unclassified)"
+          },
+          "L_REP_CTY": {
+            "id": "HK",
+            "name": "Hong Kong SAR"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          },
+          "L_POS_TYPE": {
+            "id": "N",
+            "name": "Cross-border"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "1692768.722",
+          "2024-Q2": "1754173.09",
+          "2024-Q3": "1856359.623",
+          "2024-Q4": "1891488.325",
+          "2025-Q1": "1922469.952",
+          "2025-Q2": "1987577.466",
+          "2025-Q3": "2023814.064"
+        }
+      }
+    ]
+  },
+  "summary": {
+    "fcy_mismatch_by_reporter": {
+      "GB": {
+        "all": 6668292.0,
+        "domestic": 700574.0,
+        "foreign": 5967718.0,
+        "fcy_pct": 89.49395137465486
+      },
+      "JP": {
+        "all": 5029670.156,
+        "domestic": 1011564.839,
+        "foreign": 4018105.337,
+        "fcy_pct": 79.88804856729455
+      },
+      "DE": {
+        "all": 4380629.0,
+        "domestic": 3123104.0,
+        "foreign": 1257474.0,
+        "fcy_pct": 28.70532975972172
+      },
+      "US": {
+        "all": 4239382.0,
+        "domestic": 3671154.0,
+        "foreign": 568228.0,
+        "fcy_pct": 13.403557405301056
+      },
+      "HK": {
+        "all": 2228926.817,
+        "domestic": 205112.733,
+        "foreign": 2023814.064,
+        "fcy_pct": 90.797690106485
+      }
+    }
+  }
+}

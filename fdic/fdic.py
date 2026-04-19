@@ -209,6 +209,9 @@ INSTITUTION_FIELDS = {
     "default": "CERT,NAME,STALP,CITY,ACTIVE,ASSET,DEP,NETINC,ROE,ROA,BKCLASS,DATEUPDT",
     "full": "CERT,NAME,STALP,STNAME,CITY,COUNTY,ADDRESS,ZIP,ACTIVE,ASSET,DEP,DEPDOM,NETINC,ROE,ROA,BKCLASS,CB,CBSA,OFFICES,OFFDOM,CHARTER_CLASS,REGAGENT,DATEUPDT,RISDATE,WEBADDR",
     "minimal": "CERT,NAME,STALP,ACTIVE,ASSET",
+    "holding_company": "CERT,NAME,STALP,ACTIVE,ASSET,NAMEHCR,RSSDHCR,STALPHCR,CITYHCR,PARCERT,CERTCONS,HCTONE,HCTMULT",
+    "regulatory": "CERT,NAME,STALP,ACTIVE,ASSET,BKCLASS,CB,CLCODE,FED,REGAGNT,CHRTAGNT,FDICDBS,FDICSUPV,OCCDIST,STCHRTR,FEDCHRTR,FORCHRTR,INSDIF,INSBIF,INSSAIF,CONSERVE,CLOSED,FAILED,MUTUAL,TRUST,SUBCHAPS",
+    "demographics": "CERT,NAME,STALP,STNAME,CITY,ASSET,CBSA,CBSA_NAME,MSA,MSA_NAME,CSA,METRO,MICRO,COUNTY,ZIP,MINORITY,MNRTYCDE,SPECGRP,SPECGRPDESC,CB,OFFICES,OFFDOM,NUMEMP",
 }
 
 LOCATION_FIELDS = {
@@ -326,6 +329,67 @@ FINANCIAL_FIELDS = {
     "ratios_credit": "CERT,REPDTE,NCLNLSR,NTLNLSR,P3ASSETR,P9ASSETR,NAASSETR,LNRESNCR,LNLSNTV,NPERF",
     "ratios_capital": "CERT,REPDTE,IDT1CER,RBCT1JR,RBCRWAJ,RBC1AAJ,EQV",
     "ratios_funding": "CERT,REPDTE,LNLSDEPR,INTEXPY,INTEXPYQ,INTINCY,INTINCYQ,ERNASTR,DEPDASTR",
+
+    # === UNREALIZED SECURITIES (HTM vs AFS amortized vs fair value) ===
+    # Implied unrealized loss = amortized cost - fair value
+    # SCAA vs SCAF = AFS portfolio, SCHA vs SCHF = HTM portfolio (this is the
+    # metric that blew up SVB - HTM bonds marked at amortized cost but with
+    # massive unrealized losses at fair value).
+    "unrealized_securities": "CERT,REPDTE,ASSET,EQTOT,SC,SCAA,SCAF,SCHA,SCHF,SCMV,SCMUNIAA,SCMUNIAF,SCMUNIHA,SCMUNIHF,SCASPNAF,SCASPNHA,SCSNHAA,SCSNHAF,SCHTMRES",
+    "securities_fair_value": "CERT,REPDTE,SC,SCAA,SCAF,SCHA,SCHF,SCMV,SCAFR,SCHAR,ASSET,EQTOT",
+
+    # === INTEREST RATE RISK (repricing gap across loans, deposits, securities) ===
+    # Combines maturity/repricing buckets from loans (LN*RS* / LNOT*),
+    # securities (SC*), and deposits (CD*) to assess interest rate sensitivity.
+    "interest_rate_risk": "CERT,REPDTE,ASSET,LNRS3LES,LNRS3T12,LNRS1T3,LNRS3T5,LNRS5T15,LNRSOV15,LNOT3LES,LNOT3T12,LNOT1T3,LNOT3T5,LNOT5T15,LNOTOV15,SC1LES,SCNM3LES,SCNM3T12,SCNM1T3,SCNM3T5,SCNM5T15,SCNMOV15,CD3LES,CD3LESS,CD3T12,CD3T12S,CD1T3,CD1T3S,CDOV3,CDOV3S",
+
+    # === COVID EMERGENCY PROGRAMS (PPP, MMLF) ===
+    # Paycheck Protection Program (PPP) balances, MMLF usage.
+    # Peaked 2020-2021; some balances still outstanding as of 2026.
+    "ppp_mmlf": "CERT,REPDTE,ASSET,PPPLNBAL,PPPLNNUM,PPPLNPLG,PPPLF1LS,PPPLFOV1,AVPPPPLG,MMLFBAL,AVMMLF",
+
+    # === INSTITUTIONAL METADATA AND HOLDING COMPANY ===
+    # Holding company lineage, regulator, specialty, de novo/minority flags.
+    # Use this to map bank subs to parent HC, identify new banks, etc.
+    "institution_profile": "CERT,REPDTE,ASSET,NAME,NAMEHCR,RSSDHCR,RSSDID,STALPHCR,CITYHCR,PARCERT,CERTCONS,HCTONE,HCTMULT,HCTNONE,NUMEMP,DENOVO,NEWINST,MINORITY,MNRTYCDE,SPECGRP,SPECGRPDESC,CB,BKCLASS,CLCODE,MUTUAL,TRUST,TRUSTPWR,FED,REGAGNT,SUBCHAPS,SASSER",
+    "supervisory": "CERT,REPDTE,BKCLASS,CB,CLCODE,FED,FEDDESC,REGAGNT,CHRTAGNT,FDICDBS,FDICDBSDESC,FDICSUPV,FDICSUPVDESC,OCCDIST,OCCDISTDESC,STCHRTR,FEDCHRTR,FORCHRTR,INSDIF,INSBIF,INSSAIF,INSAGNT2,INSFDIC,CONSERVE,CLOSED,FAILED,TRUST",
+
+    # === COMMUNITY BANK LEVERAGE RATIO (CBLR) ===
+    # Post-2020 simplified capital framework for qualifying community banks
+    # (< $10B assets, limited trading, limited off-B/S). CBLR replaces the
+    # full risk-based capital calculation with a single leverage ratio.
+    "cblr": "CERT,REPDTE,ASSET,AVASSETJ,EQTOT,CBLRIND,IDT1CER,RBC1AAJ,CB,BKCLASS",
+
+    # === MORTGAGE SERVICING AND REAL ESTATE ===
+    # Mortgage servicing assets (MSRs), loans held for sale, indebtedness on mortgages.
+    "mortgage_servicing": "CERT,REPDTE,ASSET,INTANMSR,INTANMSRR,MSRECE,MSRNRECE,MSRESFCL,LNSERV,LNLSSALE,LNREPP,LIPMTG,LIPNMTG,MTGLS",
+
+    # === FOREIGN OFFICES ===
+    # Foreign office deposits, loans, income, liabilities (for international banks).
+    "foreign_offices": "CERT,REPDTE,ASSET,ASSETFOR,LIABFOR,OFFFOR,DEPFOR,DEPIFOR,DEPNIFOR,EDEPFOR,CHBALFOR,CHUS,CHNUS,CHUSFBK,CHNUSFBK,LNCIFOR,LNREFOR,LNAGFOR,LNCONFOR,ILNFOR,UNINCFOR,TRFOR,OREOTHF,REPOPURF,REPOSLDF",
+
+    # === ASSET SIZE BUCKETS ===
+    # Flags (1/0) for various asset size tiers. Useful for cross-sectional
+    # distribution analysis and filtering by institution scale.
+    "size_buckets": "CERT,REPDTE,ASSET,SZ25,SZ25T50,SZ50T100,SZ100,SZ100T1B,SZ100T3,SZ100T5,SZ100MP,SZ1BP,SZ1BT3B,SZ1BT5B,SZ1BT10B,SZ3BT10B,SZ5BP,SZ10BP,SZ250BP,S10T250B,SZ300T5,SZ500T1B",
+
+    # === STAFF AND EMPLOYEES ===
+    # Number of employees, efficiency ratio, assets per employee.
+    "staff_size": "CERT,REPDTE,ASSET,NUMEMP,ESAL,ESALR,EEFFR,EEFFQR,NONIX",
+
+    # === OWNER-ORIGINATED CREDIT / SECURITIZATION EXPOSURE ===
+    # Banks that securitized their own loans (CI, credit card, HEL) retain
+    # specific risks tracked separately from third-party securitizations.
+    "own_securitizations": "CERT,REPDTE,OWNLNCI,OWNLNCRD,OWNLNHEL,OWNCRCI,OWNCRCRD,OWNCRHEL,OWNDRCI,OWNDRCRD,OWNDRHEL,OWNP3CI,OWNP3CRD,OWNP3HEL,OWNP9CI,OWNP9CRD,OWNP9HEL,OWNSCCI,OWNSCCRD,OWNSCHEL",
+
+    # === NON-PERFORMING ASSETS (composite) ===
+    # Non-performing assets ratio: 90+ PD + non-accrual loans + ORE.
+    "npa": "CERT,REPDTE,ASSET,NALNLS,P9ASSET,P9LNLS,ORE,NPERF,NPERFV,LNATRES,LNRESNCR,NCLNLS,NCLNLSR",
+
+    # === QUARTERLY CHARGE-OFFS AND RECOVERIES (run-rate) ===
+    # Quarterly (Q suffix) NCO/recovery rates across loan types for run-rate
+    # analysis rather than YTD cumulative.
+    "charge_offs_quarterly": "CERT,REPDTE,NTLNLSQ,NTLNLSQR,NTREQ,NTREQR,NTCIQ,NTCIQR,NTCONQ,NTCONQR,NTCRCDQ,NTCRCDQR,NTAGQ,NTAGQR,NTAUTOQ,NTAUTOQR,NTLSQ,NTLSQR,NTOTHQ,NTOTHQR,DRLNLSQ,DRLNLSQR,CRLNLSQ,CRLNLSQR",
 
     # === BACKWARD-COMPAT (original presets, keep names) ===
     "past_due": "CERT,REPDTE,P3ASSET,P9ASSET,NALNLS,P3RE,P9RE,P3CI,P9CI",
@@ -1217,6 +1281,535 @@ def cmd_economist_past_due_detail():
     _display_response(resp, f"past_due_cert{cert}")
 
 
+# ── Interest Rate Risk / Securities Stress recipes ───────────────────────────
+#
+# HTM/AFS unrealized loss analysis (the dynamic that blew up SVB in 2023),
+# repricing gap analysis, fair value marks on securities portfolios.
+
+def cmd_htm_stress():
+    """HTM securities unrealized loss screen.
+    SCHA = HTM at amortized cost (book), SCHF = HTM at fair value.
+    Unrealized loss = SCHA - SCHF (positive = underwater).
+    Ratio to equity reveals capital vulnerability."""
+    print("\n== HTM Unrealized Loss Screen ==")
+    min_assets = _prompt("Minimum assets ($000s, e.g. 10000000 = $10B)", "10000000")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND ASSET:[{min_assets} TO *]",
+        "fields": "CERT,REPDTE,ASSET,EQTOT,SC,SCHA,SCHF,SCAA,SCAF,SCMV,SCHTMRES,IDT1CER",
+        "sort_by": "SCHA",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"htm_stress_{repdte}")
+
+
+def cmd_afs_stress():
+    """AFS securities unrealized loss screen.
+    SCAA = AFS at amortized cost (book), SCAF = AFS at fair value.
+    AFS losses flow through AOCI (equity) but not regulatory capital for
+    most banks under opt-out rules (opt-in banks do recognize them).
+    Still signals interest rate sensitivity."""
+    print("\n== AFS Unrealized Loss Screen ==")
+    min_assets = _prompt("Minimum assets ($000s, e.g. 10000000 = $10B)", "10000000")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND ASSET:[{min_assets} TO *]",
+        "fields": "CERT,REPDTE,ASSET,EQTOT,SC,SCAA,SCAF,SCHA,SCHF,SCMV,EQCCOMPI,IDT1CER",
+        "sort_by": "SCAA",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"afs_stress_{repdte}")
+
+
+def cmd_securities_fair_value():
+    """Full securities portfolio fair value mark for one bank.
+    Time series of AFS and HTM amortized cost vs fair value, plus
+    a composite unrealized loss trajectory over N quarters."""
+    print("\n== Securities Fair Value Time Series ==")
+    cert = _prompt("CERT number")
+    if not cert:
+        return
+    quarters = int(_prompt("How many quarters", "20"))
+    resp = _get("financials", {
+        "filters": f"CERT:{cert}",
+        "fields": "CERT,REPDTE,ASSET,EQTOT,SC,SCAA,SCAF,SCHA,SCHF,SCMV,SCMUNIAA,SCMUNIAF,SCMUNIHA,SCMUNIHF,EQCCOMPI,SCHTMRES",
+        "sort_by": "REPDTE",
+        "sort_order": "DESC",
+        "limit": quarters,
+    })
+    _display_response(resp, f"securities_fv_cert{cert}")
+
+
+def cmd_interest_rate_risk():
+    """Repricing gap analysis for a single bank.
+    Combines loan repricing (LN*RS*, LNOT*), deposit maturity (CD*),
+    and securities maturity (SC*) buckets to assess interest rate
+    sensitivity across the balance sheet."""
+    print("\n== Interest Rate Risk (Repricing Gap) ==")
+    cert = _prompt("CERT number")
+    if not cert:
+        return
+    quarters = int(_prompt("How many quarters", "8"))
+    resp = _get("financials", {
+        "filters": f"CERT:{cert}",
+        "fields": FINANCIAL_FIELDS["interest_rate_risk"],
+        "sort_by": "REPDTE",
+        "sort_order": "DESC",
+        "limit": quarters,
+    })
+    _display_response(resp, f"interest_rate_risk_cert{cert}")
+
+
+# ── Holding Company / Institution Structure recipes ───────────────────────────
+#
+# FDIC data links bank subsidiaries to their holding companies via NAMEHCR
+# and RSSDHCR. Use these to roll up bank-level data to the HC level.
+
+def cmd_holding_company():
+    """Show holding company lineage for a CERT + all sibling banks under the same HC.
+    NAMEHCR = top-holder name, RSSDHCR = Fed's RSSD ID of the top-holder.
+    Helpful for understanding consolidated entity exposure (e.g. a HC with
+    multiple bank subs all contributing to the same risk envelope)."""
+    print("\n== Holding Company Lookup ==")
+    cert = _prompt("CERT number")
+    if not cert:
+        return
+
+    resp = _get("institutions", {
+        "filters": f"CERT:{cert}",
+        "fields": "CERT,NAME,STALP,NAMEHCR,RSSDHCR,STALPHCR,CITYHCR,PARCERT,CERTCONS",
+        "limit": 1,
+    })
+    rows, _ = _extract_rows(resp)
+    if not rows:
+        print(f"  No institution found with CERT {cert}")
+        return
+    rssd_hcr = rows[0].get("RSSDHCR")
+    name_hcr = rows[0].get("NAMEHCR") or ""
+    print(f"\n  Bank: {rows[0].get('NAME')} (CERT {cert})")
+    print(f"  Holding company: {name_hcr} (RSSD {rssd_hcr})")
+
+    if rssd_hcr:
+        sib = _get("institutions", {
+            "filters": f'RSSDHCR:{rssd_hcr} AND ACTIVE:1',
+            "fields": "CERT,NAME,STALP,CITY,ASSET,DEP,NETINC,BKCLASS,NAMEHCR",
+            "sort_by": "ASSET",
+            "sort_order": "DESC",
+            "limit": 50,
+        })
+        print(f"\n  Bank subsidiaries under HC RSSD {rssd_hcr}:")
+        _display_response(sib, f"hc_siblings_cert{cert}")
+
+
+def cmd_holding_company_roster():
+    """List all bank subsidiaries under a given holding company by name or RSSD ID."""
+    print("\n== Holding Company Roster ==")
+    hcr = _prompt("HC name (NAMEHCR, case-insensitive) or RSSD ID")
+    if not hcr:
+        return
+    if hcr.isdigit():
+        filt = f"RSSDHCR:{hcr}"
+    else:
+        filt = f'NAMEHCR:"{hcr.upper()}"'
+    filt += " AND ACTIVE:1"
+    resp = _get("institutions", {
+        "filters": filt,
+        "fields": "CERT,NAME,STALP,CITY,ASSET,DEP,NETINC,BKCLASS,NAMEHCR,RSSDHCR",
+        "sort_by": "ASSET",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"hc_roster_{hcr}")
+
+
+def cmd_new_banks():
+    """Recently chartered institutions (NEWINST=1 flag at most recent quarter).
+    These are new charters or recharters in the current reporting period."""
+    print("\n== Newly Chartered Institutions ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND NEWINST:1",
+        "fields": "CERT,REPDTE,NAME,STALP,ASSET,DEP,NEWINST,DENOVO,BKCLASS",
+        "sort_by": "ASSET",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"new_banks_{repdte}")
+
+
+def cmd_de_novo():
+    """De novo banks (DENOVO=1 flag) for a given reporting period.
+    Denotes a new institution that is not a recharter - true new bank formation."""
+    print("\n== De Novo Banks ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND DENOVO:1",
+        "fields": "CERT,REPDTE,NAME,STALP,ASSET,DEP,DENOVO,NEWINST,BKCLASS",
+        "sort_by": "ASSET",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"de_novo_{repdte}")
+
+
+def cmd_minority_banks():
+    """Minority Depository Institutions (MDIs) currently active.
+    MNRTYCDE classifies the minority type:
+      1=Black, 2=Asian American, 3=Chinese American, 4=Korean American,
+      5=Japanese American, 6=Indian/Arabic American, 7=Hispanic American,
+      8=Multi-racial American, 9=Native American."""
+    print("\n== Minority Depository Institutions ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND MINORITY:1",
+        "fields": "CERT,REPDTE,NAME,STALP,ASSET,DEP,NETINC,ROA,ROE,MINORITY,MNRTYCDE,CB",
+        "sort_by": "ASSET",
+        "sort_order": "DESC",
+        "limit": 200,
+    })
+    _display_response(resp, f"minority_banks_{repdte}")
+
+
+def cmd_structure_changes():
+    """Structure changes aggregated by CHANGECODE for a date range.
+    CHANGECODE maps to merger, acquisition, name change, charter conversion, etc.
+    Key codes: 110/120=acquisition, 211-224=merger, 310/320=consolidation,
+    420/430=relocation, 470=name change, 510+=branch events."""
+    print("\n== Structure Changes Aggregated ==")
+    start = _prompt("Start date YYYY-MM-DD", "2020-01-01")
+    end = _prompt("End date YYYY-MM-DD", "2025-12-31")
+    resp = _get("history", {
+        "filters": f'PROCDATE:["{start}" TO "{end}"]',
+        "fields": "INSTNAME,CERT,CHANGECODE,PROCDATE",
+        "agg_by": "CHANGECODE",
+        "agg_limit": 50,
+        "sort_by": "PROCDATE",
+        "sort_order": "DESC",
+        "limit": 1,
+    })
+    if resp:
+        meta = resp.get("meta", {})
+        print(f"  Total structure events in range: {meta.get('total', 'N/A'):,}")
+        _display_response(resp, f"structure_changes_{start}_{end}")
+
+
+def cmd_mergers_by_year():
+    """Merger and acquisition count by year.
+    Filters to CHANGECODE ranges indicating M&A and consolidations."""
+    print("\n== Mergers & Acquisitions by Year ==")
+    start_year = _prompt("Start year", "2000")
+    end_year = _prompt("End year", "2025")
+    resp = _get("history", {
+        "filters": f'PROCDATE:["{start_year}-01-01" TO "{end_year}-12-31"] AND CHANGECODE:[110 TO 399]',
+        "fields": "INSTNAME,CERT,CHANGECODE,PROCDATE",
+        "agg_by": "PROCDATE",
+        "agg_limit": 500,
+        "sort_by": "PROCDATE",
+        "sort_order": "DESC",
+        "limit": 1,
+    })
+    if resp:
+        meta = resp.get("meta", {})
+        print(f"  Total M&A events {start_year}-{end_year}: {meta.get('total', 'N/A'):,}")
+        _display_response(resp, f"mergers_{start_year}_{end_year}")
+
+
+# ── Specialty / Sector recipes ────────────────────────────────────────────────
+#
+# Banks are categorized by SPECGRP (1-9) based on asset concentration.
+# 1=International, 2=Agricultural, 3=Credit Card, 4=Commercial Lending,
+# 5=Mortgage Lending, 6=Consumer Lending, 7=Other Specialized, 8=All Other
+# <$1B, 9=All Other >$1B.
+
+def cmd_specialty_breakdown():
+    """Banking system breakdown by SPECGRP (specialty group).
+    Aggregates bank count and total assets by specialty category."""
+    print("\n== Specialty Group Breakdown ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte}",
+        "fields": "CERT,REPDTE,ASSET,SPECGRP,SPECGRPDESC",
+        "agg_by": "SPECGRP",
+        "agg_sum_fields": "ASSET",
+        "agg_limit": 15,
+        "sort_by": "ASSET",
+        "sort_order": "DESC",
+        "limit": 1,
+    })
+    _display_response(resp, f"specialty_breakdown_{repdte}")
+
+
+def cmd_ag_banks():
+    """Agricultural banks (SPECGRP=2): heavy ag + ag RE concentration.
+    Key metrics: ag loans vs capital, ag NCO rate, ag past-dues."""
+    print("\n== Agricultural Banks ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    min_assets = _prompt("Minimum assets ($000s)", "100000")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND SPECGRP:2 AND ASSET:[{min_assets} TO *]",
+        "fields": "CERT,REPDTE,ASSET,LNAG,LNREAG,LNLSNET,EQTOT,IDT1CER,NTAG,NTAGR,P9AG,NAAG,ROA,SPECGRPDESC",
+        "sort_by": "LNAG",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"ag_banks_{repdte}")
+
+
+def cmd_credit_card_banks():
+    """Credit card monoline banks (SPECGRP=3): high LNCRCD / loans."""
+    print("\n== Credit Card Banks ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND SPECGRP:3",
+        "fields": "CERT,REPDTE,ASSET,LNCRCD,LNCRCDRP,LNCON,LNLSNET,EQTOT,NTCRCD,NTCRCDR,P9CRCD,NACRCD,ROA,SPECGRPDESC",
+        "sort_by": "LNCRCD",
+        "sort_order": "DESC",
+        "limit": 50,
+    })
+    _display_response(resp, f"credit_card_banks_{repdte}")
+
+
+def cmd_trust_banks():
+    """Banks with significant fiduciary / trust activities.
+    Key signal: IFIDUC (trust fee income) + TFRA (total fiduciary assets).
+    Banks with trust powers hold billions in customer assets off-balance-sheet."""
+    print("\n== Trust Banks ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    min_ifiduc = _prompt("Minimum YTD fiduciary income ($000s)", "10000")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND IFIDUC:[{min_ifiduc} TO *]",
+        "fields": "CERT,REPDTE,ASSET,TFRA,NFAA,IFIDUC,TNI,TETOT,TRUST,TRUSTPWR",
+        "sort_by": "TFRA",
+        "sort_order": "DESC",
+        "limit": 50,
+    })
+    _display_response(resp, f"trust_banks_{repdte}")
+
+
+def cmd_mortgage_originators():
+    """Banks with material mortgage servicing portfolios.
+    Key field: INTANMSR (mortgage servicing assets) and LNSERV (servicing balance)."""
+    print("\n== Mortgage Originators (MSR holders) ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    min_msr = _prompt("Minimum MSR ($000s)", "10000")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND INTANMSR:[{min_msr} TO *]",
+        "fields": "CERT,REPDTE,ASSET,INTANMSR,INTANMSRR,LNSERV,LNLSSALE,LNREPP,MTGLS,LNRERES",
+        "sort_by": "INTANMSR",
+        "sort_order": "DESC",
+        "limit": 50,
+    })
+    _display_response(resp, f"mortgage_originators_{repdte}")
+
+
+# ── COVID Emergency Programs ──────────────────────────────────────────────────
+
+def cmd_ppp_exposure():
+    """PPP loan exposure across banks.
+    PPPLNBAL = outstanding PPP loan balance ($000s), PPPLNNUM = count of loans,
+    PPPLNPLG = pledged to PPP Lending Facility. Most PPP loans were forgiven
+    by end of 2023 but residual balances exist."""
+    print("\n== PPP Loan Exposure ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    min_ppp = _prompt("Minimum PPP balance ($000s)", "1000")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND PPPLNBAL:[{min_ppp} TO *]",
+        "fields": "CERT,REPDTE,ASSET,PPPLNBAL,PPPLNNUM,PPPLNPLG,PPPLF1LS,PPPLFOV1,AVPPPPLG,MMLFBAL",
+        "sort_by": "PPPLNBAL",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"ppp_exposure_{repdte}")
+
+
+# ── Capital / Regulatory recipes ──────────────────────────────────────────────
+
+def cmd_cblr_screen():
+    """Banks using the Community Bank Leverage Ratio framework (CBLRIND=1).
+    Post-2020 simplified capital rule: qualifying banks < $10B with limited
+    off-B/S and trading. CBLR replaces full risk-based capital calculation."""
+    print("\n== CBLR (Community Bank Leverage Ratio) Screen ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND CBLRIND:1",
+        "fields": "CERT,REPDTE,ASSET,AVASSETJ,EQTOT,CBLRIND,IDT1CER,RBC1AAJ,CB,BKCLASS,ROA",
+        "sort_by": "ASSET",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"cblr_screen_{repdte}")
+
+
+def cmd_asset_size_distribution():
+    """Asset size distribution: count and total assets by size bucket.
+    Uses the SZ* flags to count banks in each tier."""
+    print("\n== Asset Size Distribution ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    buckets = [
+        ("<$25M", "SZ25:1"),
+        ("$25M-$50M", "SZ25T50:1"),
+        ("$50M-$100M", "SZ50T100:1"),
+        ("$100M-$1B", "SZ100T1B:1"),
+        ("$1B-$10B", "SZ1BT10B:1"),
+        ("$10B+", "SZ10BP:1"),
+        ("$250B+", "SZ250BP:1"),
+    ]
+    print(f"\n  Report date: {repdte}")
+    results = []
+    for label, filt in buckets:
+        resp = _get("financials", {
+            "filters": f"REPDTE:{repdte} AND {filt}",
+            "fields": "CERT,ASSET",
+            "limit": 1,
+        })
+        if resp:
+            total_ct = resp.get("meta", {}).get("total", 0)
+            results.append({"size_bucket": label, "bank_count": total_ct})
+    _print_table(results)
+
+
+def cmd_foreign_exposure():
+    """Banks with largest foreign office exposure.
+    Ranks banks by ASSETFOR (foreign office assets) and shows foreign deposits,
+    foreign loans, and foreign-office earnings contribution."""
+    print("\n== Foreign Office Exposure ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    min_for = _prompt("Minimum foreign assets ($000s)", "100000")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND ASSETFOR:[{min_for} TO *]",
+        "fields": "CERT,REPDTE,ASSET,ASSETFOR,LIABFOR,DEPFOR,DEPIFOR,LNCIFOR,LNREFOR,ILNFOR,EDEPFOR",
+        "sort_by": "ASSETFOR",
+        "sort_order": "DESC",
+        "limit": 50,
+    })
+    _display_response(resp, f"foreign_exposure_{repdte}")
+
+
+def cmd_efficiency_distribution():
+    """Efficiency ratio (NONIX / (NIM + NONII)) distribution across large banks.
+    Lower is better. 50-60% = healthy, 70%+ = stressed/inefficient operations."""
+    print("\n== Efficiency Ratio Distribution ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    min_assets = _prompt("Minimum assets ($000s)", "1000000")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND ASSET:[{min_assets} TO *]",
+        "fields": "CERT,REPDTE,ASSET,EEFFR,EEFFQR,NONIX,NONII,NIM,ESAL,NUMEMP,ROA",
+        "sort_by": "EEFFR",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"efficiency_dist_{repdte}")
+
+
+def cmd_charge_off_waterfall():
+    """Detailed net charge-off waterfall for a bank by loan category.
+    Shows NCOs broken down by RE (with sub-types), C&I, consumer, credit card,
+    ag, auto, leases, other - both YTD and quarterly rates."""
+    print("\n== Charge-Off Waterfall ==")
+    cert = _prompt("CERT number")
+    if not cert:
+        return
+    quarters = int(_prompt("How many quarters", "8"))
+    resp = _get("financials", {
+        "filters": f"CERT:{cert}",
+        "fields": "CERT,REPDTE,NTLNLS,NTLNLSR,NTRE,NTREAG,NTRECONS,NTREMULT,NTRENRES,NTRERES,NTRELOC,NTCI,NTCON,NTCRCD,NTAG,NTAUTO,NTLS,NTOTHER,NTLNLSQ,NTLNLSQR",
+        "sort_by": "REPDTE",
+        "sort_order": "DESC",
+        "limit": quarters,
+    })
+    _display_response(resp, f"charge_off_waterfall_cert{cert}")
+
+
+def cmd_npf_screen():
+    """Non-performing asset ratio screen.
+    NPA = 90+ past-due + non-accrual + ORE (foreclosed properties).
+    High NPA ratio = bank health stress signal."""
+    print("\n== Non-Performing Asset Screen ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    min_assets = _prompt("Minimum assets ($000s)", "1000000")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte} AND ASSET:[{min_assets} TO *]",
+        "fields": "CERT,REPDTE,ASSET,NALNLS,P9ASSET,P9LNLS,ORE,NPERF,NPERFV,LNATRES,LNRESNCR,NCLNLS,NCLNLSR",
+        "sort_by": "NPERF",
+        "sort_order": "DESC",
+        "limit": 100,
+    })
+    _display_response(resp, f"npf_screen_{repdte}")
+
+
+def cmd_fed_district_banks():
+    """Banks by Federal Reserve district.
+    Fed districts: 1=Boston, 2=NY, 3=Philadelphia, 4=Cleveland, 5=Richmond,
+    6=Atlanta, 7=Chicago, 8=St. Louis, 9=Minneapolis, 10=KC, 11=Dallas, 12=SF."""
+    print("\n== Federal Reserve District Breakdown ==")
+    repdte = _prompt("Report date YYYYMMDD", "20251231")
+    resp = _get("financials", {
+        "filters": f"REPDTE:{repdte}",
+        "fields": "CERT,REPDTE,ASSET,FED,FEDDESC",
+        "agg_by": "FED",
+        "agg_sum_fields": "ASSET",
+        "agg_limit": 15,
+        "sort_by": "ASSET",
+        "sort_order": "DESC",
+        "limit": 1,
+    })
+    _display_response(resp, f"fed_district_{repdte}")
+
+
+def cmd_bank_snapshot():
+    """Comprehensive snapshot of a bank across 15+ dimensions.
+    Combines: identification, balance sheet, income, deposits, loans, credit quality,
+    capital, CRE, securities (incl. HTM unrealized), derivatives, holding company."""
+    print("\n== Bank Snapshot (Comprehensive Profile) ==")
+    cert = _prompt("CERT number")
+    if not cert:
+        return
+    repdte = _prompt("Report date YYYYMMDD (empty for latest)", "")
+
+    if not repdte:
+        latest = _get("financials", {
+            "filters": f"CERT:{cert}",
+            "fields": "REPDTE",
+            "sort_by": "REPDTE",
+            "sort_order": "DESC",
+            "limit": 1,
+        })
+        rows, _ = _extract_rows(latest)
+        if not rows:
+            print(f"  No financials found for CERT {cert}")
+            return
+        repdte = str(rows[0].get("REPDTE"))
+
+    print(f"\n  CERT: {cert}, Report Date: {repdte}")
+
+    sections = [
+        ("Institution Profile", FINANCIAL_FIELDS["institution_profile"]),
+        ("Balance Sheet", FINANCIAL_FIELDS["balance_sheet"]),
+        ("Income Statement", FINANCIAL_FIELDS["income"]),
+        ("Deposits", FINANCIAL_FIELDS["deposits_detail"]),
+        ("Loans", FINANCIAL_FIELDS["loans"]),
+        ("Credit Quality", FINANCIAL_FIELDS["credit_quality"]),
+        ("Capital (Basel III)", FINANCIAL_FIELDS["capital_basel"]),
+        ("CRE Concentration", FINANCIAL_FIELDS["cre"]),
+        ("Securities (incl. unrealized)", FINANCIAL_FIELDS["unrealized_securities"]),
+        ("Derivatives", FINANCIAL_FIELDS["derivatives"]),
+        ("Key Ratios", FINANCIAL_FIELDS["ratios"]),
+    ]
+
+    for label, fields in sections:
+        resp = _get("financials", {
+            "filters": f"CERT:{cert} AND REPDTE:{repdte}",
+            "fields": fields,
+            "limit": 1,
+        })
+        rows, _ = _extract_rows(resp)
+        if rows:
+            print(f"\n  === {label} ===")
+            _print_table(rows)
+
+
 def cmd_raw_query():
     """Execute a fully custom raw API call."""
     print("\n== Raw API Query ==")
@@ -1297,6 +1890,31 @@ COMMAND_MAP = {
     "63": cmd_economist_securities_portfolio,
     "64": cmd_economist_peer_comparison,
     "65": cmd_economist_past_due_detail,
+    "70": cmd_htm_stress,
+    "71": cmd_afs_stress,
+    "72": cmd_securities_fair_value,
+    "73": cmd_interest_rate_risk,
+    "74": cmd_cblr_screen,
+    "75": cmd_npf_screen,
+    "76": cmd_charge_off_waterfall,
+    "77": cmd_efficiency_distribution,
+    "78": cmd_foreign_exposure,
+    "79": cmd_asset_size_distribution,
+    "80": cmd_holding_company,
+    "81": cmd_holding_company_roster,
+    "82": cmd_new_banks,
+    "83": cmd_de_novo,
+    "84": cmd_minority_banks,
+    "85": cmd_structure_changes,
+    "86": cmd_mergers_by_year,
+    "87": cmd_fed_district_banks,
+    "88": cmd_specialty_breakdown,
+    "89": cmd_ag_banks,
+    "92": cmd_credit_card_banks,
+    "93": cmd_trust_banks,
+    "94": cmd_mortgage_originators,
+    "95": cmd_ppp_exposure,
+    "96": cmd_bank_snapshot,
     "90": cmd_raw_query,
     "91": cmd_field_catalog,
 }
@@ -1351,6 +1969,37 @@ def interactive_loop():
         print("    63. Securities portfolio composition")
         print("    64. Peer comparison (any preset)")
         print("    65. Past-due & non-accrual detail")
+        print()
+        print("  RATE RISK / CAPITAL / CREDIT DEEP DIVE:")
+        print("    70. HTM unrealized loss screen (SVB-style rate risk)")
+        print("    71. AFS unrealized loss screen (AOCI hit)")
+        print("    72. Securities fair value time series (single bank)")
+        print("    73. Interest rate risk (repricing gap)")
+        print("    74. CBLR (Community Bank Leverage Ratio) screen")
+        print("    75. Non-performing asset ratio screen")
+        print("    76. Charge-off waterfall (by loan type)")
+        print("    77. Efficiency ratio distribution")
+        print("    78. Foreign office exposure")
+        print("    79. Asset size distribution (system-wide)")
+        print()
+        print("  INSTITUTIONAL STRUCTURE / DEMOGRAPHICS:")
+        print("    80. Holding company lookup (CERT -> HC + siblings)")
+        print("    81. Holding company roster (all subs under HC)")
+        print("    82. Newly chartered banks (NEWINST=1)")
+        print("    83. De novo banks (DENOVO=1)")
+        print("    84. Minority Depository Institutions")
+        print("    85. Structure changes (aggregated by CHANGECODE)")
+        print("    86. Mergers & acquisitions by year")
+        print("    87. Fed district breakdown")
+        print()
+        print("  SPECIALTY / SECTOR:")
+        print("    88. Specialty group breakdown (SPECGRP)")
+        print("    89. Agricultural banks")
+        print("    92. Credit card monoline banks")
+        print("    93. Trust banks (fiduciary income)")
+        print("    94. Mortgage originators (MSR holders)")
+        print("    95. PPP loan exposure")
+        print("    96. Bank snapshot (comprehensive 10-section profile)")
         print()
         print("  TOOLS:")
         print("    90. Raw query (fully custom)")
@@ -1549,6 +2198,124 @@ def build_argparse():
     p = sub.add_parser("past-due-detail", help="Past-due and non-accrual detail")
     p.add_argument("--cert", required=True)
     p.add_argument("--quarters", type=int, default=12)
+    p.add_argument("--json", action="store_true")
+
+    # Rate risk / capital / credit
+    p = sub.add_parser("htm-stress", help="HTM securities unrealized loss screen")
+    p.add_argument("--min-assets", type=int, default=10000000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("afs-stress", help="AFS securities unrealized loss screen")
+    p.add_argument("--min-assets", type=int, default=10000000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("securities-fair-value", help="Securities fair value time series")
+    p.add_argument("--cert", required=True)
+    p.add_argument("--quarters", type=int, default=20)
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("interest-rate-risk", help="Repricing gap analysis (loans, deposits, securities)")
+    p.add_argument("--cert", required=True)
+    p.add_argument("--quarters", type=int, default=8)
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("cblr-screen", help="Banks using Community Bank Leverage Ratio")
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("npf-screen", help="Non-performing asset ratio screen")
+    p.add_argument("--min-assets", type=int, default=1000000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("charge-off-waterfall", help="NCO waterfall for a bank by loan type")
+    p.add_argument("--cert", required=True)
+    p.add_argument("--quarters", type=int, default=8)
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("efficiency-distribution", help="Efficiency ratio distribution")
+    p.add_argument("--min-assets", type=int, default=1000000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("foreign-exposure", help="Banks with foreign office assets")
+    p.add_argument("--min-foreign", type=int, default=100000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("asset-size-distribution", help="Bank count by asset size bucket")
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    # Holding company / structure / demographics
+    p = sub.add_parser("holding-company", help="HC lookup for a CERT + bank siblings")
+    p.add_argument("--cert", required=True)
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("holding-company-roster", help="All banks under a holding company")
+    p.add_argument("--hcr", required=True, help="HC name (NAMEHCR) or RSSD ID")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("new-banks", help="Newly chartered institutions")
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("de-novo", help="De novo banks (not recharters)")
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("minority-banks", help="Minority Depository Institutions")
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("structure-changes", help="Aggregated structure events by CHANGECODE")
+    p.add_argument("--start", default="2020-01-01")
+    p.add_argument("--end", default="2025-12-31")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("mergers-by-year", help="M&A aggregates by year")
+    p.add_argument("--start-year", default="2000")
+    p.add_argument("--end-year", default="2025")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("fed-district-banks", help="Banks by Federal Reserve district")
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    # Specialty
+    p = sub.add_parser("specialty-breakdown", help="Specialty group (SPECGRP) breakdown")
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("ag-banks", help="Agricultural banks (SPECGRP=2)")
+    p.add_argument("--min-assets", type=int, default=100000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("credit-card-banks", help="Credit card banks (SPECGRP=3)")
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("trust-banks", help="Banks with significant trust activity")
+    p.add_argument("--min-ifiduc", type=int, default=10000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("mortgage-originators", help="Banks with material MSR")
+    p.add_argument("--min-msr", type=int, default=10000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("ppp-exposure", help="PPP loan balance exposure")
+    p.add_argument("--min-ppp", type=int, default=1000)
+    p.add_argument("--repdte", default="20251231")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("bank-snapshot", help="Comprehensive multi-section profile for a bank")
+    p.add_argument("--cert", required=True)
+    p.add_argument("--repdte", default="", help="YYYYMMDD, empty for latest")
     p.add_argument("--json", action="store_true")
 
     sub.add_parser("field-catalog", help="Show field presets for all endpoints")
@@ -1900,6 +2667,316 @@ def run_noninteractive(args):
             "sort_by": "REPDTE", "sort_order": "DESC", "limit": args.quarters,
         })
         _ni_output(resp, args, f"past_due_{args.cert}")
+
+    # Rate risk / securities stress
+    elif cmd == "htm-stress":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND ASSET:[{args.min_assets} TO *]",
+            "fields": "CERT,REPDTE,ASSET,EQTOT,SC,SCHA,SCHF,SCAA,SCAF,SCMV,SCHTMRES,IDT1CER",
+            "sort_by": "SCHA", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"htm_stress_{args.repdte}")
+
+    elif cmd == "afs-stress":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND ASSET:[{args.min_assets} TO *]",
+            "fields": "CERT,REPDTE,ASSET,EQTOT,SC,SCAA,SCAF,SCHA,SCHF,SCMV,EQCCOMPI,IDT1CER",
+            "sort_by": "SCAA", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"afs_stress_{args.repdte}")
+
+    elif cmd == "securities-fair-value":
+        resp = _get("financials", {
+            "filters": f"CERT:{args.cert}",
+            "fields": FINANCIAL_FIELDS["unrealized_securities"],
+            "sort_by": "REPDTE", "sort_order": "DESC", "limit": args.quarters,
+        })
+        _ni_output(resp, args, f"securities_fv_{args.cert}")
+
+    elif cmd == "interest-rate-risk":
+        resp = _get("financials", {
+            "filters": f"CERT:{args.cert}",
+            "fields": FINANCIAL_FIELDS["interest_rate_risk"],
+            "sort_by": "REPDTE", "sort_order": "DESC", "limit": args.quarters,
+        })
+        _ni_output(resp, args, f"interest_rate_risk_{args.cert}")
+
+    elif cmd == "cblr-screen":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND CBLRIND:1",
+            "fields": "CERT,REPDTE,ASSET,AVASSETJ,EQTOT,CBLRIND,IDT1CER,RBC1AAJ,CB,BKCLASS,ROA",
+            "sort_by": "ASSET", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"cblr_screen_{args.repdte}")
+
+    elif cmd == "npf-screen":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND ASSET:[{args.min_assets} TO *]",
+            "fields": "CERT,REPDTE,ASSET,NALNLS,P9ASSET,P9LNLS,ORE,NPERF,NPERFV,LNATRES,LNRESNCR,NCLNLS,NCLNLSR",
+            "sort_by": "NPERF", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"npf_screen_{args.repdte}")
+
+    elif cmd == "charge-off-waterfall":
+        resp = _get("financials", {
+            "filters": f"CERT:{args.cert}",
+            "fields": "CERT,REPDTE,NTLNLS,NTLNLSR,NTRE,NTREAG,NTRECONS,NTREMULT,NTRENRES,NTRERES,NTRELOC,NTCI,NTCON,NTCRCD,NTAG,NTAUTO,NTLS,NTOTHER,NTLNLSQ,NTLNLSQR",
+            "sort_by": "REPDTE", "sort_order": "DESC", "limit": args.quarters,
+        })
+        _ni_output(resp, args, f"charge_off_waterfall_{args.cert}")
+
+    elif cmd == "efficiency-distribution":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND ASSET:[{args.min_assets} TO *]",
+            "fields": "CERT,REPDTE,ASSET,EEFFR,EEFFQR,NONIX,NONII,NIM,ESAL,NUMEMP,ROA",
+            "sort_by": "EEFFR", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"efficiency_dist_{args.repdte}")
+
+    elif cmd == "foreign-exposure":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND ASSETFOR:[{args.min_foreign} TO *]",
+            "fields": "CERT,REPDTE,ASSET,ASSETFOR,LIABFOR,DEPFOR,DEPIFOR,LNCIFOR,LNREFOR,ILNFOR,EDEPFOR",
+            "sort_by": "ASSETFOR", "sort_order": "DESC", "limit": 50,
+        })
+        _ni_output(resp, args, f"foreign_exposure_{args.repdte}")
+
+    elif cmd == "asset-size-distribution":
+        buckets = [
+            ("<$25M", "SZ25:1"),
+            ("$25M-$50M", "SZ25T50:1"),
+            ("$50M-$100M", "SZ50T100:1"),
+            ("$100M-$1B", "SZ100T1B:1"),
+            ("$1B-$10B", "SZ1BT10B:1"),
+            ("$10B+", "SZ10BP:1"),
+            ("$250B+", "SZ250BP:1"),
+        ]
+        results = []
+        for label, filt in buckets:
+            resp = _get("financials", {
+                "filters": f"REPDTE:{args.repdte} AND {filt}",
+                "fields": "CERT,ASSET",
+                "limit": 1,
+            })
+            if resp:
+                total_ct = resp.get("meta", {}).get("total", 0)
+                results.append({"size_bucket": label, "bank_count": total_ct})
+        if getattr(args, "json", False):
+            print(json.dumps({"repdte": args.repdte, "distribution": results}, indent=2))
+        else:
+            print(f"\n  Asset size distribution for REPDTE={args.repdte}")
+            _print_table(results)
+
+    # Holding company / structure
+    elif cmd == "holding-company":
+        resp = _get("institutions", {
+            "filters": f"CERT:{args.cert}",
+            "fields": "CERT,NAME,STALP,NAMEHCR,RSSDHCR,STALPHCR,CITYHCR,PARCERT,CERTCONS",
+            "limit": 1,
+        })
+        rows, _ = _extract_rows(resp)
+        if not rows:
+            if getattr(args, "json", False):
+                print(json.dumps({"error": f"no institution found for CERT {args.cert}"}))
+            else:
+                print(f"No institution found for CERT {args.cert}")
+            return
+        rssd_hcr = rows[0].get("RSSDHCR")
+        name_hcr = rows[0].get("NAMEHCR") or ""
+        siblings_resp = None
+        if rssd_hcr:
+            siblings_resp = _get("institutions", {
+                "filters": f'RSSDHCR:{rssd_hcr} AND ACTIVE:1',
+                "fields": "CERT,NAME,STALP,CITY,ASSET,DEP,NETINC,BKCLASS,NAMEHCR",
+                "sort_by": "ASSET", "sort_order": "DESC", "limit": 50,
+            })
+        if getattr(args, "json", False):
+            out = {"lookup": rows[0], "siblings": siblings_resp or {}}
+            print(json.dumps(out, indent=2, default=str))
+        else:
+            print(f"\nBank: {rows[0].get('NAME')} (CERT {args.cert})")
+            print(f"Holding company: {name_hcr} (RSSD {rssd_hcr})\n")
+            if siblings_resp:
+                sib_rows, _ = _extract_rows(siblings_resp)
+                print(f"Bank subsidiaries under HC RSSD {rssd_hcr}:")
+                _print_table(sib_rows)
+
+    elif cmd == "holding-company-roster":
+        if args.hcr.isdigit():
+            filt = f"RSSDHCR:{args.hcr}"
+        else:
+            filt = f'NAMEHCR:"{args.hcr.upper()}"'
+        filt += " AND ACTIVE:1"
+        resp = _get("institutions", {
+            "filters": filt,
+            "fields": "CERT,NAME,STALP,CITY,ASSET,DEP,NETINC,BKCLASS,NAMEHCR,RSSDHCR",
+            "sort_by": "ASSET", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"hc_roster_{args.hcr}")
+
+    elif cmd == "new-banks":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND NEWINST:1",
+            "fields": "CERT,REPDTE,NAME,STALP,ASSET,DEP,NEWINST,DENOVO,BKCLASS",
+            "sort_by": "ASSET", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"new_banks_{args.repdte}")
+
+    elif cmd == "de-novo":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND DENOVO:1",
+            "fields": "CERT,REPDTE,NAME,STALP,ASSET,DEP,DENOVO,NEWINST,BKCLASS",
+            "sort_by": "ASSET", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"de_novo_{args.repdte}")
+
+    elif cmd == "minority-banks":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND MINORITY:1",
+            "fields": "CERT,REPDTE,NAME,STALP,ASSET,DEP,NETINC,ROA,ROE,MINORITY,MNRTYCDE,CB",
+            "sort_by": "ASSET", "sort_order": "DESC", "limit": 200,
+        })
+        _ni_output(resp, args, f"minority_banks_{args.repdte}")
+
+    elif cmd == "structure-changes":
+        resp = _get("history", {
+            "filters": f'PROCDATE:["{args.start}" TO "{args.end}"]',
+            "fields": "INSTNAME,CERT,CHANGECODE,PROCDATE",
+            "agg_by": "CHANGECODE", "agg_limit": 50,
+            "sort_by": "PROCDATE", "sort_order": "DESC", "limit": 1,
+        })
+        if getattr(args, "json", False):
+            print(json.dumps(resp, indent=2, default=str))
+        elif resp:
+            meta = resp.get("meta", {})
+            print(f"Total structure events in range: {meta.get('total', 'N/A'):,}")
+            print(json.dumps(resp, indent=2, default=str)[:5000])
+
+    elif cmd == "mergers-by-year":
+        resp = _get("history", {
+            "filters": f'PROCDATE:["{args.start_year}-01-01" TO "{args.end_year}-12-31"] AND CHANGECODE:[110 TO 399]',
+            "fields": "INSTNAME,CERT,CHANGECODE,PROCDATE",
+            "agg_by": "PROCDATE", "agg_limit": 500,
+            "sort_by": "PROCDATE", "sort_order": "DESC", "limit": 1,
+        })
+        if getattr(args, "json", False):
+            print(json.dumps(resp, indent=2, default=str))
+        elif resp:
+            meta = resp.get("meta", {})
+            print(f"Total M&A events: {meta.get('total', 'N/A'):,}")
+            print(json.dumps(resp, indent=2, default=str)[:5000])
+
+    elif cmd == "fed-district-banks":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte}",
+            "fields": "CERT,REPDTE,ASSET,FED,FEDDESC",
+            "agg_by": "FED", "agg_sum_fields": "ASSET",
+            "agg_limit": 15, "sort_by": "ASSET", "sort_order": "DESC", "limit": 1,
+        })
+        if getattr(args, "json", False):
+            print(json.dumps(resp, indent=2, default=str))
+        elif resp:
+            print(json.dumps(resp, indent=2, default=str)[:5000])
+
+    # Specialty
+    elif cmd == "specialty-breakdown":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte}",
+            "fields": "CERT,REPDTE,ASSET,SPECGRP,SPECGRPDESC",
+            "agg_by": "SPECGRP", "agg_sum_fields": "ASSET",
+            "agg_limit": 15, "sort_by": "ASSET", "sort_order": "DESC", "limit": 1,
+        })
+        if getattr(args, "json", False):
+            print(json.dumps(resp, indent=2, default=str))
+        elif resp:
+            print(json.dumps(resp, indent=2, default=str)[:5000])
+
+    elif cmd == "ag-banks":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND SPECGRP:2 AND ASSET:[{args.min_assets} TO *]",
+            "fields": "CERT,REPDTE,ASSET,LNAG,LNREAG,LNLSNET,EQTOT,IDT1CER,NTAG,NTAGR,P9AG,NAAG,ROA,SPECGRPDESC",
+            "sort_by": "LNAG", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"ag_banks_{args.repdte}")
+
+    elif cmd == "credit-card-banks":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND SPECGRP:3",
+            "fields": "CERT,REPDTE,ASSET,LNCRCD,LNCRCDRP,LNCON,LNLSNET,EQTOT,NTCRCD,NTCRCDR,P9CRCD,NACRCD,ROA,SPECGRPDESC",
+            "sort_by": "LNCRCD", "sort_order": "DESC", "limit": 50,
+        })
+        _ni_output(resp, args, f"credit_card_banks_{args.repdte}")
+
+    elif cmd == "trust-banks":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND IFIDUC:[{args.min_ifiduc} TO *]",
+            "fields": "CERT,REPDTE,ASSET,TFRA,NFAA,IFIDUC,TNI,TETOT,TRUST,TRUSTPWR",
+            "sort_by": "TFRA", "sort_order": "DESC", "limit": 50,
+        })
+        _ni_output(resp, args, f"trust_banks_{args.repdte}")
+
+    elif cmd == "mortgage-originators":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND INTANMSR:[{args.min_msr} TO *]",
+            "fields": "CERT,REPDTE,ASSET,INTANMSR,INTANMSRR,LNSERV,LNLSSALE,LNREPP,MTGLS,LNRERES",
+            "sort_by": "INTANMSR", "sort_order": "DESC", "limit": 50,
+        })
+        _ni_output(resp, args, f"mortgage_originators_{args.repdte}")
+
+    elif cmd == "ppp-exposure":
+        resp = _get("financials", {
+            "filters": f"REPDTE:{args.repdte} AND PPPLNBAL:[{args.min_ppp} TO *]",
+            "fields": "CERT,REPDTE,ASSET,PPPLNBAL,PPPLNNUM,PPPLNPLG,PPPLF1LS,PPPLFOV1,AVPPPPLG,MMLFBAL",
+            "sort_by": "PPPLNBAL", "sort_order": "DESC", "limit": 100,
+        })
+        _ni_output(resp, args, f"ppp_exposure_{args.repdte}")
+
+    elif cmd == "bank-snapshot":
+        repdte = args.repdte
+        if not repdte:
+            latest = _get("financials", {
+                "filters": f"CERT:{args.cert}",
+                "fields": "REPDTE",
+                "sort_by": "REPDTE", "sort_order": "DESC", "limit": 1,
+            })
+            rows, _ = _extract_rows(latest)
+            if not rows:
+                print(f"No financials found for CERT {args.cert}")
+                return
+            repdte = str(rows[0].get("REPDTE"))
+
+        sections = [
+            ("institution_profile", FINANCIAL_FIELDS["institution_profile"]),
+            ("balance_sheet", FINANCIAL_FIELDS["balance_sheet"]),
+            ("income", FINANCIAL_FIELDS["income"]),
+            ("deposits_detail", FINANCIAL_FIELDS["deposits_detail"]),
+            ("loans", FINANCIAL_FIELDS["loans"]),
+            ("credit_quality", FINANCIAL_FIELDS["credit_quality"]),
+            ("capital_basel", FINANCIAL_FIELDS["capital_basel"]),
+            ("cre", FINANCIAL_FIELDS["cre"]),
+            ("unrealized_securities", FINANCIAL_FIELDS["unrealized_securities"]),
+            ("derivatives", FINANCIAL_FIELDS["derivatives"]),
+            ("ratios", FINANCIAL_FIELDS["ratios"]),
+        ]
+
+        snapshot = {"cert": args.cert, "repdte": repdte, "sections": {}}
+        for key, fields in sections:
+            resp = _get("financials", {
+                "filters": f"CERT:{args.cert} AND REPDTE:{repdte}",
+                "fields": fields, "limit": 1,
+            })
+            rows, _ = _extract_rows(resp)
+            snapshot["sections"][key] = rows[0] if rows else {}
+
+        if getattr(args, "json", False):
+            print(json.dumps(snapshot, indent=2, default=str))
+        else:
+            print(f"\n=== Bank Snapshot: CERT {args.cert}, REPDTE {repdte} ===\n")
+            for key, _ in sections:
+                print(f"\n--- {key} ---")
+                row = snapshot["sections"].get(key)
+                if row:
+                    _print_table([row])
 
     elif cmd == "field-catalog":
         for ep, cat in FIELD_CATALOGS.items():

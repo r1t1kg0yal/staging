@@ -1,0 +1,222 @@
+{
+  "generated_at": "2026-04-19T00:21:06.154453+00:00",
+  "reporter": "US",
+  "basis": "F",
+  "bank_type": "4R",
+  "start_period": "2024",
+  "series": {
+    "mat_A": [
+      {
+        "key": "Q.S.US.4R.F.I.A.A.TO1.A.5J",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_REP_CTY": {
+            "id": "US",
+            "name": "United States"
+          },
+          "CBS_BANK_TYPE": {
+            "id": "4R",
+            "name": "Domestic banks(4B), excl. domestic positions"
+          },
+          "CBS_BASIS": {
+            "id": "F",
+            "name": "Immediate counterparty basis"
+          },
+          "L_POSITION": {
+            "id": "I",
+            "name": "International claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "REM_MATURITY": {
+            "id": "A",
+            "name": "Total (all maturities)"
+          },
+          "CURR_TYPE_BOOK": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "2951959.0",
+          "2024-Q2": "2930168.0",
+          "2024-Q3": "2934251.0",
+          "2024-Q4": "2565165.0",
+          "2025-Q1": "3246713.0",
+          "2025-Q2": "3433062.0",
+          "2025-Q3": "3491452.0"
+        }
+      }
+    ],
+    "mat_U": [
+      {
+        "key": "Q.S.US.4R.F.I.A.U.TO1.A.5J",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_REP_CTY": {
+            "id": "US",
+            "name": "United States"
+          },
+          "CBS_BANK_TYPE": {
+            "id": "4R",
+            "name": "Domestic banks(4B), excl. domestic positions"
+          },
+          "CBS_BASIS": {
+            "id": "F",
+            "name": "Immediate counterparty basis"
+          },
+          "L_POSITION": {
+            "id": "I",
+            "name": "International claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "REM_MATURITY": {
+            "id": "U",
+            "name": "Up to and including 1 year"
+          },
+          "CURR_TYPE_BOOK": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "2256037.0",
+          "2024-Q2": "2231600.0",
+          "2024-Q3": "2218125.0",
+          "2024-Q4": "1869317.0",
+          "2025-Q1": "2517447.0",
+          "2025-Q2": "2571629.0",
+          "2025-Q3": "2610389.0"
+        }
+      }
+    ],
+    "mat_M": [],
+    "mat_N": [
+      {
+        "key": "Q.S.US.4R.F.I.A.N.TO1.A.5J",
+        "dimensions": {
+          "FREQ": {
+            "id": "Q",
+            "name": "Quarterly"
+          },
+          "L_MEASURE": {
+            "id": "S",
+            "name": "Amounts outstanding / Stocks"
+          },
+          "L_REP_CTY": {
+            "id": "US",
+            "name": "United States"
+          },
+          "CBS_BANK_TYPE": {
+            "id": "4R",
+            "name": "Domestic banks(4B), excl. domestic positions"
+          },
+          "CBS_BASIS": {
+            "id": "F",
+            "name": "Immediate counterparty basis"
+          },
+          "L_POSITION": {
+            "id": "I",
+            "name": "International claims"
+          },
+          "L_INSTR": {
+            "id": "A",
+            "name": "All instruments"
+          },
+          "REM_MATURITY": {
+            "id": "N",
+            "name": "Over 2 years"
+          },
+          "CURR_TYPE_BOOK": {
+            "id": "TO1",
+            "name": "All currencies"
+          },
+          "L_CP_SECTOR": {
+            "id": "A",
+            "name": "All sectors"
+          },
+          "L_CP_COUNTRY": {
+            "id": "5J",
+            "name": "All countries"
+          }
+        },
+        "attributes": {
+          "COLLECTION": "End of period",
+          "ORG_VISIBILITY": "Public",
+          "AVAILABILITY": "Free, last value not to be published prior to embargo date"
+        },
+        "observations": {
+          "2024-Q1": "695922.0",
+          "2024-Q2": "698568.0",
+          "2024-Q3": "716126.0",
+          "2024-Q4": "695848.0",
+          "2025-Q1": "729266.0",
+          "2025-Q2": "861433.0",
+          "2025-Q3": "881063.0"
+        }
+      }
+    ]
+  },
+  "summary": {
+    "A": {
+      "value": 3491452.0,
+      "period": "2025-Q3",
+      "name": "All maturities"
+    },
+    "U": {
+      "value": 2610389.0,
+      "period": "2025-Q3",
+      "name": "Up to 1 year"
+    },
+    "N": {
+      "value": 881063.0,
+      "period": "2025-Q3",
+      "name": "Over 2 years"
+    }
+  }
+}
