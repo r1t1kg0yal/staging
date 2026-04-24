@@ -1,0 +1,3707 @@
+"""
+rendering -- HTML templates + headless-Chrome PNG export for GS/viz/echarts.
+
+Three concerns merged into one module:
+
+    1. Single-chart editor HTML  (render_editor_html)
+       Minimal-aesthetic interactive editor for one chart: knobs, spec-sheets,
+       raw JSON escape hatch. Used by make_echart() and the composites layer.
+
+    2. Dashboard HTML            (render_dashboard_html)
+       GS-branded self-contained dashboard: cards, tabs, grid, global filters,
+       brush cross-filter, echarts.connect() link groups. Used by
+       compile_dashboard().
+
+    3. PNG export                (save_chart_png, save_dashboard_pngs,
+                                   save_dashboard_html_png, find_chrome)
+       Server-side rasterization via headless Chrome. Zero Python deps; only
+       requires a Chrome/Chromium binary (auto-detected on macOS, overridable
+       via $CHROME_BIN).
+
+Entry points
+============
+
+    render_editor_html(option, chart_id, chart_type, theme, palette,
+                        dimension_preset, knob_defs, spec_sheets,
+                        active_spec_sheet, user_id, filename_base) -> str
+
+    render_dashboard_html(manifest, chart_specs, filename_base) -> str
+
+    save_chart_png(option, path, ...) -> Path
+    save_dashboard_pngs(manifest, chart_specs, dir, ...) -> List[Path]
+    save_dashboard_html_png(html_path, png_path, ...) -> Path
+    find_chrome() -> str
+
+All PNG functions raise RuntimeError with an explicit message when the
+Chrome dependency is not available -- there is no silent fallback.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+_here = Path(__file__).resolve().parent
+if str(_here) not in sys.path:
+    sys.path.insert(0, str(_here))
+
+from config import (
+    THEMES, PALETTES, DIMENSION_PRESETS, TYPOGRAPHY_OVERRIDES,
+    GS_SKY, GS_NAVY, GS_NAVY_DEEP, GS_INK, GS_PAPER, GS_BG,
+    GS_GREY_70, GS_GREY_40, GS_GREY_20, GS_GREY_10, GS_GREY_05,
+    GS_POS, GS_NEG, GS_FONT_SANS, GS_FONT_SERIF,
+)
+
+
+# =============================================================================
+# SHARED HELPERS
+# =============================================================================
+
+def _html_escape(s: Any) -> str:
+    """HTML-escape any value (cast to str first)."""
+    return (str(s).replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;")
+             .replace('"', "&quot;"))
+
+
+
+# =============================================================================
+# PART 1 -- SINGLE-CHART EDITOR HTML
+# =============================================================================
+# Minimal-aesthetic interactive editor: knob cards, spec sheets, data/code/
+# metadata/export panels, raw JSON escape hatch.
+
+
+HTML_SHELL = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>__TITLE__</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+/* bare-minimum layout; aesthetics intentionally austere per project
+   convention. Typeface is the Goldman Sachs stack so the editor
+   matches the rendered chart. */
+html,body{margin:0;padding:0;font-family:__GS_FONT_SANS__;
+  font-size:13px;background:#fff;color:__GS_INK__}
+header,main,footer{padding:8px 12px}
+header{border-bottom:2px solid __GS_NAVY__}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.wrap{display:flex;flex-wrap:wrap;gap:12px}
+.chart-col{flex:1 1 600px;min-width:400px}
+.side-col{flex:0 0 440px;min-width:320px;max-width:520px}
+#chart{width:100%;height:480px}
+.side-col{border-left:1px solid #ccc;padding-left:10px}
+.tabs button{background:none;border:1px solid #ccc;padding:3px 8px;cursor:pointer;margin-right:2px}
+.tabs button.active{background:#eee;font-weight:bold}
+.tab{display:none;margin-top:6px}
+.tab.active{display:block}
+textarea.raw{width:100%;height:300px;font-family:monospace;font-size:11px}
+table.data{border-collapse:collapse;font-size:11px}
+table.data th,table.data td{border:1px solid #ccc;padding:2px 6px}
+table.data th{background:#f4f4f4;cursor:pointer}
+input[type=search]{padding:3px;width:200px}
+details.card{border:1px solid #ccc;padding:8px;margin-bottom:8px}
+details.card>summary{font-weight:bold;cursor:pointer;padding:2px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px}
+.knob{display:flex;justify-content:space-between;align-items:center;margin:3px 0;gap:6px}
+.knob label{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis}
+.knob input,.knob select{flex:0 0 140px}
+.knob input[type=range]{flex:0 0 100px}
+.knob input[type=checkbox]{flex:0 0 auto}
+.knob input[type=color]{flex:0 0 40px;padding:0}
+.knob .val{flex:0 0 50px;text-align:right;font-family:monospace;font-size:11px}
+button{cursor:pointer}
+.status{color:#888;font-size:11px;margin-left:12px}
+.group-title{font-weight:bold;margin-top:10px}
+hr{border:none;border-top:1px solid #ccc;margin:6px 0}
+</style>
+</head>
+<body>
+<header>
+<div class="row">
+<strong>__TITLE__</strong>
+<span class="status" id="chart-meta">chart_id: __CHART_ID__ | type: __CHART_TYPE__</span>
+</div>
+<div class="row" style="margin-top:4px">
+<label>spec sheet:
+<select id="sheet-select"></select>
+</label>
+<button id="sheet-save">Save</button>
+<button id="sheet-saveas">Save as</button>
+<button id="sheet-delete">Delete</button>
+<button id="sheet-download">Download</button>
+<button id="sheet-upload">Upload</button>
+<input type="file" id="sheet-upload-file" accept=".json" style="display:none"/>
+<span class="status" id="sheet-status"></span>
+</div>
+</header>
+<main>
+<div class="wrap">
+<div class="chart-col">
+<div class="row">
+<button id="btn-reset">Reset view</button>
+<button id="btn-full">Fullscreen</button>
+<button id="btn-png2x">PNG 2x</button>
+<button id="btn-png4x">PNG 4x</button>
+<button id="btn-svg">SVG</button>
+<span class="status" id="chart-status"></span>
+</div>
+<div id="chart" style="width:100%;height:480px"></div>
+</div>
+<div class="side-col">
+<div class="tabs">
+<button class="active" data-tab="data">Data</button>
+<button data-tab="code">Code</button>
+<button data-tab="meta">Metadata</button>
+<button data-tab="export">Export</button>
+<button data-tab="raw">Raw</button>
+</div>
+<div id="tab-data" class="tab active"></div>
+<div id="tab-code" class="tab"></div>
+<div id="tab-meta" class="tab"></div>
+<div id="tab-export" class="tab"></div>
+<div id="tab-raw" class="tab"></div>
+</div>
+</div>
+<hr/>
+<div class="row">
+<input id="knob-search" type="search" placeholder="search knobs..."/>
+<span class="status" id="knob-count"></span>
+<button id="btn-reset-knobs">Reset all knobs</button>
+</div>
+<div id="knob-cards" class="cards" style="margin-top:8px"></div>
+</main>
+<footer>
+<span class="status">echart_studio v__VERSION__ | echarts@5 (CDN)</span>
+</footer>
+<script>
+__PAYLOAD__
+__APP__
+</script>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
+# JS app: apply functions + knob wiring + tabs + spec sheets
+# ---------------------------------------------------------------------------
+
+APP_JS = r"""
+(function(){
+  'use strict';
+
+  // Revive string-encoded JS functions into real functions before any
+  // setOption call. The editor uses this for every mutation + reset path.
+  function _isFnStr(s) {
+    return typeof s === 'string' && /^\s*function\s*\(/.test(s);
+  }
+  function reviveFns(x) {
+    if (x == null) return x;
+    if (_isFnStr(x)) {
+      try { return new Function('return (' + x + ')')(); }
+      catch(e) { return x; }
+    }
+    if (Array.isArray(x)) {
+      for (var i = 0; i < x.length; i++) x[i] = reviveFns(x[i]);
+      return x;
+    }
+    if (typeof x === 'object') {
+      for (var k in x) {
+        if (Object.prototype.hasOwnProperty.call(x, k)) {
+          x[k] = reviveFns(x[k]);
+        }
+      }
+    }
+    return x;
+  }
+
+  var state = {
+    originalOption: JSON.parse(JSON.stringify(PAYLOAD.option)),
+    option: JSON.parse(JSON.stringify(PAYLOAD.option)),
+    chart: null,
+    theme: PAYLOAD.theme,
+    palette: PAYLOAD.palette,
+    dimension: PAYLOAD.dimension,
+    chartType: PAYLOAD.chartType,
+    chartId: PAYLOAD.chartId,
+    knobDefs: PAYLOAD.knobDefs,
+    knobValues: {},
+    sheets: PAYLOAD.sheets || {},
+    activeSheet: PAYLOAD.activeSheet || '',
+    sheetsKey: PAYLOAD.sheetsKey || 'echart_studio_sheets',
+    prefKey: PAYLOAD.prefKey || ('echart_studio_prefs_' + PAYLOAD.chartType),
+    paletteColors: PAYLOAD.paletteColors,
+    paletteKind: PAYLOAD.paletteKind,
+    themes: PAYLOAD.themes,
+    palettes: PAYLOAD.palettes,
+    dimensions: PAYLOAD.dimensions,
+    typographyOverrides: PAYLOAD.typographyOverrides,
+    version: PAYLOAD.version
+  };
+
+  // register themes
+  try {
+    Object.keys(state.themes || {}).forEach(function(tn){
+      try { echarts.registerTheme(tn, state.themes[tn]); } catch(e){}
+    });
+  } catch(e){}
+
+  // ------------------------------------------------------------------
+  // APPLY FUNCTIONS
+  // ------------------------------------------------------------------
+  var APPLY = {};
+
+  function getPath(obj, path){
+    var parts = path.split('.'); var o = obj;
+    for (var i=0;i<parts.length;i++){
+      if (o == null) return undefined;
+      var p = parts[i];
+      var m = p.match(/^(.*)\[(\d+)\]$/);
+      if (m){ o = o[m[1]]; if (o == null) return undefined; o = o[parseInt(m[2])]; }
+      else { o = o[p]; }
+    }
+    return o;
+  }
+  function setPath(obj, path, val){
+    var parts = path.split('.'); var o = obj;
+    for (var i=0;i<parts.length-1;i++){
+      var p = parts[i];
+      var m = p.match(/^(.*)\[(\d+)\]$/);
+      if (m){
+        var arr = o[m[1]]; if (arr == null) { arr = []; o[m[1]] = arr; }
+        var idx = parseInt(m[2]); if (arr[idx] == null) arr[idx] = {};
+        o = arr[idx];
+      } else {
+        if (o[p] == null || typeof o[p] !== 'object' || Array.isArray(o[p])) o[p] = (typeof o[p] === 'object' && o[p] !== null) ? o[p] : {};
+        o = o[p];
+      }
+    }
+    var last = parts[parts.length-1];
+    var mm = last.match(/^(.*)\[(\d+)\]$/);
+    if (mm){ var arr2 = o[mm[1]] || (o[mm[1]] = []); arr2[parseInt(mm[2])] = val; }
+    else { o[last] = val; }
+  }
+
+  // Title/subtitle
+  APPLY.setTitleText = function(v){ setPath(state.option, 'title.text', v || ''); };
+  APPLY.setSubtitleText = function(v){ setPath(state.option, 'title.subtext', v || ''); };
+
+  // Legend position. All 'top*' positions sit at y=42 (row 2) so the
+  // legend has its own row below the title/toolbox (row 1, y=0..30) and
+  // never collides with either, regardless of chart width or the number
+  // of legend entries.
+  APPLY.setLegendPosition = function(v){
+    var leg = state.option.legend || {}; state.option.legend = leg;
+    ['top','bottom','left','right'].forEach(function(k){ delete leg[k]; });
+    if (v === 'top') { leg.top = 42; leg.left = 'center'; }
+    else if (v === 'bottom') { leg.bottom = 'bottom'; leg.left = 'center'; }
+    else if (v === 'left') { leg.left = 'left'; leg.top = 'middle'; leg.orient = 'vertical'; }
+    else if (v === 'right') { leg.right = 'right'; leg.top = 'middle'; leg.orient = 'vertical'; }
+    else if (v === 'top-left') { leg.top = 42; leg.left = 'left'; }
+    else if (v === 'top-right') { leg.top = 42; leg.right = 10; }
+    else if (v === 'bottom-left') { leg.bottom = 'bottom'; leg.left = 'left'; }
+    else if (v === 'bottom-right') { leg.bottom = 'bottom'; leg.right = 'right'; }
+  };
+
+  // Axis label / name sizes
+  function forEachAxis(cb){
+    ['xAxis','yAxis'].forEach(function(k){
+      var ax = state.option[k]; if (!ax) return;
+      if (Array.isArray(ax)) ax.forEach(cb); else cb(ax);
+    });
+  }
+  APPLY.setAxisLabelSize = function(v){ forEachAxis(function(a){
+    a.axisLabel = a.axisLabel || {}; a.axisLabel.fontSize = v;
+  });};
+  APPLY.setAxisNameSize = function(v){ forEachAxis(function(a){
+    a.nameTextStyle = a.nameTextStyle || {}; a.nameTextStyle.fontSize = v;
+  });};
+
+  function xAxes(){ var a = state.option.xAxis; if (!a) return []; return Array.isArray(a)?a:[a]; }
+  function yAxes(){ var a = state.option.yAxis; if (!a) return []; return Array.isArray(a)?a:[a]; }
+  function onEachAxis(axisList, cb){ axisList.forEach(cb); }
+
+  function applyBoundaryGap(axisList, v){
+    axisList.forEach(function(a){
+      if (v === 'default') delete a.boundaryGap;
+      else if (v === 'true') a.boundaryGap = true;
+      else if (v === 'false') a.boundaryGap = false;
+    });
+  }
+  function tryNumber(v){ if (v === '' || v == null) return undefined; var n = Number(v); return isFinite(n) ? n : v; }
+  function setMin(axisList, v){ axisList.forEach(function(a){ if (v === '' || v == null) delete a.min; else a.min = tryNumber(v); }); }
+  function setMax(axisList, v){ axisList.forEach(function(a){ if (v === '' || v == null) delete a.max; else a.max = tryNumber(v); }); }
+  APPLY.setXMin = function(v){ setMin(xAxes(), v); };
+  APPLY.setXMax = function(v){ setMax(xAxes(), v); };
+  APPLY.setYMin = function(v){ setMin(yAxes(), v); };
+  APPLY.setYMax = function(v){ setMax(yAxes(), v); };
+  APPLY.setXBoundaryGap = function(v){ applyBoundaryGap(xAxes(), v); };
+  APPLY.setYBoundaryGap = function(v){ applyBoundaryGap(yAxes(), v); };
+  APPLY.setXSplitLineColor = function(v){ xAxes().forEach(function(a){ a.splitLine = a.splitLine || {}; a.splitLine.lineStyle = a.splitLine.lineStyle || {}; a.splitLine.lineStyle.color = v; }); };
+  APPLY.setYSplitLineColor = function(v){ yAxes().forEach(function(a){ a.splitLine = a.splitLine || {}; a.splitLine.lineStyle = a.splitLine.lineStyle || {}; a.splitLine.lineStyle.color = v; }); };
+  APPLY.setXAxisLabelFormat = function(v){ xAxes().forEach(function(a){
+    a.axisLabel = a.axisLabel || {};
+    if (!v){ delete a.axisLabel.formatter; return; }
+    a.axisLabel.formatter = v;
+  });};
+  APPLY.setYAxisLabelFormat = function(v){ yAxes().forEach(function(a){
+    a.axisLabel = a.axisLabel || {};
+    if (!v){ delete a.axisLabel.formatter; return; }
+    a.axisLabel.formatter = v;
+  });};
+
+  // Toolbox feature toggles
+  function toolboxFeat(){ state.option.toolbox = state.option.toolbox || {show:true, feature:{}}; state.option.toolbox.feature = state.option.toolbox.feature || {}; return state.option.toolbox.feature; }
+  APPLY.setToolboxSaveAsImage = function(v){ var f = toolboxFeat(); if (v) f.saveAsImage = f.saveAsImage || {}; else delete f.saveAsImage; };
+  APPLY.setToolboxDataZoom = function(v){ var f = toolboxFeat(); if (v) f.dataZoom = f.dataZoom || {}; else delete f.dataZoom; };
+  APPLY.setToolboxRestore = function(v){ var f = toolboxFeat(); if (v) f.restore = f.restore || {}; else delete f.restore; };
+  APPLY.setToolboxDataView = function(v){ var f = toolboxFeat(); if (v) f.dataView = f.dataView || {}; else delete f.dataView; };
+  APPLY.setToolboxMagicType = function(v){ var f = toolboxFeat(); if (v) f.magicType = {type:['line','bar']}; else delete f.magicType; };
+  APPLY.setToolboxBrush = function(v){ var f = toolboxFeat(); if (v) f.brush = {type:['rect','polygon','lineX','clear']}; else delete f.brush; };
+
+  // DataZoom
+  function dzFind(kind){
+    var dz = state.option.dataZoom;
+    if (!dz) return -1;
+    if (!Array.isArray(dz)) dz = [dz];
+    for (var i=0;i<dz.length;i++) if (dz[i] && dz[i].type === kind) return i;
+    return -1;
+  }
+  function dzEnsure(){ if (!state.option.dataZoom) state.option.dataZoom = [];
+    if (!Array.isArray(state.option.dataZoom)) state.option.dataZoom = [state.option.dataZoom]; }
+  APPLY.setDataZoomShow = function(v){
+    dzEnsure();
+    var idx = dzFind('slider');
+    if (v){ if (idx < 0) state.option.dataZoom.push({type:'slider'}); }
+    else { if (idx >= 0) state.option.dataZoom.splice(idx,1); }
+  };
+  APPLY.setDataZoomInside = function(v){
+    dzEnsure();
+    var idx = dzFind('inside');
+    if (v){ if (idx < 0) state.option.dataZoom.push({type:'inside'}); }
+    else { if (idx >= 0) state.option.dataZoom.splice(idx,1); }
+  };
+  APPLY.setDataZoomStart = function(v){ dzEnsure(); state.option.dataZoom.forEach(function(d){ d.start = v; }); };
+  APPLY.setDataZoomEnd = function(v){ dzEnsure(); state.option.dataZoom.forEach(function(d){ d.end = v; }); };
+  APPLY.setDataZoomOrient = function(v){ dzEnsure(); state.option.dataZoom.forEach(function(d){ d.orient = v; }); };
+
+  // Mark helpers
+  function mainSeries(){
+    var s = state.option.series; if (!s) return [];
+    if (!Array.isArray(s)) return [s];
+    return s;
+  }
+  function seriesOfType(t){ return mainSeries().filter(function(s){ return s.type === t; }); }
+
+  // Line
+  APPLY.setLineWidth = function(v){ seriesOfType('line').forEach(function(s){ s.lineStyle = s.lineStyle || {}; s.lineStyle.width = v; }); };
+  APPLY.setLineSmooth = function(v){ seriesOfType('line').forEach(function(s){ s.smooth = !!v; }); };
+  APPLY.setLineStep = function(v){ seriesOfType('line').forEach(function(s){ if (v === 'none') delete s.step; else s.step = v; }); };
+  APPLY.setLineConnectNulls = function(v){ seriesOfType('line').forEach(function(s){ s.connectNulls = !!v; }); };
+  APPLY.setLineShowSymbol = function(v){ seriesOfType('line').forEach(function(s){ s.showSymbol = !!v; }); };
+  APPLY.setLineSymbolSize = function(v){ seriesOfType('line').forEach(function(s){ s.symbolSize = v; }); };
+  APPLY.setLineAreaFill = function(v){ seriesOfType('line').forEach(function(s){ if (v){ s.areaStyle = s.areaStyle || {opacity:0.3}; } else delete s.areaStyle; }); };
+  APPLY.setLineAreaOpacity = function(v){ seriesOfType('line').forEach(function(s){ if (s.areaStyle){ s.areaStyle.opacity = v; } }); };
+  APPLY.setLineStack = function(v){ seriesOfType('line').forEach(function(s){ if (v) s.stack = 'total'; else delete s.stack; }); };
+  APPLY.setLineStyleType = function(v){ seriesOfType('line').forEach(function(s){ s.lineStyle = s.lineStyle || {}; s.lineStyle.type = v; }); };
+
+  // Bar
+  APPLY.setBarWidth = function(v){ seriesOfType('bar').forEach(function(s){ if (v === '' || v == null) delete s.barWidth; else s.barWidth = v; }); };
+  APPLY.setBarMaxWidth = function(v){ seriesOfType('bar').forEach(function(s){ if (v === '' || v == null) delete s.barMaxWidth; else s.barMaxWidth = v; }); };
+  APPLY.setBarCategoryGap = function(v){ seriesOfType('bar').forEach(function(s){ s.barCategoryGap = v; }); };
+  APPLY.setBarGap = function(v){ seriesOfType('bar').forEach(function(s){ s.barGap = v; }); };
+  APPLY.setBarBorderRadius = function(v){ seriesOfType('bar').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.borderRadius = v; }); };
+  APPLY.setBarOpacity = function(v){ seriesOfType('bar').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.opacity = v; }); };
+  APPLY.setBarStack = function(v){ seriesOfType('bar').forEach(function(s){ if (v) s.stack = 'total'; else delete s.stack; }); };
+  APPLY.setBarLabelShow = function(v){ seriesOfType('bar').forEach(function(s){ s.label = s.label || {}; s.label.show = !!v; }); };
+  APPLY.setBarLabelPosition = function(v){ seriesOfType('bar').forEach(function(s){ s.label = s.label || {}; s.label.position = v; }); };
+
+  // Scatter
+  APPLY.setScatterSymbolSize = function(v){ seriesOfType('scatter').forEach(function(s){ s.symbolSize = v; }); };
+  APPLY.setScatterSymbol = function(v){ seriesOfType('scatter').forEach(function(s){ s.symbol = v; }); };
+  APPLY.setScatterOpacity = function(v){ seriesOfType('scatter').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.opacity = v; }); };
+  APPLY.setScatterBorderWidth = function(v){ seriesOfType('scatter').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.borderWidth = v; }); };
+
+  // Area (lines with areaStyle; we also cover pure area by piggybacking on setLineArea*)
+  APPLY.setAreaOpacity = function(v){ seriesOfType('line').forEach(function(s){ if (s.areaStyle){ s.areaStyle.opacity = v; } }); };
+  APPLY.setAreaStack = function(v){ seriesOfType('line').forEach(function(s){ if (v) s.stack = 'total'; else delete s.stack; }); };
+  APPLY.setAreaLineWidth = function(v){ seriesOfType('line').forEach(function(s){ s.lineStyle = s.lineStyle || {}; s.lineStyle.width = v; }); };
+  APPLY.setAreaSmooth = function(v){ seriesOfType('line').forEach(function(s){ s.smooth = !!v; }); };
+
+  // Heatmap
+  APPLY.setHeatmapShowLabels = function(v){ seriesOfType('heatmap').forEach(function(s){ s.label = s.label || {}; s.label.show = !!v; }); };
+  APPLY.setHeatmapBorderWidth = function(v){ seriesOfType('heatmap').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.borderWidth = v; }); };
+
+  // Pie
+  APPLY.setPieInnerRadius = function(v){ seriesOfType('pie').forEach(function(s){ var r = s.radius || ['0%','75%']; if (!Array.isArray(r)) r = ['0%', r]; r[0] = v; s.radius = r; }); };
+  APPLY.setPieOuterRadius = function(v){ seriesOfType('pie').forEach(function(s){ var r = s.radius || ['0%','75%']; if (!Array.isArray(r)) r = ['0%', r]; r[1] = v; s.radius = r; }); };
+  APPLY.setPieRoseType = function(v){ seriesOfType('pie').forEach(function(s){ if (v === 'none') delete s.roseType; else s.roseType = v; }); };
+  APPLY.setPieLabelShow = function(v){ seriesOfType('pie').forEach(function(s){ s.label = s.label || {}; s.label.show = !!v; }); };
+  APPLY.setPieLabelPosition = function(v){ seriesOfType('pie').forEach(function(s){ s.label = s.label || {}; s.label.position = v; }); };
+  APPLY.setPieLabelLine = function(v){ seriesOfType('pie').forEach(function(s){ s.labelLine = s.labelLine || {}; s.labelLine.show = !!v; }); };
+  APPLY.setPieBorderRadius = function(v){ seriesOfType('pie').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.borderRadius = v; }); };
+
+  // Boxplot
+  APPLY.setBoxBorderWidth = function(v){ seriesOfType('boxplot').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.borderWidth = v; }); };
+  APPLY.setBoxItemWidth = function(v){ seriesOfType('boxplot').forEach(function(s){ s.boxWidth = [Math.max(1,v/2), v]; }); };
+
+  // Sankey
+  APPLY.setSankeyNodeWidth = function(v){ seriesOfType('sankey').forEach(function(s){ s.nodeWidth = v; }); };
+  APPLY.setSankeyNodeGap = function(v){ seriesOfType('sankey').forEach(function(s){ s.nodeGap = v; }); };
+  APPLY.setSankeyOrient = function(v){ seriesOfType('sankey').forEach(function(s){ s.orient = v; }); };
+  APPLY.setSankeyLinkOpacity = function(v){ seriesOfType('sankey').forEach(function(s){ s.lineStyle = s.lineStyle || {}; s.lineStyle.opacity = v; }); };
+  APPLY.setSankeyLinkCurveness = function(v){ seriesOfType('sankey').forEach(function(s){ s.lineStyle = s.lineStyle || {}; s.lineStyle.curveness = v; }); };
+  APPLY.setSankeyDraggable = function(v){ seriesOfType('sankey').forEach(function(s){ s.draggable = !!v; }); };
+
+  // Treemap / sunburst
+  APPLY.setTreemapLeafDepth = function(v){ seriesOfType('treemap').forEach(function(s){ s.leafDepth = v; }); };
+  APPLY.setTreemapRoam = function(v){ seriesOfType('treemap').forEach(function(s){ s.roam = !!v; }); };
+  APPLY.setTreemapNodeClick = function(v){ seriesOfType('treemap').forEach(function(s){ if (v === 'false') s.nodeClick = false; else s.nodeClick = v; }); };
+  APPLY.setSunburstInnerRadius = function(v){ seriesOfType('sunburst').forEach(function(s){ var r = s.radius || ['0%','90%']; if (!Array.isArray(r)) r = ['0%', r]; r[0] = v; s.radius = r; }); };
+  APPLY.setSunburstOuterRadius = function(v){ seriesOfType('sunburst').forEach(function(s){ var r = s.radius || ['0%','90%']; if (!Array.isArray(r)) r = ['0%', r]; r[1] = v; s.radius = r; }); };
+  APPLY.setSunburstHighlightPolicy = function(v){ seriesOfType('sunburst').forEach(function(s){ s.emphasis = s.emphasis || {}; s.emphasis.focus = v === 'none' ? undefined : v; }); };
+
+  // Graph
+  APPLY.setGraphLayout = function(v){ seriesOfType('graph').forEach(function(s){ s.layout = v; }); };
+  APPLY.setGraphRoam = function(v){ seriesOfType('graph').forEach(function(s){ s.roam = !!v; }); };
+  APPLY.setGraphRepulsion = function(v){ seriesOfType('graph').forEach(function(s){ s.force = s.force || {}; s.force.repulsion = v; }); };
+  APPLY.setGraphEdgeLength = function(v){ seriesOfType('graph').forEach(function(s){ s.force = s.force || {}; s.force.edgeLength = v; }); };
+  APPLY.setGraphEdgeSymbol = function(v){ seriesOfType('graph').forEach(function(s){ if (v === 'none') s.edgeSymbol = ['none','none']; else s.edgeSymbol = ['none', v]; }); };
+  APPLY.setGraphDraggable = function(v){ seriesOfType('graph').forEach(function(s){ s.draggable = !!v; }); };
+
+  // Candlestick
+  APPLY.setCandleBullColor = function(v){ seriesOfType('candlestick').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.color = v; }); };
+  APPLY.setCandleBearColor = function(v){ seriesOfType('candlestick').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.color0 = v; }); };
+  APPLY.setCandleBorderBull = function(v){ seriesOfType('candlestick').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.borderColor = v; }); };
+  APPLY.setCandleBorderBear = function(v){ seriesOfType('candlestick').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.borderColor0 = v; }); };
+
+  // Radar
+  APPLY.setRadarShape = function(v){ state.option.radar = state.option.radar || {}; state.option.radar.shape = v; };
+  APPLY.setRadarSplitNumber = function(v){ state.option.radar = state.option.radar || {}; state.option.radar.splitNumber = v; };
+  APPLY.setRadarAreaOpacity = function(v){ seriesOfType('radar').forEach(function(s){ s.areaStyle = s.areaStyle || {}; s.areaStyle.opacity = v; }); };
+
+  // Gauge
+  APPLY.setGaugeMin = function(v){ seriesOfType('gauge').forEach(function(s){ s.min = v; }); };
+  APPLY.setGaugeMax = function(v){ seriesOfType('gauge').forEach(function(s){ s.max = v; }); };
+  APPLY.setGaugeSplitNumber = function(v){ seriesOfType('gauge').forEach(function(s){ s.splitNumber = v; }); };
+  APPLY.setGaugeStartAngle = function(v){ seriesOfType('gauge').forEach(function(s){ s.startAngle = v; }); };
+  APPLY.setGaugeEndAngle = function(v){ seriesOfType('gauge').forEach(function(s){ s.endAngle = v; }); };
+
+  // Calendar
+  APPLY.setCalendarOrient = function(v){ state.option.calendar = state.option.calendar || {}; state.option.calendar.orient = v; };
+  APPLY.setCalendarCellSize = function(v){ state.option.calendar = state.option.calendar || {}; state.option.calendar.cellSize = ['auto', v]; };
+  APPLY.setCalendarYearLabel = function(v){ state.option.calendar = state.option.calendar || {}; state.option.calendar.yearLabel = state.option.calendar.yearLabel || {}; state.option.calendar.yearLabel.show = !!v; };
+
+  // Parallel coords
+  APPLY.setParallelLineOpacity = function(v){ seriesOfType('parallel').forEach(function(s){ s.lineStyle = s.lineStyle || {}; s.lineStyle.opacity = v; }); };
+  APPLY.setParallelLineWidth = function(v){ seriesOfType('parallel').forEach(function(s){ s.lineStyle = s.lineStyle || {}; s.lineStyle.width = v; }); };
+  APPLY.setParallelLayoutHorizontal = function(v){ state.option.parallel = state.option.parallel || {}; state.option.parallel.layout = v ? 'horizontal' : 'vertical'; };
+
+  // Funnel
+  APPLY.setFunnelSort = function(v){ seriesOfType('funnel').forEach(function(s){ s.sort = v === 'none' ? undefined : v; }); };
+  APPLY.setFunnelGap = function(v){ seriesOfType('funnel').forEach(function(s){ s.gap = v; }); };
+  APPLY.setFunnelMin = function(v){ seriesOfType('funnel').forEach(function(s){ s.min = v; }); };
+  APPLY.setFunnelMax = function(v){ seriesOfType('funnel').forEach(function(s){ s.max = v; }); };
+  APPLY.setFunnelLabelShow = function(v){ seriesOfType('funnel').forEach(function(s){ s.label = s.label || {}; s.label.show = !!v; }); };
+
+  // Tree
+  APPLY.setTreeOrient = function(v){ seriesOfType('tree').forEach(function(s){ s.orient = v; s.layout = v === 'radial' ? 'radial' : 'orthogonal'; }); };
+  APPLY.setTreeSymbolSize = function(v){ seriesOfType('tree').forEach(function(s){ s.symbolSize = v; }); };
+  APPLY.setTreeRoam = function(v){ seriesOfType('tree').forEach(function(s){ s.roam = !!v; }); };
+
+  // ------------------------------------------------------------------
+  // KNOB RENDERING + WIRING
+  // ------------------------------------------------------------------
+
+  function applyKnob(def, val){
+    state.knobValues[def.name] = val;
+    if (def.apply){
+      var fn = APPLY[def.apply];
+      if (typeof fn === 'function') fn(val);
+    } else if (def.path){
+      setPath(state.option, def.path, val);
+    }
+  }
+
+  function renderKnob(def){
+    var row = document.createElement('div'); row.className = 'knob'; row.dataset.knob = def.name;
+    var lab = document.createElement('label'); lab.textContent = def.label; lab.title = def.name;
+    row.appendChild(lab);
+    var val = state.knobValues[def.name];
+    if (val === undefined) val = def.default;
+    var input;
+    if (def.type === 'range'){
+      input = document.createElement('input'); input.type = 'range';
+      input.min = def.min; input.max = def.max; input.step = def.step;
+      input.value = val;
+      var valSpan = document.createElement('span'); valSpan.className = 'val'; valSpan.textContent = val;
+      input.addEventListener('input', function(){
+        var v = Number(input.value); valSpan.textContent = v;
+        applyKnob(def, v); render();
+      });
+      row.appendChild(input); row.appendChild(valSpan);
+    } else if (def.type === 'number'){
+      input = document.createElement('input'); input.type = 'number'; input.value = val;
+      input.addEventListener('input', function(){ var v = Number(input.value); applyKnob(def, v); render(); });
+      row.appendChild(input);
+    } else if (def.type === 'select'){
+      input = document.createElement('select');
+      (def.options || []).forEach(function(o){ var op = document.createElement('option'); op.value = o; op.textContent = o; input.appendChild(op); });
+      input.value = val;
+      input.addEventListener('change', function(){ applyKnob(def, input.value); render(); });
+      row.appendChild(input);
+    } else if (def.type === 'checkbox'){
+      input = document.createElement('input'); input.type = 'checkbox'; input.checked = !!val;
+      input.addEventListener('change', function(){ applyKnob(def, input.checked); render(); });
+      row.appendChild(input);
+    } else if (def.type === 'color'){
+      input = document.createElement('input'); input.type = 'color'; input.value = val || '#000000';
+      input.addEventListener('input', function(){ applyKnob(def, input.value); render(); });
+      row.appendChild(input);
+    } else {
+      input = document.createElement('input'); input.type = 'text'; input.value = val == null ? '' : val;
+      input.addEventListener('change', function(){ applyKnob(def, input.value); render(); });
+      row.appendChild(input);
+    }
+    return row;
+  }
+
+  function groupedKnobs(){
+    var groups = {};
+    (state.knobDefs || []).forEach(function(def){
+      var g = def.group || 'Other';
+      groups[g] = groups[g] || [];
+      groups[g].push(def);
+    });
+    return groups;
+  }
+
+  function renderKnobCards(){
+    var wrap = document.getElementById('knob-cards');
+    wrap.innerHTML = '';
+    // Presets card
+    var presets = document.createElement('details'); presets.className = 'card'; presets.open = true;
+    var psum = document.createElement('summary'); psum.textContent = 'Presets'; presets.appendChild(psum);
+    presets.appendChild(makePresetRow('Theme', Object.keys(state.themes), state.theme, function(v){ state.theme = v; applyTheme(v); render(); rerenderKnobs(); }));
+    var paletteNames = Object.keys(state.palettes);
+    presets.appendChild(makePresetRow('Palette', paletteNames, state.palette, function(v){ state.palette = v; applyPalette(v); render(); }));
+    presets.appendChild(makePresetRow('Dimensions', Object.keys(state.dimensions), state.dimension, function(v){ state.dimension = v; applyDimension(v); render(); rerenderKnobs(); }));
+    wrap.appendChild(presets);
+
+    // Essentials card
+    var ess = document.createElement('details'); ess.className = 'card'; ess.open = true;
+    var esum = document.createElement('summary'); esum.textContent = 'Essentials'; ess.appendChild(esum);
+    (state.knobDefs || []).forEach(function(d){ if (d.essential || ESSENTIALS[d.name]) ess.appendChild(renderKnob(d)); });
+    wrap.appendChild(ess);
+
+    // Other groups
+    var grouped = groupedKnobs();
+    var order = ['Title','Typography','Layout','Grid','XAxis','YAxis','Legend','Tooltip','Toolbox','DataZoom','VisualMap','Interactivity','Mark','Colors'];
+    var seen = {};
+    order.forEach(function(g){
+      if (!grouped[g]) return; seen[g] = true;
+      var d = document.createElement('details'); d.className = 'card'; d.open = false;
+      var sum = document.createElement('summary'); sum.textContent = g; d.appendChild(sum);
+      grouped[g].forEach(function(def){ d.appendChild(renderKnob(def)); });
+      wrap.appendChild(d);
+    });
+    Object.keys(grouped).forEach(function(g){
+      if (seen[g]) return;
+      var d = document.createElement('details'); d.className = 'card'; d.open = false;
+      var sum = document.createElement('summary'); sum.textContent = g; d.appendChild(sum);
+      grouped[g].forEach(function(def){ d.appendChild(renderKnob(def)); });
+      wrap.appendChild(d);
+    });
+
+    // Session Prefs card
+    var sp = document.createElement('details'); sp.className = 'card';
+    var spSum = document.createElement('summary'); spSum.textContent = 'Session preferences'; sp.appendChild(spSum);
+    var resetBtn = document.createElement('button'); resetBtn.textContent = 'Reset to theme defaults';
+    resetBtn.addEventListener('click', function(){ resetToTheme(); });
+    sp.appendChild(resetBtn);
+    wrap.appendChild(sp);
+
+    document.getElementById('knob-count').textContent = (state.knobDefs || []).length + ' knobs';
+  }
+
+  var ESSENTIALS = ESSENTIAL_NAMES;
+
+  function makePresetRow(label, options, current, onChange){
+    var row = document.createElement('div'); row.className = 'knob';
+    var l = document.createElement('label'); l.textContent = label; row.appendChild(l);
+    var sel = document.createElement('select');
+    options.forEach(function(o){ var op = document.createElement('option'); op.value = o; op.textContent = o; sel.appendChild(op); });
+    sel.value = current;
+    sel.addEventListener('change', function(){ onChange(sel.value); });
+    row.appendChild(sel); return row;
+  }
+
+  function applyTheme(name){
+    state.theme = name;
+    var theme = state.themes[name];
+    if (theme && theme.color){ state.option.color = theme.color.slice(); }
+    var kv = THEME_KNOB_VALUES[name] || {};
+    Object.keys(kv).forEach(function(n){
+      var def = KNOB_INDEX[n]; if (!def) return;
+      applyKnob(def, kv[n]);
+    });
+  }
+
+  function applyPalette(name){
+    var p = state.palettes[name];
+    if (!p) return;
+    state.paletteColors = p.colors;
+    state.paletteKind = p.kind;
+    if (p.kind === 'categorical'){
+      state.option.color = p.colors.slice();
+    } else {
+      // sequential/diverging -> visualMap ramp if present
+      if (state.option.visualMap){
+        var vm = state.option.visualMap;
+        if (!Array.isArray(vm)) vm = [vm];
+        vm.forEach(function(v){ v.inRange = {color: p.colors.slice()}; });
+        state.option.visualMap = vm;
+      }
+    }
+  }
+
+  function applyDimension(name){
+    var dim = state.dimensions[name]; if (!dim) return;
+    var chartEl = document.getElementById('chart');
+    chartEl.style.width = dim.width + 'px';
+    chartEl.style.height = dim.height + 'px';
+    state.chart && state.chart.resize();
+    // typography override
+    var to = state.typographyOverrides[name];
+    if (to){
+      Object.keys(to).forEach(function(k){
+        var def = KNOB_INDEX[k]; if (!def) return;
+        applyKnob(def, to[k]);
+      });
+    }
+  }
+
+  function resetToTheme(){
+    state.option = JSON.parse(JSON.stringify(state.originalOption));
+    state.knobValues = {};
+    applyTheme(state.theme);
+    render(); rerenderKnobs();
+  }
+
+  function rerenderKnobs(){
+    renderKnobCards();
+    filterKnobs(document.getElementById('knob-search').value || '');
+  }
+
+  function filterKnobs(q){
+    q = q.toLowerCase();
+    document.querySelectorAll('.knob').forEach(function(row){
+      var label = row.querySelector('label');
+      var name = row.dataset.knob || '';
+      var text = (label ? label.textContent : '') + ' ' + name;
+      row.style.display = (!q || text.toLowerCase().indexOf(q) >= 0) ? 'flex' : 'none';
+    });
+  }
+
+  // Index knob defs by name
+  var KNOB_INDEX = {};
+  (state.knobDefs || []).forEach(function(d){ KNOB_INDEX[d.name] = d; });
+  var THEME_KNOB_VALUES = PAYLOAD.themeKnobValues;
+
+  // ------------------------------------------------------------------
+  // CHART RENDERING
+  // ------------------------------------------------------------------
+
+  function render(){
+    if (!state.chart){
+      state.chart = echarts.init(document.getElementById('chart'), state.theme in state.themes ? state.theme : null);
+    }
+    try {
+      // Pass through the reviver so renderItem/formatter/filter strings
+      // become real functions. state.option is kept as-is so Raw/Code tab
+      // still shows the serializable JSON.
+      var live = reviveFns(JSON.parse(JSON.stringify(state.option)));
+      state.chart.setOption(live, true);
+      document.getElementById('chart-status').textContent = 'ok';
+    } catch (e){
+      document.getElementById('chart-status').textContent = 'error: ' + (e && e.message || e);
+    }
+    refreshTabs();
+  }
+
+  function refreshTabs(){
+    refreshCodeTab(); refreshDataTab(); refreshMetaTab(); refreshExportTab(); refreshRawTab();
+  }
+
+  function refreshCodeTab(){
+    var el = document.getElementById('tab-code');
+    el.innerHTML = '';
+    var pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(state.option, null, 2);
+    var copyBtn = document.createElement('button'); copyBtn.textContent = 'Copy JSON';
+    copyBtn.addEventListener('click', function(){
+      try { navigator.clipboard.writeText(pre.textContent); copyBtn.textContent = 'copied'; setTimeout(function(){copyBtn.textContent = 'Copy JSON';}, 800); } catch(e){}
+    });
+    el.appendChild(copyBtn); el.appendChild(pre);
+  }
+
+  function extractData(){
+    var rows = [];
+    (mainSeries() || []).forEach(function(s){
+      if (s.data && Array.isArray(s.data)){
+        s.data.forEach(function(d){ rows.push({series: s.name || s.type, data: d}); });
+      }
+    });
+    return rows;
+  }
+
+  function refreshDataTab(){
+    var el = document.getElementById('tab-data');
+    el.innerHTML = '';
+    var rows = extractData();
+    var info = document.createElement('div'); info.textContent = rows.length + ' rows across ' + (mainSeries().length) + ' series';
+    el.appendChild(info);
+    if (rows.length === 0) return;
+    var tbl = document.createElement('table'); tbl.className = 'data';
+    var thead = document.createElement('thead'); var trh = document.createElement('tr');
+    ['series','value'].forEach(function(h){ var th = document.createElement('th'); th.textContent = h; trh.appendChild(th); });
+    thead.appendChild(trh); tbl.appendChild(thead);
+    var tbody = document.createElement('tbody');
+    rows.slice(0, 500).forEach(function(r){
+      var tr = document.createElement('tr');
+      var tds = document.createElement('td'); tds.textContent = r.series;
+      var tdv = document.createElement('td'); tdv.textContent = JSON.stringify(r.data);
+      tr.appendChild(tds); tr.appendChild(tdv); tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody); el.appendChild(tbl);
+    if (rows.length > 500){
+      var more = document.createElement('div'); more.textContent = '(showing first 500 of ' + rows.length + ' rows)';
+      el.appendChild(more);
+    }
+  }
+
+  function refreshMetaTab(){
+    var el = document.getElementById('tab-meta');
+    el.innerHTML = '';
+    var k = ['chart_id','chart_type','theme','palette','dimension'];
+    var v = [state.chartId, state.chartType, state.theme, state.palette, state.dimension];
+    var dl = document.createElement('dl');
+    for (var i=0;i<k.length;i++){
+      var dt = document.createElement('dt'); dt.textContent = k[i];
+      var dd = document.createElement('dd'); dd.textContent = v[i];
+      dl.appendChild(dt); dl.appendChild(dd);
+    }
+    el.appendChild(dl);
+    var series = document.createElement('div');
+    series.textContent = 'series types: ' + mainSeries().map(function(s){ return s.type; }).join(', ');
+    el.appendChild(series);
+  }
+
+  function refreshExportTab(){
+    var el = document.getElementById('tab-export');
+    el.innerHTML = '';
+    var specs = [
+      {label: 'PNG 1x', fn: function(){ downloadImage(1, 'png'); }},
+      {label: 'PNG 2x', fn: function(){ downloadImage(2, 'png'); }},
+      {label: 'PNG 4x', fn: function(){ downloadImage(4, 'png'); }},
+      {label: 'SVG', fn: function(){ downloadSvg(); }},
+      {label: 'Option JSON', fn: function(){ downloadText('option.json', JSON.stringify(state.option, null, 2)); }},
+      {label: 'Spec Sheet JSON', fn: function(){ downloadText('spec_sheet.json', JSON.stringify(exportSheet(), null, 2)); }},
+    ];
+    specs.forEach(function(s){ var b = document.createElement('button'); b.textContent = s.label; b.addEventListener('click', s.fn); el.appendChild(b); });
+  }
+
+  function refreshRawTab(){
+    var el = document.getElementById('tab-raw');
+    el.innerHTML = '';
+    var title = document.createElement('div'); title.textContent = 'Edit ECharts option as JSON. Changes apply on blur.';
+    el.appendChild(title);
+    var ta = document.createElement('textarea'); ta.className = 'raw';
+    ta.value = JSON.stringify(state.option, null, 2);
+    ta.addEventListener('blur', function(){
+      try {
+        var parsed = JSON.parse(ta.value);
+        state.option = parsed; render();
+        document.getElementById('chart-status').textContent = 'raw applied';
+      } catch (e){
+        document.getElementById('chart-status').textContent = 'invalid JSON';
+      }
+    });
+    el.appendChild(ta);
+  }
+
+  // ------------------------------------------------------------------
+  // EXPORT / IO
+  // ------------------------------------------------------------------
+
+  function downloadImage(pixelRatio, type){
+    var url = state.chart.getDataURL({pixelRatio: pixelRatio, backgroundColor: state.option.backgroundColor || '#fff', type: type});
+    var a = document.createElement('a'); a.href = url; a.download = (PAYLOAD.filename || 'chart') + '.' + type; a.click();
+  }
+  function downloadSvg(){
+    var dom = document.getElementById('chart');
+    var svg = dom.querySelector('svg');
+    if (!svg) { alert('SVG renderer not active. Use PNG.'); return; }
+    var xml = new XMLSerializer().serializeToString(svg);
+    var blob = new Blob([xml], {type: 'image/svg+xml'});
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (PAYLOAD.filename || 'chart') + '.svg'; a.click();
+  }
+  function downloadText(name, text){
+    var blob = new Blob([text], {type: 'text/plain'});
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  }
+
+  // ------------------------------------------------------------------
+  // SPEC SHEETS (localStorage)
+  // ------------------------------------------------------------------
+
+  function loadSheets(){
+    try {
+      var raw = localStorage.getItem(state.sheetsKey);
+      if (raw){ state.sheets = Object.assign({}, state.sheets, JSON.parse(raw)); }
+    } catch(e){}
+  }
+  function saveSheets(){
+    try { localStorage.setItem(state.sheetsKey, JSON.stringify(state.sheets)); } catch(e){}
+  }
+  function refreshSheetDropdown(){
+    var sel = document.getElementById('sheet-select');
+    sel.innerHTML = '';
+    var none = document.createElement('option'); none.value = ''; none.textContent = '(none)'; sel.appendChild(none);
+    Object.keys(state.sheets).forEach(function(id){
+      var op = document.createElement('option'); op.value = id; op.textContent = state.sheets[id].name || id; sel.appendChild(op);
+    });
+    sel.value = state.activeSheet || '';
+  }
+  function exportSheet(){
+    return {
+      schema_version: 1,
+      spec_sheet_id: state.activeSheet || 'unnamed',
+      name: state.activeSheet || 'unnamed',
+      base_theme: state.theme, base_palette: state.palette,
+      base_dimension_preset: state.dimension,
+      overrides: Object.assign({}, state.knobValues),
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    };
+  }
+  function applySheet(sheet){
+    if (!sheet) return;
+    if (sheet.base_theme){ state.theme = sheet.base_theme; applyTheme(sheet.base_theme); }
+    if (sheet.base_palette){ state.palette = sheet.base_palette; applyPalette(sheet.base_palette); }
+    if (sheet.base_dimension_preset){ state.dimension = sheet.base_dimension_preset; applyDimension(sheet.base_dimension_preset); }
+    Object.keys(sheet.overrides || {}).forEach(function(n){
+      var def = KNOB_INDEX[n]; if (!def) return;
+      applyKnob(def, sheet.overrides[n]);
+    });
+    render(); rerenderKnobs();
+  }
+
+  // ------------------------------------------------------------------
+  // WIRE UI
+  // ------------------------------------------------------------------
+
+  document.querySelectorAll('.tabs button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('.tabs button').forEach(function(x){ x.classList.remove('active'); });
+      document.querySelectorAll('.tab').forEach(function(x){ x.classList.remove('active'); });
+      b.classList.add('active');
+      document.getElementById('tab-' + b.dataset.tab).classList.add('active');
+    });
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', function(){
+    state.chart && state.chart.dispatchAction({type: 'restore'});
+  });
+  document.getElementById('btn-full').addEventListener('click', function(){
+    var el = document.getElementById('chart');
+    if (document.fullscreenElement) document.exitFullscreen(); else el.requestFullscreen();
+  });
+  document.getElementById('btn-png2x').addEventListener('click', function(){ downloadImage(2, 'png'); });
+  document.getElementById('btn-png4x').addEventListener('click', function(){ downloadImage(4, 'png'); });
+  document.getElementById('btn-svg').addEventListener('click', function(){ downloadSvg(); });
+
+  document.getElementById('knob-search').addEventListener('input', function(e){ filterKnobs(e.target.value); });
+  document.getElementById('btn-reset-knobs').addEventListener('click', function(){ resetToTheme(); });
+
+  // sheet buttons
+  document.getElementById('sheet-save').addEventListener('click', function(){
+    var id = state.activeSheet || prompt('Name for this spec sheet:'); if (!id) return;
+    var s = exportSheet(); s.spec_sheet_id = id; s.name = id;
+    state.sheets[id] = s; state.activeSheet = id; saveSheets(); refreshSheetDropdown();
+    document.getElementById('sheet-status').textContent = 'saved';
+  });
+  document.getElementById('sheet-saveas').addEventListener('click', function(){
+    var id = prompt('New sheet name:'); if (!id) return;
+    var s = exportSheet(); s.spec_sheet_id = id; s.name = id;
+    state.sheets[id] = s; state.activeSheet = id; saveSheets(); refreshSheetDropdown();
+  });
+  document.getElementById('sheet-delete').addEventListener('click', function(){
+    if (!state.activeSheet) return;
+    delete state.sheets[state.activeSheet]; state.activeSheet = ''; saveSheets(); refreshSheetDropdown();
+  });
+  document.getElementById('sheet-download').addEventListener('click', function(){
+    downloadText((state.activeSheet || 'spec_sheet') + '.json', JSON.stringify(exportSheet(), null, 2));
+  });
+  document.getElementById('sheet-upload').addEventListener('click', function(){
+    document.getElementById('sheet-upload-file').click();
+  });
+  document.getElementById('sheet-upload-file').addEventListener('change', function(e){
+    var f = e.target.files[0]; if (!f) return;
+    var fr = new FileReader();
+    fr.onload = function(){
+      try {
+        var s = JSON.parse(fr.result);
+        var id = s.spec_sheet_id || s.name || ('sheet_' + Date.now());
+        state.sheets[id] = s; state.activeSheet = id; saveSheets(); refreshSheetDropdown();
+        applySheet(s);
+      } catch(err){ alert('bad JSON'); }
+    };
+    fr.readAsText(f);
+  });
+  document.getElementById('sheet-select').addEventListener('change', function(e){
+    state.activeSheet = e.target.value;
+    if (state.activeSheet){ applySheet(state.sheets[state.activeSheet]); }
+    else { resetToTheme(); }
+  });
+
+  // init
+  loadSheets(); refreshSheetDropdown();
+  renderKnobCards();
+  filterKnobs('');
+  render();
+  if (state.activeSheet && state.sheets[state.activeSheet]) applySheet(state.sheets[state.activeSheet]);
+})();
+"""
+
+
+def _essential_names_map() -> Dict[str, bool]:
+    from echart_studio import ESSENTIAL_NAMES
+    return {n: True for n in ESSENTIAL_NAMES}
+
+
+def _themes_for_js() -> Dict[str, Any]:
+    """Return a name -> ECharts theme object map for registerTheme."""
+    return {name: theme["echarts"] for name, theme in THEMES.items()}
+
+
+def _theme_knob_values_for_js() -> Dict[str, Dict[str, Any]]:
+    return {name: dict(theme["knob_values"]) for name, theme in THEMES.items()}
+
+
+def _palettes_for_js() -> Dict[str, Any]:
+    return {name: {"colors": list(p["colors"]), "kind": p["kind"]}
+            for name, p in PALETTES.items()}
+
+
+def _dimensions_for_js() -> Dict[str, Any]:
+    return {name: {"width": d["width"], "height": d["height"]}
+            for name, d in DIMENSION_PRESETS.items()}
+
+
+def render_editor_html(
+    option: Dict[str, Any],
+    chart_id: str,
+    chart_type: str,
+    theme: str,
+    palette: str,
+    dimension_preset: str,
+    knob_defs: List[Dict[str, Any]],
+    spec_sheets: Optional[Dict[str, Any]] = None,
+    active_spec_sheet: Optional[str] = None,
+    user_id: Optional[str] = None,
+    filename_base: Optional[str] = None,
+) -> str:
+    """Render the single-chart editor HTML document."""
+    from echart_studio import __version__ as VERSION
+
+    title = option.get("title", {}).get("text", "") or filename_base or "chart"
+    essential_map = _essential_names_map()
+    # Also mark per-knob .essential flags
+    for d in knob_defs:
+        if d.get("essential"):
+            essential_map[d["name"]] = True
+
+    payload = {
+        "option": option,
+        "chartId": chart_id,
+        "chartType": chart_type,
+        "theme": theme,
+        "palette": palette,
+        "dimension": dimension_preset,
+        "knobDefs": knob_defs,
+        "themes": _themes_for_js(),
+        "palettes": _palettes_for_js(),
+        "dimensions": _dimensions_for_js(),
+        "typographyOverrides": dict(TYPOGRAPHY_OVERRIDES),
+        "themeKnobValues": _theme_knob_values_for_js(),
+        "paletteColors": list(PALETTES[palette]["colors"]),
+        "paletteKind": PALETTES[palette]["kind"],
+        "sheets": spec_sheets or {},
+        "activeSheet": active_spec_sheet or "",
+        "sheetsKey": f"echart_studio_sheets_{user_id or 'anon'}",
+        "prefKey": f"echart_studio_prefs_{user_id or 'anon'}_{chart_type}",
+        "filename": filename_base or "chart",
+        "version": VERSION,
+    }
+    payload_js = (
+        "var PAYLOAD = " + json.dumps(payload, default=str) + ";\n"
+        "var ESSENTIAL_NAMES = " + json.dumps(essential_map) + ";\n"
+    )
+    html = (HTML_SHELL
+            .replace("__TITLE__", _html_escape(title))
+            .replace("__CHART_ID__", chart_id)
+            .replace("__CHART_TYPE__", chart_type)
+            .replace("__VERSION__", VERSION)
+            .replace("__PAYLOAD__", payload_js)
+            .replace("__APP__", APP_JS)
+            .replace("__GS_FONT_SANS__", GS_FONT_SANS)
+            .replace("__GS_NAVY__", GS_NAVY)
+            .replace("__GS_INK__", GS_INK)
+            .replace("__GS_PAPER__", GS_PAPER))
+    return html
+
+
+# =============================================================================
+# PART 2 -- DASHBOARD HTML
+# =============================================================================
+# GS-branded cards, tabs, grid layout, global filter bus, echarts.connect()
+# link groups, brush cross-filter via shared dataset scopes.
+
+
+DASHBOARD_SHELL = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>__TITLE__</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+/* =============================================================
+   Goldman Sachs canonical design tokens (synced with
+   GS/viz/echarts/config.py). There is one style -- this one.
+   ============================================================= */
+:root {
+  --gs-navy:       __GS_NAVY__;
+  --gs-navy-deep:  __GS_NAVY_DEEP__;
+  --gs-sky:        __GS_SKY__;
+  --gs-ink:        __GS_INK__;
+  --gs-paper:      __GS_PAPER__;
+  --gs-bg:         __GS_BG__;
+  --gs-grey-70:    __GS_GREY_70__;
+  --gs-grey-40:    __GS_GREY_40__;
+  --gs-grey-20:    __GS_GREY_20__;
+  --gs-grey-10:    __GS_GREY_10__;
+  --gs-grey-05:    __GS_GREY_05__;
+  --gs-pos:        __GS_POS__;
+  --gs-neg:        __GS_NEG__;
+  --gs-font-sans:  __GS_FONT_SANS__;
+  --gs-font-serif: __GS_FONT_SERIF__;
+
+  /* semantic slots used by the chrome */
+  --bg:            var(--gs-bg);
+  --surface:       var(--gs-paper);
+  --surface-2:     var(--gs-grey-05);
+  --surface-hover: #F2F5FA;
+  --text:          var(--gs-ink);
+  --text-dim:      var(--gs-grey-70);
+  --text-faint:    var(--gs-grey-40);
+  --border:        var(--gs-grey-10);
+  --border-strong: var(--gs-grey-20);
+  --accent:        var(--gs-navy);
+  --accent-2:      var(--gs-sky);
+  --accent-soft:   rgba(115,153,198,0.16);
+  --accent-ring:   rgba(0,47,108,0.14);
+  --pos:           var(--gs-pos);
+  --pos-soft:      rgba(46,125,50,0.12);
+  --neg:           var(--gs-neg);
+  --neg-soft:      rgba(179,38,30,0.10);
+
+  /* surface geometry */
+  --shadow-sm:  0 1px 2px rgba(10,18,40,0.04);
+  --shadow:     0 1px 3px rgba(10,18,40,0.06),
+                0 1px 2px rgba(10,18,40,0.04);
+  --shadow-md:  0 4px 8px -2px rgba(10,18,40,0.08),
+                0 2px 4px -2px rgba(10,18,40,0.05);
+  --shadow-lg:  0 12px 24px -4px rgba(10,18,40,0.12),
+                0 4px 8px -4px rgba(10,18,40,0.08);
+  --radius:     6px;
+  --radius-sm:  4px;
+  --bounce:     cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease:       cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg); color: var(--text);
+  font-family: var(--gs-font-sans);
+  font-size: 14px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "ss02", "kern", "liga", "tnum";
+  transition: background-color 0.15s var(--ease),
+              color 0.15s var(--ease);
+}
+
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* GS brand mark -- a compact navy "blue-box" reminiscent of the
+   historic Goldman Sachs logo. Pure CSS, no images. */
+.gs-mark {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--gs-font-serif); letter-spacing: 0.01em;
+}
+.gs-mark .gs-box {
+  width: 28px; height: 28px; background: var(--gs-navy);
+  color: #fff; display: inline-flex; align-items: center;
+  justify-content: center;
+  font-family: var(--gs-font-serif); font-weight: 700;
+  font-size: 13px; letter-spacing: 0.02em;
+}
+.gs-mark .gs-wordmark {
+  font-family: var(--gs-font-serif); font-weight: 600;
+  font-size: 13px; color: var(--gs-ink);
+  letter-spacing: 0.03em; white-space: nowrap;
+}
+
+header.app-header {
+  background: var(--surface);
+  border-bottom: 2px solid var(--gs-navy);
+  padding: 16px 28px 14px 28px;
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 18px; flex-wrap: wrap;
+}
+.header-titles { flex: 1 1 auto; min-width: 280px;
+                   display: flex; flex-direction: column; gap: 4px; }
+.header-titles h1 {
+  font-family: var(--gs-font-serif);
+  font-size: 22px; margin: 2px 0 0 0; font-weight: 600;
+  letter-spacing: -0.005em; color: var(--gs-ink);
+}
+.header-titles .subtitle {
+  color: var(--text-dim); font-size: 13px;
+  max-width: 820px; font-family: var(--gs-font-sans);
+}
+.header-meta { color: var(--text-faint); font-size: 12px;
+                 display: flex; align-items: center; gap: 10px;
+                 font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+.header-meta .meta-dot {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; background: var(--gs-grey-05);
+  border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text-dim); font-size: 11px;
+}
+.header-meta .meta-dot span { color: var(--gs-ink); font-weight: 600; }
+.header-actions .icon-btn.refreshing {
+  background: var(--gs-grey-05); color: var(--text-dim);
+  cursor: wait; opacity: 0.9;
+}
+.header-actions .icon-btn.refresh-success {
+  background: var(--pos); color: #fff; border-color: var(--pos);
+}
+.header-actions .icon-btn.refresh-error {
+  background: var(--neg); color: #fff; border-color: var(--neg);
+}
+.badge {
+  padding: 3px 9px; font-size: 10px; border-radius: 2px;
+  background: var(--gs-navy); color: #fff;
+  font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  font-family: var(--gs-font-sans);
+}
+.header-actions { display: flex; gap: 6px; align-items: center; }
+.icon-btn {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 12px;
+  cursor: pointer; color: var(--text); font-size: 12px;
+  font-family: var(--gs-font-sans); font-weight: 500;
+  letter-spacing: 0.01em;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: background-color 0.12s var(--ease),
+              border-color 0.12s var(--ease),
+              color 0.12s var(--ease),
+              transform 0.12s var(--bounce);
+}
+.icon-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent-2);
+  color: var(--accent);
+}
+.icon-btn:active { transform: scale(0.97); }
+.icon-btn.primary {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.icon-btn.primary:hover {
+  background: var(--gs-navy-deep); border-color: var(--gs-navy-deep);
+  color: #fff;
+}
+
+nav.tab-bar {
+  display: flex; gap: 0; padding: 0 28px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: thin;
+}
+.tab-btn {
+  background: none; border: none;
+  padding: 12px 18px; font-size: 12px; color: var(--text-dim);
+  border-bottom: 2px solid transparent; cursor: pointer;
+  transition: color 0.12s var(--ease),
+              border-color 0.15s var(--ease),
+              background-color 0.12s var(--ease);
+  font-family: var(--gs-font-sans);
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.tab-btn:hover { color: var(--accent); background: var(--surface-hover); }
+.tab-btn.active {
+  color: var(--accent); border-bottom-color: var(--gs-navy);
+  background: var(--gs-grey-05);
+}
+
+.filter-bar {
+  background: var(--surface); padding: 12px 28px;
+  border-bottom: 1px solid var(--border);
+  display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+}
+.filter-item {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-dim);
+  font-family: var(--gs-font-sans);
+}
+.filter-item label {
+  font-weight: 600; color: var(--text);
+  letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px;
+}
+.filter-item select, .filter-item input[type=text], .filter-item input[type=date] {
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface);
+  font-size: 13px; color: var(--text); font-family: inherit;
+  transition: border-color 0.15s var(--ease),
+              box-shadow 0.15s var(--ease);
+}
+.filter-item select:focus, .filter-item input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.filter-item input[type=checkbox] {
+  accent-color: var(--accent); width: 15px; height: 15px;
+}
+.filter-reset { margin-left: auto; }
+
+main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
+
+.tab-panel {
+  display: none;
+  animation: fadeInUp 0.22s var(--ease);
+}
+.tab-panel.active { display: block; }
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tab-panel-header {
+  margin-bottom: 14px;
+  display: flex; justify-content: space-between; align-items: baseline;
+  border-left: 3px solid var(--gs-navy); padding-left: 10px;
+}
+.tab-panel-header h2 {
+  font-family: var(--gs-font-serif);
+  font-size: 13px; margin: 0; color: var(--text-dim);
+  font-weight: 500; font-style: italic;
+}
+
+.grid { display: grid; grid-template-columns: repeat(__COLS__, 1fr); gap: 14px; }
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: box-shadow 0.18s var(--ease),
+              border-color 0.18s var(--ease);
+  display: flex; flex-direction: column;
+}
+.tile:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent-2);
+}
+.tile.is-fullscreen {
+  position: fixed; inset: 16px; z-index: 50;
+  box-shadow: var(--shadow-lg);
+  grid-column: 1/-1 !important;
+}
+.tile-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  background: var(--surface);
+}
+.tile-title {
+  font-family: var(--gs-font-sans);
+  font-size: 12px; font-weight: 600; color: var(--gs-ink);
+  letter-spacing: 0.04em; text-transform: uppercase;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile-actions { display: flex; gap: 2px; }
+.tile-btn {
+  background: none; border: 1px solid transparent;
+  border-radius: var(--radius-sm); padding: 3px 8px;
+  cursor: pointer; color: var(--text-faint); font-size: 11px;
+  font-family: var(--gs-font-sans); font-weight: 600;
+  letter-spacing: 0.04em;
+  transition: color 0.12s var(--ease),
+              background-color 0.12s var(--ease),
+              border-color 0.12s var(--ease);
+}
+.tile-btn:hover { background: var(--surface-2);
+                   color: var(--accent);
+                   border-color: var(--accent-2); }
+.tile-body { padding: 10px 14px; flex: 1 1 auto; position: relative; }
+
+/* chart tile */
+.chart-tile .tile-body { padding: 6px 8px 8px; }
+.chart-div { width: 100%; min-height: 240px; }
+
+/* kpi tile */
+.kpi-tile {
+  padding: 16px 20px 18px 20px;
+  display: flex; flex-direction: column; justify-content: center;
+  min-height: 118px; gap: 0;
+  border-top: 3px solid var(--gs-navy);
+}
+.kpi-label {
+  font-family: var(--gs-font-sans);
+  font-size: 10px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.09em;
+  font-weight: 700;
+}
+.kpi-value {
+  font-family: var(--gs-font-serif);
+  font-size: 32px; font-weight: 600; margin-top: 8px;
+  line-height: 1.02; color: var(--gs-navy);
+  font-feature-settings: "tnum";
+  letter-spacing: -0.015em;
+}
+.kpi-value.small { font-size: 24px; }
+.kpi-delta {
+  font-family: var(--gs-font-sans);
+  font-size: 11px; margin-top: 6px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 2px; align-self: flex-start;
+  letter-spacing: 0.02em;
+}
+.kpi-delta.pos { color: var(--pos); background: var(--pos-soft); }
+.kpi-delta.neg { color: var(--neg); background: var(--neg-soft); }
+.kpi-delta.flat { color: var(--text-dim); background: var(--surface-2); }
+.kpi-sub { font-size: 11px; color: var(--text-faint); margin-top: 6px;
+           font-family: var(--gs-font-sans); }
+.kpi-sparkline { height: 32px; margin-top: 10px;
+                  margin-left: -4px; margin-right: -4px; }
+
+/* markdown tile */
+.markdown-tile {
+  background: transparent; border: none; box-shadow: none;
+  padding: 0;
+}
+.markdown-tile .tile-body { padding: 12px 4px; }
+.markdown-tile h1, .markdown-tile h2, .markdown-tile h3 {
+  margin: 6px 0 6px 0; color: var(--text);
+  font-family: var(--gs-font-serif); font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.markdown-tile h1 { font-size: 20px; }
+.markdown-tile h2 { font-size: 15px; }
+.markdown-tile h3 {
+  font-family: var(--gs-font-sans);
+  font-size: 11px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700;
+}
+.markdown-tile p { margin: 4px 0; color: var(--text-dim); line-height: 1.6;
+                    font-family: var(--gs-font-sans); }
+.markdown-tile a { color: var(--accent); text-decoration: underline;
+                    text-decoration-color: var(--accent-2);
+                    text-underline-offset: 3px; }
+.markdown-tile a:hover { color: var(--gs-navy-deep); }
+
+/* divider tile */
+.divider-tile {
+  background: transparent; border: none; box-shadow: none;
+  padding: 8px 0;
+}
+.divider-tile hr {
+  border: none; border-top: 1px solid var(--gs-grey-20);
+  margin: 0;
+}
+
+/* table tile */
+.table-tile .tile-body { padding: 0; }
+.data-table {
+  border-collapse: collapse; width: 100%; font-size: 12px;
+  font-family: var(--gs-font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.data-table thead { background: var(--gs-grey-05);
+                      position: sticky; top: 0;
+                      border-bottom: 2px solid var(--gs-navy); }
+.data-table th {
+  padding: 8px 12px; text-align: left; font-weight: 700;
+  color: var(--gs-ink); text-transform: uppercase;
+  letter-spacing: 0.08em; font-size: 10px;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--surface-hover); }
+.data-table.compact th { padding: 5px 8px; font-size: 9px; }
+.data-table.compact td { padding: 5px 8px; font-size: 11px; }
+.data-table.clickable tbody tr { cursor: pointer; }
+.data-table th.sortable { cursor: pointer; user-select: none; }
+.data-table th.sortable:hover { background: var(--gs-grey-10); }
+
+.table-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; background: var(--gs-grey-05);
+  border-bottom: 1px solid var(--border);
+}
+.table-toolbar .table-search {
+  flex: 1; min-width: 120px; max-width: 320px;
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 4px; font-size: 12px; font-family: var(--gs-font-sans);
+  background: var(--surface);
+}
+.table-toolbar .table-search:focus { outline: none; border-color: var(--gs-navy); }
+.table-toolbar .table-count {
+  color: var(--text-faint); font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.table-empty {
+  padding: 32px 16px; text-align: center; color: var(--text-faint);
+  font-size: 12px; font-style: italic;
+}
+
+/* modal popup (row-click details) */
+.ed-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(26, 54, 93, 0.45);
+  display: none; align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.ed-modal {
+  background: var(--surface); border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  max-width: 640px; min-width: 360px;
+  max-height: 80vh; overflow: auto;
+  border-top: 4px solid var(--gs-navy);
+}
+.ed-modal-header {
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.ed-modal-title { font-weight: 600; font-size: 15px; color: var(--gs-navy); }
+.ed-modal-close {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 16px; color: var(--text-faint); padding: 4px 8px;
+}
+.ed-modal-close:hover { color: var(--text); }
+.ed-modal-body { padding: 16px 18px; font-size: 12px; }
+.modal-detail-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.modal-detail-table th {
+  text-align: left; padding: 6px 12px 6px 0; width: 42%;
+  color: var(--text-faint); font-weight: 500; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.modal-detail-table td {
+  padding: 6px 0; color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.modal-detail-table tr:last-child td { border-bottom: none; }
+.modal-extra {
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--border); font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* filter widgets extensions */
+.filter-item.slider { min-width: 200px; }
+.filter-item.slider .slider-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.filter-item.slider input[type="range"] { flex: 1; }
+.filter-item.slider .slider-val {
+  min-width: 36px; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--gs-navy);
+  font-weight: 600; font-size: 12px;
+}
+.filter-item.radio-group .radio-row {
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+}
+.filter-item.radio-group label.radio-opt {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--text); font-weight: 400;
+  text-transform: none; letter-spacing: 0; cursor: pointer;
+}
+.filter-item.text input[type="text"],
+.filter-item.number input[type="number"] {
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 4px; font-size: 12px;
+  font-family: var(--gs-font-sans);
+  background: var(--surface);
+  min-width: 120px;
+}
+.filter-item.text input[type="text"]:focus,
+.filter-item.number input[type="number"]:focus {
+  outline: none; border-color: var(--gs-navy);
+}
+
+/* stat_grid widget */
+.stat-grid-tile .tile-body { padding: 0; }
+.stat-grid-tile .stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1px; background: var(--border);
+}
+.stat-grid-tile .stat-cell {
+  background: var(--surface); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.stat-grid-tile .stat-label {
+  font-size: 10px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
+}
+.stat-grid-tile .stat-value {
+  font-size: 18px; color: var(--gs-navy); font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.stat-grid-tile .stat-sub {
+  font-size: 10px; color: var(--text-faint);
+}
+
+/* image widget */
+.image-tile .tile-body {
+  padding: 0; display: flex; align-items: center; justify-content: center;
+}
+.image-tile img { max-width: 100%; max-height: 100%; display: block; }
+
+.status { color: var(--text-faint); font-size: 11px;
+          font-family: var(--gs-font-sans);
+          font-variant-numeric: tabular-nums; }
+
+footer.app-footer {
+  padding: 14px 28px; border-top: 1px solid var(--border);
+  background: var(--gs-grey-05); color: var(--text-faint);
+  font-size: 11px; font-family: var(--gs-font-sans);
+  letter-spacing: 0.02em;
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 8px;
+}
+footer.app-footer .gs-mark .gs-box {
+  width: 22px; height: 22px; font-size: 11px;
+}
+footer.app-footer .gs-mark .gs-wordmark { font-size: 12px; }
+
+/* responsive */
+@media (max-width: 1024px) {
+  .grid > .tile { grid-column: span 6; }
+}
+@media (max-width: 720px) {
+  .grid > .tile { grid-column: span 12; }
+  header.app-header { padding: 14px 16px; }
+  nav.tab-bar { padding: 0 16px; }
+  .filter-bar { padding: 10px 16px; }
+  main.app-main { padding: 14px 16px; }
+}
+
+/* motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <div class="header-titles">
+      <span class="gs-mark">
+        <span class="gs-box">GS</span>
+        <span class="gs-wordmark">Goldman Sachs</span>
+      </span>
+      <h1>__TITLE__</h1>
+      <div class="subtitle">__DESCRIPTION__</div>
+    </div>
+    <div class="header-meta">
+      <span class="badge" id="theme-badge">__THEME__</span>
+      <span class="meta-dot" id="data-as-of" style="display:none">
+        Data as of <span id="data-as-of-val"></span>
+      </span>
+      <span id="chart-count"></span>
+    </div>
+    <div class="header-actions" id="header-actions">
+      <button class="icon-btn" id="refresh-btn"
+              title="Refresh dashboard data" style="display:none">
+        <span id="refresh-btn-label">Refresh</span>
+      </button>
+      <button class="icon-btn primary" id="export-all"
+              title="Download all charts as PNG (2x)">
+        Download PNGs
+      </button>
+    </div>
+  </header>
+  __TAB_BAR__
+  __FILTER_BAR__
+  <main class="app-main">
+    __TAB_PANELS__
+  </main>
+  <footer class="app-footer">
+    <span class="gs-mark">
+      <span class="gs-box">GS</span>
+      <span class="gs-wordmark">Goldman Sachs</span>
+    </span>
+    <span class="status">
+      echart_dashboard v__VERSION__ &middot; ECharts@5 &middot; __TIMESTAMP__
+    </span>
+  </footer>
+</div>
+<script>
+__PAYLOAD__
+__APP__
+</script>
+</body>
+</html>
+"""
+
+
+DASHBOARD_APP_JS = r"""
+(function(){
+  'use strict';
+  var MANIFEST = PAYLOAD.manifest;
+  var SPECS    = PAYLOAD.specs;       // id -> ECharts option dict
+  var DATASETS = PAYLOAD.datasets;    // name -> {source: [...rows]}
+
+  // Revive string-encoded JS functions (renderItem, formatter, filter)
+  // into real functions. Python emits them as strings because JSON cannot
+  // carry code; ECharts needs real functions at setOption() time.
+  function _isFnStr(s) {
+    return typeof s === 'string' && /^\s*function\s*\(/.test(s);
+  }
+  function reviveFns(x) {
+    if (x == null) return x;
+    if (_isFnStr(x)) {
+      try { return new Function('return (' + x + ')')(); }
+      catch(e) { return x; }
+    }
+    if (Array.isArray(x)) {
+      for (var i = 0; i < x.length; i++) x[i] = reviveFns(x[i]);
+      return x;
+    }
+    if (typeof x === 'object') {
+      for (var k in x) {
+        if (Object.prototype.hasOwnProperty.call(x, k)) {
+          x[k] = reviveFns(x[k]);
+        }
+      }
+    }
+    return x;
+  }
+
+  // register themes so echarts can use them
+  try {
+    Object.keys(PAYLOAD.themes || {}).forEach(function(tn){
+      try { echarts.registerTheme(tn, PAYLOAD.themes[tn]); } catch(e){}
+    });
+  } catch(e){}
+
+  // ----- filter state + event bus -----
+  var filterState = {};
+  (MANIFEST.filters || []).forEach(function(f){
+    filterState[f.id] = f.default != null ? f.default :
+                          (f.type === 'multiSelect' ? [] : '');
+  });
+  var listeners = {}; // filterId -> [chartId, ...]
+
+  function subscribe(chartId, filterIds){
+    filterIds.forEach(function(fid){
+      listeners[fid] = listeners[fid] || [];
+      if (listeners[fid].indexOf(chartId) < 0) listeners[fid].push(chartId);
+    });
+  }
+  function broadcast(filterId){
+    (listeners[filterId] || []).forEach(rerenderChart);
+    renderKpis();
+    renderTables();
+  }
+
+  // ----- dataset management -----
+  var currentDatasets = {};
+  Object.keys(DATASETS || {}).forEach(function(name){
+    currentDatasets[name] = JSON.parse(JSON.stringify(DATASETS[name].source || DATASETS[name]));
+  });
+  function resetDataset(name){
+    var src = (DATASETS[name] && DATASETS[name].source) || DATASETS[name];
+    currentDatasets[name] = JSON.parse(JSON.stringify(src));
+  }
+
+  // ----- widget meta registry -----
+  var WIDGET_META = {};
+  function collectWidgets(){
+    function visit(rows){
+      rows.forEach(function(row){ row.forEach(function(w){
+        if (w.id) WIDGET_META[w.id] = w;
+      }); });
+    }
+    var layout = MANIFEST.layout || {};
+    if (layout.kind === 'tabs'){
+      (layout.tabs || []).forEach(function(t){ visit(t.rows || []); });
+    } else {
+      visit(layout.rows || []);
+    }
+  }
+  collectWidgets();
+
+  function targetMatch(target, id){
+    if (target === '*') return true;
+    if (target.indexOf('*') < 0) return target === id;
+    var rx = new RegExp('^' + target.replace(/\*/g,'.*') + '$');
+    return rx.test(id);
+  }
+  function filtersForChart(chartId){
+    var out = [];
+    (MANIFEST.filters || []).forEach(function(f){
+      if ((f.targets || []).some(function(t){ return targetMatch(t, chartId); })){
+        out.push(f.id);
+      }
+    });
+    return out;
+  }
+
+  // ----- apply global filters to a dataset -----
+  function resolveDateRange(val){
+    var now = Date.now();
+    if (typeof val === 'string'){
+      var m = val.match(/^(\d+)([DWMY])$/);
+      if (m){
+        var n = parseInt(m[1]);
+        var ms = {D:86400e3, W:7*86400e3, M:30*86400e3, Y:365*86400e3}[m[2]];
+        return [now - n*ms, now];
+      }
+      if (val === 'YTD'){
+        var jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
+        return [jan1, now];
+      }
+      if (val === 'All') return [0, now];
+    }
+    if (Array.isArray(val) && val.length === 2){
+      return [Date.parse(val[0]), Date.parse(val[1])];
+    }
+    return [0, now];
+  }
+
+  // Generic cell-vs-value comparator used by slider/number/text + conditional
+  // formatting rules on tables. op defaults to '==' (equality).
+  function cmpOp(op, cell, val){
+    if (cell == null) return false;
+    if (op == null) op = '==';
+    if (op === 'contains')   return String(cell).toLowerCase().indexOf(String(val).toLowerCase()) >= 0;
+    if (op === 'startsWith') return String(cell).toLowerCase().indexOf(String(val).toLowerCase()) === 0;
+    if (op === 'endsWith')   return String(cell).toLowerCase().lastIndexOf(String(val).toLowerCase()) === String(cell).length - String(val).length;
+    var a = +cell, b = +val;
+    if (isNaN(a) || isNaN(b)) {
+      if (op === '==' ) return String(cell) === String(val);
+      if (op === '!=' ) return String(cell) !== String(val);
+      return false;
+    }
+    if (op === '==') return a === b;
+    if (op === '!=') return a !== b;
+    if (op === '>' ) return a >  b;
+    if (op === '>=') return a >= b;
+    if (op === '<' ) return a <  b;
+    if (op === '<=') return a <= b;
+    return false;
+  }
+
+  function applyFilters(name, rows){
+    var header = rows[0]; var body = rows.slice(1); var out = body;
+    (MANIFEST.filters || []).forEach(function(f){
+      var val = filterState[f.id];
+      if (val === '' || val == null || (Array.isArray(val) && val.length === 0)) return;
+      // Escape-hatch: if the filter declares `all_value` and the current
+      // value matches it, treat this filter as a no-op. Lets radio/select
+      // filters have an explicit "All / Any / None" option without having
+      // to invent a null sentinel.
+      if (f.all_value != null && String(val) === String(f.all_value)) return;
+      var idx = f.field != null ? header.indexOf(f.field) : -1;
+      if (f.type === 'dateRange'){
+        if (idx < 0) idx = 0;
+        var r = resolveDateRange(val);
+        out = out.filter(function(row){
+          var c = row[idx]; if (c == null) return false;
+          var d = (typeof c === 'string') ? Date.parse(c) : +c;
+          if (isNaN(d)) return true;
+          return d >= r[0] && d <= r[1];
+        });
+      } else if ((f.type === 'select' || f.type === 'radio') && idx >= 0){
+        out = out.filter(function(row){ return String(row[idx]) === String(val); });
+      } else if (f.type === 'multiSelect' && idx >= 0){
+        out = out.filter(function(row){ return val.indexOf(String(row[idx])) >= 0; });
+      } else if (f.type === 'numberRange' && idx >= 0){
+        var lo = val[0], hi = val[1];
+        out = out.filter(function(row){ var n = +row[idx]; return !isNaN(n) && n>=lo && n<=hi; });
+      } else if (f.type === 'toggle' && idx >= 0){
+        if (val) out = out.filter(function(row){ return !!row[idx]; });
+      } else if ((f.type === 'slider' || f.type === 'number' || f.type === 'text')
+                   && idx >= 0){
+        var op = f.op || (f.type === 'text' ? 'contains' : '>=');
+        var transform = f.transform; // optional 'abs' | 'neg'
+        out = out.filter(function(row){
+          var cell = row[idx];
+          if (transform === 'abs' && cell != null) cell = Math.abs(+cell);
+          else if (transform === 'neg' && cell != null) cell = -(+cell);
+          return cmpOp(op, cell, val);
+        });
+      }
+    });
+    return [header].concat(out);
+  }
+
+  // ----- rewire a chart spec to use a shared dataset -----
+  function materializeOption(cid){
+    var w = WIDGET_META[cid]; var base = SPECS[cid];
+    var opt = JSON.parse(JSON.stringify(base));
+    if (w && w.dataset_ref && currentDatasets[w.dataset_ref]){
+      var filt = applyFilters(w.dataset_ref, currentDatasets[w.dataset_ref]);
+      opt.dataset = {source: filt};
+      var header = filt[0];
+      (opt.series || []).forEach(function(s, i){
+        if (s.type === 'line' || s.type === 'bar' || s.type === 'scatter' || s.type === 'area'){
+          if (!s.encode){
+            var yIdx = Math.min(1 + i, header.length - 1);
+            s.encode = {x: header[0], y: header[yIdx]};
+            s.name = s.name || header[yIdx];
+          }
+          delete s.data;
+        }
+      });
+    }
+    return opt;
+  }
+
+  // ----- chart init/render -----
+  var CHARTS = {};
+
+  function chartThemeName(){
+    // Use the manifest theme regardless of dark/light dashboard surface.
+    // Dashboard chrome and chart styling are decoupled by design.
+    return MANIFEST.theme || 'gs_clean';
+  }
+
+  function initChart(cid){
+    var el = document.getElementById('chart-' + cid); if (!el) return;
+    if (CHARTS[cid]) return;
+    var theme = chartThemeName();
+    var inst = echarts.init(el, theme in PAYLOAD.themes ? theme : null);
+    CHARTS[cid] = {inst: inst, datasetRef: WIDGET_META[cid].dataset_ref};
+    inst.setOption(reviveFns(materializeOption(cid)), true);
+    subscribe(cid, filtersForChart(cid));
+    wireBrush(cid, inst);
+  }
+  function rerenderChart(cid){
+    var rec = CHARTS[cid]; if (!rec) return;
+    rec.inst.setOption(reviveFns(materializeOption(cid)), true);
+  }
+
+  // ----- brush cross-filter -----
+  function wireBrush(cid, inst){
+    var link = (MANIFEST.links || []).find(function(l){
+      return l.brush && (l.members || []).some(function(m){ return targetMatch(m, cid); });
+    });
+    if (!link) return;
+    inst.on('brushSelected', function(params){
+      var sel = (params.batch && params.batch[0]) || {};
+      applyBrush(cid, link, sel.areas || []);
+    });
+  }
+  function applyBrush(cid, link, areas){
+    var members = (link.members || []).flatMap(function(p){
+      return Object.keys(WIDGET_META).filter(function(k){
+        return targetMatch(p, k) && WIDGET_META[k].widget === 'chart';
+      });
+    });
+    if (!areas.length){
+      members.forEach(function(m){
+        if (m === cid) return;
+        var rec = CHARTS[m]; if (!rec || !rec.datasetRef) return;
+        resetDataset(rec.datasetRef); rerenderChart(m);
+      });
+      return;
+    }
+    var xMin, xMax;
+    areas.forEach(function(a){
+      if (a.coordRange && a.coordRange.length >= 2){
+        var cr = a.coordRange;
+        var xr = Array.isArray(cr[0]) ? cr[0] : cr;
+        if (xMin == null) xMin = xr[0]; else xMin = Math.min(xMin, xr[0]);
+        if (xMax == null) xMax = xr[1]; else xMax = Math.max(xMax, xr[1]);
+      }
+    });
+    members.forEach(function(m){
+      if (m === cid) return;
+      var rec = CHARTS[m]; if (!rec || !rec.datasetRef) return;
+      var ds = DATASETS[rec.datasetRef]; if (!ds) return;
+      var src = ds.source || ds;
+      var header = src[0]; var body = src.slice(1);
+      var filt = body.filter(function(r){
+        var v = r[0]; var d = (typeof v === 'string') ? Date.parse(v) : +v;
+        if (isNaN(d)) return true;
+        return d >= xMin && d <= xMax;
+      });
+      currentDatasets[rec.datasetRef] = [header].concat(filt);
+      rerenderChart(m);
+    });
+  }
+
+  function applyConnects(){
+    (MANIFEST.links || []).forEach(function(lk){
+      if (!lk.sync) return;
+      var group = lk.group;
+      var members = (lk.members || []).flatMap(function(p){
+        return Object.keys(CHARTS).filter(function(k){ return targetMatch(p, k); });
+      });
+      members.map(function(m){ return CHARTS[m] && CHARTS[m].inst; })
+              .filter(Boolean).forEach(function(i){ i.group = group; });
+      try { echarts.connect(group); } catch(e){}
+    });
+  }
+
+  // ----- tabs -----
+  function activateTab(tabId){
+    document.querySelectorAll('.tab-btn').forEach(function(b){
+      b.classList.toggle('active', b.dataset.tab === tabId);
+    });
+    document.querySelectorAll('.tab-panel').forEach(function(p){
+      p.classList.toggle('active', p.id === 'tab-panel-' + tabId);
+    });
+    // lazy-init any chart tiles in the newly active tab
+    var panel = document.getElementById('tab-panel-' + tabId);
+    if (panel){
+      panel.querySelectorAll('.chart-div').forEach(function(div){
+        var id = (div.id || '').replace(/^chart-/, '');
+        if (id && !CHARTS[id]) initChart(id);
+        else if (id && CHARTS[id]){
+          try { CHARTS[id].inst.resize(); } catch(e){}
+        }
+      });
+      applyConnects();
+    }
+    try { localStorage.setItem('echart_dashboard_tab_' + MANIFEST.id, tabId); } catch(e){}
+  }
+
+  document.querySelectorAll('.tab-btn').forEach(function(b){
+    b.addEventListener('click', function(){ activateTab(b.dataset.tab); });
+  });
+
+  // ----- filter wiring -----
+  function wireFilters(){
+    (MANIFEST.filters || []).forEach(function(f){
+      var el = document.getElementById('filter-' + f.id); if (!el) return;
+      if (f.type === 'multiSelect'){
+        el.addEventListener('change', function(){
+          filterState[f.id] = Array.from(el.selectedOptions).map(function(o){ return o.value; });
+          broadcast(f.id);
+        });
+      } else if (f.type === 'toggle'){
+        el.addEventListener('change', function(){ filterState[f.id] = el.checked; broadcast(f.id); });
+      } else if (f.type === 'numberRange'){
+        el.addEventListener('change', function(){
+          var parts = el.value.split(',').map(function(s){ return Number(s.trim()); });
+          if (parts.length === 2){ filterState[f.id] = parts; broadcast(f.id); }
+        });
+      } else if (f.type === 'slider'){
+        var display = document.getElementById('filter-' + f.id + '-val');
+        el.addEventListener('input', function(){
+          var n = Number(el.value);
+          filterState[f.id] = n;
+          if (display) display.textContent = n;
+        });
+        el.addEventListener('change', function(){ broadcast(f.id); });
+      } else if (f.type === 'number'){
+        el.addEventListener('change', function(){
+          var n = Number(el.value);
+          filterState[f.id] = isNaN(n) ? '' : n;
+          broadcast(f.id);
+        });
+      } else if (f.type === 'text'){
+        // Debounce text input so broadcasts aren't firing per keystroke.
+        var tId = null;
+        el.addEventListener('input', function(){
+          filterState[f.id] = el.value;
+          if (tId) clearTimeout(tId);
+          tId = setTimeout(function(){ broadcast(f.id); }, 180);
+        });
+      } else if (f.type === 'radio'){
+        // Radio groups are a set of inputs with the same name
+        var inputs = document.querySelectorAll('input[name="filter-' + f.id + '"]');
+        Array.prototype.forEach.call(inputs, function(r){
+          r.addEventListener('change', function(){
+            if (r.checked){
+              filterState[f.id] = r.value;
+              broadcast(f.id);
+            }
+          });
+        });
+      } else {
+        el.addEventListener('change', function(){ filterState[f.id] = el.value; broadcast(f.id); });
+      }
+    });
+    var reset = document.getElementById('filter-reset');
+    if (reset){
+      reset.addEventListener('click', function(){
+        (MANIFEST.filters || []).forEach(function(f){
+          filterState[f.id] = f.default != null ? f.default :
+                              (f.type === 'multiSelect' ? [] : '');
+          if (f.type === 'radio'){
+            var inputs = document.querySelectorAll('input[name="filter-' + f.id + '"]');
+            Array.prototype.forEach.call(inputs, function(r){
+              r.checked = r.value === String(filterState[f.id]);
+            });
+            return;
+          }
+          var el = document.getElementById('filter-' + f.id);
+          if (!el) return;
+          if (f.type === 'toggle') el.checked = !!filterState[f.id];
+          else if (f.type === 'multiSelect')
+            Array.from(el.options).forEach(function(o){ o.selected = filterState[f.id].indexOf(o.value) >= 0; });
+          else if (f.type === 'slider'){
+            el.value = filterState[f.id];
+            var display = document.getElementById('filter-' + f.id + '-val');
+            if (display) display.textContent = filterState[f.id];
+          }
+          else el.value = filterState[f.id] == null ? '' : filterState[f.id];
+        });
+        Object.keys(currentDatasets).forEach(resetDataset);
+        Object.keys(CHARTS).forEach(rerenderChart);
+        renderKpis(); renderTables();
+      });
+    }
+  }
+
+  // ----- KPI widgets -----
+  function formatNumber(v, opts){
+    opts = opts || {};
+    if (v == null || isNaN(+v)) return String(v);
+    var n = +v;
+    var d = opts.decimals != null ? opts.decimals :
+              (Math.abs(n) >= 1000 ? 0 : 2);
+    var prefix = opts.prefix || '';
+    var suffix = opts.suffix || '';
+    var abs = Math.abs(n);
+    var formatted;
+    if (abs >= 1e12) formatted = (n/1e12).toFixed(d) + 'T';
+    else if (abs >= 1e9)  formatted = (n/1e9).toFixed(d) + 'B';
+    else if (abs >= 1e6)  formatted = (n/1e6).toFixed(d) + 'M';
+    else if (abs >= 1e3)  formatted = (n/1e3).toFixed(d) + 'K';
+    else formatted = n.toFixed(d);
+    return prefix + formatted + suffix;
+  }
+
+  function resolveAgg(src, agg, col){
+    var ds = currentDatasets[src]; if (!ds) return null;
+    var header = ds[0]; var idx = header.indexOf(col);
+    if (idx < 0) return null;
+    var vals = ds.slice(1).map(function(r){ return r[idx]; })
+                .filter(function(v){ return typeof v === 'number'; });
+    if (!vals.length) return null;
+    if (agg === 'latest') return vals[vals.length - 1];
+    if (agg === 'first')  return vals[0];
+    if (agg === 'sum')    return vals.reduce(function(a,b){ return a+b; }, 0);
+    if (agg === 'mean')   return vals.reduce(function(a,b){ return a+b; }, 0) / vals.length;
+    if (agg === 'min')    return Math.min.apply(null, vals);
+    if (agg === 'max')    return Math.max.apply(null, vals);
+    if (agg === 'count')  return vals.length;
+    if (agg === 'prev'){
+      return vals.length >= 2 ? vals[vals.length - 2] : vals[vals.length - 1];
+    }
+    return null;
+  }
+  function resolveSource(src){
+    if (!src) return null;
+    var parts = String(src).split('.');
+    if (parts.length < 3) return null;
+    return resolveAgg(parts[0], parts[1], parts.slice(2).join('.'));
+  }
+
+  function renderKpis(){
+    Object.keys(WIDGET_META).forEach(function(id){
+      var w = WIDGET_META[id]; if (w.widget !== 'kpi') return;
+      var el = document.getElementById('kpi-' + id); if (!el) return;
+      var value = w.value != null ? w.value : resolveSource(w.source);
+      var formatted;
+      if (typeof value === 'number'){
+        formatted = formatNumber(value, {
+          decimals: w.decimals,
+          prefix: w.prefix || '', suffix: w.suffix || ''
+        });
+      } else {
+        formatted = value == null ? '--' : String(value);
+      }
+      var vNode = el.querySelector('.kpi-value');
+      if (vNode) vNode.textContent = formatted;
+
+      // delta: {delta: 1.2, delta_pct: 4.5, delta_label: 'vs prev'}
+      // or automatic if delta_source points to prev aggregator
+      var dNode = el.querySelector('.kpi-delta');
+      if (dNode){
+        var deltaVal = w.delta;
+        var deltaSrc = w.delta_source;
+        var pct = w.delta_pct;
+        if (deltaVal == null && deltaSrc){
+          var cur = (typeof value === 'number') ? value : resolveSource(w.source);
+          var prev = resolveSource(deltaSrc);
+          if (typeof cur === 'number' && typeof prev === 'number'){
+            deltaVal = cur - prev;
+            pct = prev !== 0 ? (deltaVal / Math.abs(prev)) * 100 : null;
+          }
+        }
+        if (deltaVal != null){
+          dNode.classList.remove('pos','neg','flat');
+          var sign = deltaVal > 0 ? 'pos' : (deltaVal < 0 ? 'neg' : 'flat');
+          dNode.classList.add(sign);
+          var arrow = deltaVal > 0 ? '\u25B2' : (deltaVal < 0 ? '\u25BC' : '\u25B6');
+          var txt = arrow + ' ' + formatNumber(Math.abs(deltaVal), {decimals: w.delta_decimals || 2});
+          if (pct != null && !isNaN(pct)) txt += ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)';
+          if (w.delta_label) txt += ' ' + w.delta_label;
+          dNode.textContent = txt;
+          dNode.style.display = 'inline-flex';
+        } else {
+          dNode.style.display = 'none';
+        }
+      }
+
+      // sparkline
+      var sNode = el.querySelector('.kpi-sparkline');
+      if (sNode && w.sparkline_source){
+        var sp = String(w.sparkline_source).split('.');
+        if (sp.length >= 2){
+          var dsName = sp[0], col = sp.slice(1).join('.');
+          var ds = currentDatasets[dsName];
+          if (ds){
+            var header = ds[0]; var idx = header.indexOf(col);
+            var rows = ds.slice(1);
+            if (idx >= 0){
+              var data = rows.map(function(r){ return r[idx]; });
+              if (!sNode._inst){
+                sNode._inst = echarts.init(sNode);
+              }
+              sNode._inst.setOption({
+                grid:{top:2,bottom:2,left:2,right:2,containLabel:false},
+                xAxis:{type:'category',show:false,data:data.map(function(_,i){return i;})},
+                yAxis:{type:'value',show:false,scale:true},
+                tooltip:{show:false},
+                animation:false,
+                series:[{type:'line',data:data,symbol:'none',
+                          smooth:true,lineStyle:{width:1.6},
+                          areaStyle:{opacity:0.18}}]
+              }, true);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ----- table widgets -----
+  // Column formatters. Token is the prefix before ':' in the format string;
+  // the suffix (if any) is decimals / precision.
+  function formatValue(v, fmt){
+    if (v == null || v === '') return '';
+    if (fmt == null || fmt === 'text') return String(v);
+    var parts = String(fmt).split(':');
+    var kind = parts[0];
+    var prec = parts.length > 1 ? Number(parts[1]) : 2;
+    var n = Number(v);
+    if (kind === 'integer') {
+      if (isNaN(n)) return String(v);
+      return Math.round(n).toLocaleString();
+    }
+    if (kind === 'number')  {
+      if (isNaN(n)) return String(v);
+      return n.toLocaleString(undefined, {minimumFractionDigits: prec,
+                                             maximumFractionDigits: prec});
+    }
+    if (kind === 'percent') {
+      if (isNaN(n)) return String(v);
+      // Accept both fractional (0.12) and percent (12) forms
+      var pct = Math.abs(n) <= 1 ? n * 100 : n;
+      return pct.toFixed(isNaN(prec) ? 1 : prec) + '%';
+    }
+    if (kind === 'currency') {
+      if (isNaN(n)) return String(v);
+      return '$' + n.toLocaleString(undefined, {minimumFractionDigits: prec,
+                                                     maximumFractionDigits: prec});
+    }
+    if (kind === 'bps') {
+      if (isNaN(n)) return String(v);
+      return n.toFixed(isNaN(prec) ? 0 : prec) + 'bp';
+    }
+    if (kind === 'signed') {
+      if (isNaN(n)) return String(v);
+      var sign = n > 0 ? '+' : '';
+      return sign + n.toFixed(isNaN(prec) ? 2 : prec);
+    }
+    if (kind === 'delta') {
+      if (isNaN(n)) return String(v);
+      var arrow = n > 0 ? '\u25B2' : n < 0 ? '\u25BC' : '\u25AC';
+      return arrow + ' ' + Math.abs(n).toFixed(isNaN(prec) ? 2 : prec);
+    }
+    if (kind === 'date') {
+      var d = new Date(v);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      return String(v);
+    }
+    if (kind === 'datetime') {
+      var dt = new Date(v);
+      if (!isNaN(dt.getTime())) return dt.toISOString().replace('T', ' ').slice(0, 19);
+      return String(v);
+    }
+    if (kind === 'link') {
+      var safe = String(v).replace(/"/g, '&quot;');
+      return '<a href="' + safe + '" target="_blank">open</a>';
+    }
+    return String(v);
+  }
+
+  function _lerp(a, b, t){ return a + (b - a) * t; }
+  function _hex2rgb(hex){
+    hex = hex.replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map(function(c){ return c+c; }).join('');
+    return [parseInt(hex.substr(0,2),16), parseInt(hex.substr(2,2),16), parseInt(hex.substr(4,2),16)];
+  }
+  function _rgb2hex(r, g, b){
+    function hx(x){ return ('0' + Math.round(x).toString(16)).slice(-2); }
+    return '#' + hx(r) + hx(g) + hx(b);
+  }
+  function interpolatePalette(stops, t){
+    if (!stops || !stops.length) return null;
+    if (stops.length === 1) return stops[0];
+    var n = stops.length - 1;
+    var pos = Math.max(0, Math.min(1, t)) * n;
+    var lo = Math.floor(pos), hi = Math.min(n, lo + 1);
+    var frac = pos - lo;
+    var a = _hex2rgb(stops[lo]), b = _hex2rgb(stops[hi]);
+    return _rgb2hex(_lerp(a[0], b[0], frac), _lerp(a[1], b[1], frac), _lerp(a[2], b[2], frac));
+  }
+  function colorForScale(v, scale){
+    var n = Number(v);
+    if (isNaN(n) || !scale) return null;
+    var pal = PAYLOAD.palettes[scale.palette];
+    if (!pal) return null;
+    var lo = scale.min != null ? scale.min : 0;
+    var hi = scale.max != null ? scale.max : 1;
+    var span = hi - lo || 1;
+    var t = (n - lo) / span;
+    return interpolatePalette(pal.colors, t);
+  }
+  function conditionalStyle(v, rules){
+    if (!rules) return null;
+    for (var i = 0; i < rules.length; i++){
+      var r = rules[i];
+      if (cmpOp(r.op || '==', v, r.value)){
+        return r;
+      }
+    }
+    return null;
+  }
+  // Table per-widget state: sort column index (null = original order),
+  // sort direction (1 = asc, -1 = desc), search string.
+  var TABLE_STATE = {};
+  function tableState(id){
+    if (!TABLE_STATE[id]){
+      TABLE_STATE[id] = {sortCol: null, sortDir: 1, search: ''};
+    }
+    return TABLE_STATE[id];
+  }
+
+  function _rowMatchesSearch(row, needle){
+    if (!needle) return true;
+    var n = String(needle).toLowerCase();
+    for (var i = 0; i < row.length; i++){
+      var c = row[i]; if (c == null) continue;
+      if (String(c).toLowerCase().indexOf(n) >= 0) return true;
+    }
+    return false;
+  }
+
+  function renderTables(){
+    Object.keys(WIDGET_META).forEach(function(id){
+      var w = WIDGET_META[id]; if (w.widget !== 'table') return;
+      var el = document.getElementById('table-' + id); if (!el) return;
+      var ds = w.dataset_ref ? currentDatasets[w.dataset_ref] : null;
+      if (!ds || !ds.length) {
+        el.innerHTML = '<div class="table-empty">' +
+          (w.empty_message || 'No rows.') + '</div>';
+        return;
+      }
+      var header = ds[0];
+      var allBody = applyFilters(w.dataset_ref, ds).slice(1);
+      var ts = tableState(id);
+
+      // Search filter
+      if (ts.search){
+        allBody = allBody.filter(function(r){ return _rowMatchesSearch(r, ts.search); });
+      }
+
+      // Column config: if not supplied, auto-generate from header.
+      var cols = w.columns;
+      if (!cols || !cols.length){
+        cols = header.map(function(h){ return {field: h, label: h}; });
+      }
+      var colIndexes = cols.map(function(c){ return header.indexOf(c.field); });
+      var colCompare = function(ci, dir){
+        return function(a, b){
+          var av = a[ci], bv = b[ci];
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          var an = Number(av), bn = Number(bv);
+          if (!isNaN(an) && !isNaN(bn)) return (an - bn) * dir;
+          return String(av).localeCompare(String(bv)) * dir;
+        };
+      };
+      if (ts.sortCol != null && colIndexes[ts.sortCol] >= 0){
+        allBody = allBody.slice().sort(colCompare(colIndexes[ts.sortCol], ts.sortDir));
+      }
+
+      var maxRows = w.max_rows || 100;
+      var visible = allBody.slice(0, maxRows);
+      var allRowsShown = allBody.length <= maxRows;
+
+      var html = '';
+      if (w.searchable){
+        html += '<div class="table-toolbar">' +
+          '<input class="table-search" data-tid="' + id +
+          '" placeholder="Search..." value="' + _he(ts.search) + '"/>' +
+          '<span class="table-count">' + allBody.length +
+          (allRowsShown ? '' : ' (showing ' + maxRows + ')') +
+          ' rows</span></div>';
+      }
+      html += '<table class="data-table' +
+              (w.row_height === 'compact' ? ' compact' : '') +
+              (w.row_click ? ' clickable' : '') +
+              '"><thead><tr>';
+
+      cols.forEach(function(c, ci){
+        var lbl = c.label != null ? c.label : c.field;
+        var align = c.align || (c.format && /^(number|integer|percent|currency|bps|signed|delta)/.test(c.format) ? 'right' : 'left');
+        var tip = c.tooltip ? ' title="' + _he(c.tooltip) + '"' : '';
+        var sortable = c.sortable !== false && w.sortable !== false;
+        var arrow = '';
+        if (sortable && ts.sortCol === ci){
+          arrow = ts.sortDir === 1 ? ' \u25B4' : ' \u25BE';
+        }
+        html += '<th style="text-align:' + align + '"' +
+                (sortable ? ' class="sortable" data-col="' + ci + '" data-tid="' + id + '"' : '') +
+                tip + '>' + _he(lbl) + arrow + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+
+      visible.forEach(function(row, ri){
+        html += '<tr data-row-idx="' + ri + '" data-tid="' + id + '">';
+        cols.forEach(function(c, ci){
+          var hi = colIndexes[ci];
+          var v = hi >= 0 ? row[hi] : null;
+          var txt = formatValue(v, c.format);
+          var align = c.align || (c.format && /^(number|integer|percent|currency|bps|signed|delta)/.test(c.format) ? 'right' : 'left');
+          var styleParts = ['text-align:' + align];
+          // Conditional formatting
+          var cs = conditionalStyle(v, c.conditional);
+          if (cs){
+            if (cs.background) styleParts.push('background:' + cs.background);
+            if (cs.color)      styleParts.push('color:' + cs.color);
+            if (cs.bold)       styleParts.push('font-weight:600');
+          }
+          // Color scale (continuous heatmap)
+          if (c.color_scale){
+            var bg = colorForScale(v, c.color_scale);
+            if (bg){
+              styleParts.push('background:' + bg);
+              // Pick black or white text for contrast
+              var rgb = _hex2rgb(bg);
+              var lum = 0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2];
+              styleParts.push('color:' + (lum > 128 ? '#1a1a1a' : '#ffffff'));
+            }
+          }
+          var tip = c.tooltip ? ' title="' + _he(c.tooltip) + '"' : '';
+          html += '<td style="' + styleParts.join(';') + '"' + tip + '>' + txt + '</td>';
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+
+      // Wire search
+      var searchEl = el.querySelector('.table-search');
+      if (searchEl){
+        var tId = null;
+        searchEl.addEventListener('input', function(){
+          ts.search = searchEl.value;
+          if (tId) clearTimeout(tId);
+          tId = setTimeout(function(){ renderTables(); }, 160);
+        });
+      }
+      // Wire header-click sort
+      el.querySelectorAll('th.sortable').forEach(function(th){
+        th.addEventListener('click', function(){
+          var ci = Number(th.dataset.col);
+          if (ts.sortCol === ci) ts.sortDir = -ts.sortDir;
+          else { ts.sortCol = ci; ts.sortDir = 1; }
+          renderTables();
+        });
+      });
+      // Wire row click -> popup modal
+      if (w.row_click){
+        el.querySelectorAll('tbody tr').forEach(function(tr){
+          tr.addEventListener('click', function(){
+            var idx = Number(tr.dataset.rowIdx);
+            var row = visible[idx];
+            openRowModal(w, header, row, cols);
+          });
+        });
+      }
+    });
+  }
+
+  function _he(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  // ----- row click modal -----
+  function openRowModal(w, header, row, cols){
+    var rc = w.row_click || {};
+    var title = '';
+    if (rc.title_field){
+      var tIdx = header.indexOf(rc.title_field);
+      if (tIdx >= 0) title = String(row[tIdx]);
+    }
+    if (!title && cols && cols.length){
+      var firstIdx = header.indexOf(cols[0].field);
+      if (firstIdx >= 0) title = String(row[firstIdx]);
+    }
+
+    // Which fields to show in the body? Default = all columns.
+    var showFields = rc.popup_fields;
+    if (!showFields || showFields === '*' || (showFields.length === 1 && showFields[0] === '*')){
+      showFields = header.slice();
+    }
+
+    var body = '<table class="modal-detail-table">';
+    showFields.forEach(function(fname){
+      var hi = header.indexOf(fname);
+      if (hi < 0) return;
+      var val = row[hi];
+      // Try to re-use column format if we have it
+      var fmt = null;
+      if (cols){
+        for (var i = 0; i < cols.length; i++){
+          if (cols[i].field === fname){ fmt = cols[i].format; break; }
+        }
+      }
+      body += '<tr><th>' + _he(fname) + '</th>' +
+               '<td>' + formatValue(val, fmt) + '</td></tr>';
+    });
+    body += '</table>';
+
+    if (rc.extra_content){
+      body += '<div class="modal-extra">' + String(rc.extra_content) + '</div>';
+    }
+
+    showModal(title || 'Details', body);
+  }
+
+  function showModal(title, bodyHtml){
+    var back = document.getElementById('ed-modal-backdrop');
+    if (!back){
+      back = document.createElement('div');
+      back.id = 'ed-modal-backdrop';
+      back.className = 'ed-modal-backdrop';
+      back.innerHTML =
+        '<div class="ed-modal">' +
+          '<div class="ed-modal-header">' +
+            '<div class="ed-modal-title"></div>' +
+            '<button class="ed-modal-close" aria-label="close">\u2715</button>' +
+          '</div>' +
+          '<div class="ed-modal-body"></div>' +
+        '</div>';
+      document.body.appendChild(back);
+      back.addEventListener('click', function(e){
+        if (e.target === back) hideModal();
+      });
+      back.querySelector('.ed-modal-close').addEventListener('click', hideModal);
+      document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape') hideModal();
+      });
+    }
+    back.querySelector('.ed-modal-title').textContent = title;
+    back.querySelector('.ed-modal-body').innerHTML = bodyHtml;
+    back.style.display = 'flex';
+  }
+  function hideModal(){
+    var back = document.getElementById('ed-modal-backdrop');
+    if (back) back.style.display = 'none';
+  }
+
+  // ----- per-tile fullscreen + export -----
+  function wireTileActions(){
+    document.querySelectorAll('.tile').forEach(function(tile){
+      var id = tile.dataset.tileId;
+      var fs = tile.querySelector('.tile-btn.fullscreen');
+      if (fs){
+        fs.addEventListener('click', function(){
+          tile.classList.toggle('is-fullscreen');
+          var c = CHARTS[id]; if (c) { setTimeout(function(){ c.inst.resize(); }, 120); }
+        });
+      }
+      var dl = tile.querySelector('.tile-btn.download');
+      if (dl){
+        dl.addEventListener('click', function(){
+          var c = CHARTS[id]; if (!c) return;
+          var url = c.inst.getDataURL({pixelRatio: 2, type: 'png',
+                                         backgroundColor: '#ffffff'});
+          var a = document.createElement('a'); a.href = url;
+          a.download = (id || 'chart') + '.png'; a.click();
+        });
+      }
+    });
+  }
+
+  var exportAll = document.getElementById('export-all');
+  if (exportAll){
+    exportAll.addEventListener('click', function(){
+      Object.keys(CHARTS).forEach(function(id){
+        var c = CHARTS[id]; if (!c) return;
+        var url = c.inst.getDataURL({pixelRatio: 2, type: 'png', backgroundColor:'#ffffff'});
+        var a = document.createElement('a'); a.href = url; a.download = id + '.png'; a.click();
+      });
+    });
+  }
+
+  // ----- chart count badge -----
+  var ccEl = document.getElementById('chart-count');
+  if (ccEl){
+    var count = Object.keys(WIDGET_META).filter(function(k){
+      return WIDGET_META[k].widget === 'chart';
+    }).length;
+    ccEl.textContent = count + (count === 1 ? ' chart' : ' charts');
+  }
+
+  // ----- data freshness badge -----
+  var MD = MANIFEST.metadata || {};
+  (function(){
+    var el = document.getElementById('data-as-of');
+    var val = document.getElementById('data-as-of-val');
+    if (!el || !val) return;
+    var stamp = MD.data_as_of || MD.generated_at;
+    if (!stamp) return;
+    var s = String(stamp);
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) s = d.toISOString().replace('T',' ').slice(0, 16) + 'Z';
+    val.textContent = s;
+    el.style.display = 'inline-flex';
+  })();
+
+  // ----- header_actions: custom buttons/links in the header -----
+  (function(){
+    var host = document.getElementById('header-actions');
+    var actions = MANIFEST.header_actions || [];
+    if (!host || !actions.length) return;
+    actions.forEach(function(a){
+      var el;
+      if (a.href){
+        el = document.createElement('a');
+        el.href = a.href;
+        el.target = a.target || '_blank';
+        if (a.target !== '_self') el.rel = 'noopener noreferrer';
+      } else {
+        el = document.createElement('button');
+        el.type = 'button';
+      }
+      el.className = 'icon-btn' + (a.primary ? ' primary' : '');
+      if (a.id) el.id = a.id;
+      if (a.title) el.title = a.title;
+      el.innerHTML = (a.icon ? (a.icon + ' ') : '') + _he(a.label || '');
+      if (a.onclick && typeof window[a.onclick] === 'function'){
+        el.addEventListener('click', function(e){
+          try { window[a.onclick](e, a); } catch(err){ console.warn(err); }
+        });
+      }
+      host.insertBefore(el, host.firstChild);
+    });
+  })();
+
+  // ----- refresh button -----
+  // Shown when metadata.kerberos + metadata.dashboard_id are set AND
+  // metadata.refresh_enabled !== false. POSTs to metadata.api_url (default
+  // /api/dashboard/refresh/) and polls metadata.status_url for completion.
+  (function(){
+    var btn = document.getElementById('refresh-btn');
+    var label = document.getElementById('refresh-btn-label');
+    if (!btn || !label) return;
+    var kerberos = MD.kerberos;
+    var dashboardId = MD.dashboard_id || MANIFEST.id;
+    var enabled = MD.refresh_enabled !== false;
+    if (!kerberos || !dashboardId || !enabled) return;
+    var apiUrl = MD.api_url || '/api/dashboard/refresh/';
+    var statusUrl = MD.status_url || '/api/dashboard/refresh/status/';
+    btn.style.display = 'inline-flex';
+
+    function setLabel(cls, txt){
+      btn.classList.remove('refreshing','refresh-success','refresh-error');
+      if (cls) btn.classList.add(cls);
+      label.textContent = txt;
+    }
+    function resetLabel(){ setLabel('', 'Refresh'); btn.disabled = false; }
+    function pollStatus(){
+      var polls = 0, maxPolls = 60; // 3s x 60 = 3 min
+      var timer = setInterval(function(){
+        polls++;
+        if (polls > maxPolls){
+          clearInterval(timer); setLabel('refresh-error', 'Timeout');
+          setTimeout(resetLabel, 3000); return;
+        }
+        fetch(statusUrl + '?dashboard_id=' + encodeURIComponent(dashboardId))
+          .then(function(r){ return r.json(); })
+          .then(function(st){
+            if (st.status === 'success'){
+              clearInterval(timer);
+              setLabel('refresh-success', 'Done -- reloading...');
+              setTimeout(function(){ location.reload(); }, 900);
+            } else if (st.status === 'error'){
+              clearInterval(timer);
+              setLabel('refresh-error', 'Error');
+              var msg = (st.errors && st.errors.length) ? st.errors[0] : 'Unknown error';
+              console.warn('[refresh] error:', msg);
+              setTimeout(resetLabel, 3500);
+            } else if (st.status === 'partial'){
+              clearInterval(timer);
+              setLabel('refresh-error', 'Partial');
+              setTimeout(function(){ location.reload(); }, 2000);
+            }
+            // still running -> keep polling
+          })
+          .catch(function(e){ console.warn('[refresh] poll network error:', e); });
+      }, 3000);
+    }
+    btn.addEventListener('click', function(){
+      if (window.location.protocol === 'file:'){
+        alert('Refresh is not available when viewing the dashboard offline. ' +
+              'Open the dashboard from the PRISM portal to refresh.');
+        return;
+      }
+      btn.disabled = true; setLabel('refreshing', 'Refreshing...');
+      fetch(apiUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kerberos: kerberos, dashboard_id: dashboardId})
+      })
+        .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
+        .then(function(pair){
+          var code = pair[0], result = pair[1] || {};
+          if (code === 409){ pollStatus(); return; }
+          if (result.status === 'refreshing'){ pollStatus(); return; }
+          if (result.status === 'success' || result.status === 'partial'){
+            setLabel('refresh-success', 'Done -- reloading...');
+            setTimeout(function(){ location.reload(); }, 900);
+          } else {
+            setLabel('refresh-error', 'Error');
+            var msg = result.errors || result.error || 'Unknown error';
+            console.warn('[refresh] failed:', msg);
+            setTimeout(resetLabel, 3500);
+          }
+        })
+        .catch(function(err){
+          setLabel('refresh-error', 'Error');
+          console.warn('[refresh] network error:', err);
+          setTimeout(resetLabel, 3500);
+        });
+    });
+  })();
+
+  // ----- init -----
+  window.addEventListener('load', function(){
+    wireFilters(); wireTileActions();
+
+    // figure initial tab
+    var layout = MANIFEST.layout || {};
+    var initialTab = null;
+    if (layout.kind === 'tabs' && (layout.tabs || []).length){
+      try {
+        var saved = localStorage.getItem('echart_dashboard_tab_' + MANIFEST.id);
+        if (saved && layout.tabs.some(function(t){ return t.id === saved; })) initialTab = saved;
+      } catch(e){}
+      initialTab = initialTab || layout.tabs[0].id;
+      activateTab(initialTab);
+    } else {
+      // initialize every chart in the single default tab
+      Object.keys(WIDGET_META).forEach(function(id){
+        var w = WIDGET_META[id]; if (w.widget === 'chart') initChart(id);
+      });
+      applyConnects();
+    }
+    renderKpis(); renderTables();
+    window.addEventListener('resize', function(){
+      Object.keys(CHARTS).forEach(function(k){
+        try { CHARTS[k].inst.resize(); } catch(e){}
+      });
+    });
+  });
+
+  window.DASHBOARD = { manifest: MANIFEST, charts: CHARTS,
+                        filters: filterState, datasets: currentDatasets };
+})();
+"""
+
+
+# ---------------------------------------------------------------------------
+# PYTHON RENDERING
+# ---------------------------------------------------------------------------
+
+
+
+
+def _span_style(w: int, cols: int) -> str:
+    return f"grid-column: span {max(1, min(w, cols))};"
+
+
+def _render_filter_controls(filters: List[Dict[str, Any]]) -> str:
+    if not filters:
+        return ""
+    out = ["<div class=\"filter-bar\">"]
+    for f in filters:
+        fid = f["id"]
+        label = f.get("label", fid)
+        ftype = f.get("type")
+        default = f.get("default", "")
+        if ftype == "dateRange":
+            options = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "5Y", "All"]
+            opts_html = "".join(
+                f"<option value=\"{o}\"{' selected' if str(default) == o else ''}>{o}</option>"
+                for o in options
+            )
+            out.append(
+                f"<div class=\"filter-item\"><label>{_html_escape(label)}</label>"
+                f"<select id=\"filter-{fid}\">{opts_html}</select></div>"
+            )
+        elif ftype in ("select", "multiSelect"):
+            options = f.get("options", [])
+            multi = " multiple" if ftype == "multiSelect" else ""
+            default_set = set()
+            if isinstance(default, list):
+                default_set = set(str(d) for d in default)
+            elif default:
+                default_set = {str(default)}
+            opts_html = "".join(
+                f"<option value=\"{_html_escape(o)}\""
+                f"{' selected' if str(o) in default_set else ''}>"
+                f"{_html_escape(o)}</option>"
+                for o in options
+            )
+            out.append(
+                f"<div class=\"filter-item\"><label>{_html_escape(label)}</label>"
+                f"<select id=\"filter-{fid}\"{multi}>{opts_html}</select></div>"
+            )
+        elif ftype == "numberRange":
+            out.append(
+                f"<div class=\"filter-item\"><label>{_html_escape(label)}</label>"
+                f"<input id=\"filter-{fid}\" type=\"text\" "
+                f"value=\"{_html_escape(str(default))}\" "
+                f"placeholder=\"min,max\"/>"
+                f"</div>"
+            )
+        elif ftype == "toggle":
+            checked = " checked" if default else ""
+            out.append(
+                f"<div class=\"filter-item\"><label>{_html_escape(label)}</label>"
+                f"<input id=\"filter-{fid}\" type=\"checkbox\"{checked}/></div>"
+            )
+        elif ftype == "slider":
+            mn = f.get("min", 0)
+            mx = f.get("max", 100)
+            step = f.get("step", 1)
+            val = default if default != "" else mn
+            out.append(
+                f"<div class=\"filter-item slider\"><label>{_html_escape(label)}</label>"
+                f"<div class=\"slider-row\">"
+                f"<input id=\"filter-{fid}\" type=\"range\" "
+                f"min=\"{mn}\" max=\"{mx}\" step=\"{step}\" value=\"{val}\"/>"
+                f"<span id=\"filter-{fid}-val\" class=\"slider-val\">{val}</span>"
+                f"</div></div>"
+            )
+        elif ftype == "radio":
+            options = f.get("options", [])
+            radios: List[str] = []
+            for o in options:
+                checked = " checked" if str(o) == str(default) else ""
+                radios.append(
+                    f"<label class=\"radio-opt\">"
+                    f"<input type=\"radio\" name=\"filter-{fid}\" "
+                    f"value=\"{_html_escape(o)}\"{checked}/>"
+                    f"{_html_escape(o)}</label>"
+                )
+            out.append(
+                f"<div class=\"filter-item radio-group\">"
+                f"<label>{_html_escape(label)}</label>"
+                f"<div class=\"radio-row\">{''.join(radios)}</div></div>"
+            )
+        elif ftype == "text":
+            placeholder = f.get("placeholder", "Type to search...")
+            out.append(
+                f"<div class=\"filter-item text\"><label>{_html_escape(label)}</label>"
+                f"<input id=\"filter-{fid}\" type=\"text\" "
+                f"value=\"{_html_escape(str(default))}\" "
+                f"placeholder=\"{_html_escape(placeholder)}\"/></div>"
+            )
+        elif ftype == "number":
+            mn = f.get("min", None)
+            mx = f.get("max", None)
+            step = f.get("step", "any")
+            extra = ""
+            if mn is not None:
+                extra += f" min=\"{mn}\""
+            if mx is not None:
+                extra += f" max=\"{mx}\""
+            extra += f" step=\"{step}\""
+            out.append(
+                f"<div class=\"filter-item number\"><label>{_html_escape(label)}</label>"
+                f"<input id=\"filter-{fid}\" type=\"number\""
+                f"{extra} value=\"{_html_escape(str(default))}\"/></div>"
+            )
+    out.append("<button class=\"icon-btn filter-reset\" id=\"filter-reset\">Reset</button>")
+    out.append("</div>")
+    return "\n".join(out)
+
+
+def _chart_toolbar_buttons() -> str:
+    return (
+        "<div class=\"tile-actions\">"
+        "<button class=\"tile-btn download\" title=\"PNG 2x\">PNG</button>"
+        "<button class=\"tile-btn fullscreen\" title=\"Fullscreen\">&#x26F6;</button>"
+        "</div>"
+    )
+
+
+def _render_widget(w: Dict[str, Any], cols: int) -> str:
+    wt = w.get("widget")
+    width = w.get("w", cols)
+    wid = w.get("id") or f"w_{id(w)}"
+    style = _span_style(width, cols)
+    title = w.get("title", "")
+
+    if wt == "chart":
+        height = int(w.get("h_px", 280))
+        return (
+            f"<div class=\"tile chart-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"style=\"{style}\">"
+            f"  <div class=\"tile-header\">"
+            f"    <div class=\"tile-title\">{_html_escape(title)}</div>"
+            f"    {_chart_toolbar_buttons()}"
+            f"  </div>"
+            f"  <div class=\"tile-body\">"
+            f"    <div id=\"chart-{_html_escape(wid)}\" class=\"chart-div\" "
+            f"style=\"height:{height}px\"></div>"
+            f"  </div>"
+            f"</div>"
+        )
+
+    if wt == "kpi":
+        label = w.get("label", "")
+        val = w.get("value", "--")
+        sub = w.get("sub", "")
+        has_sparkline = bool(w.get("sparkline_source"))
+        sub_html = f'<div class="kpi-sub">{_html_escape(sub)}</div>' if sub else ""
+        sparkline_html = '<div class="kpi-sparkline"></div>' if has_sparkline else ""
+        return (
+            f"<div class=\"tile kpi-tile\" id=\"kpi-{_html_escape(wid)}\" "
+            f"data-tile-id=\"{_html_escape(wid)}\" style=\"{style}\">"
+            f"<div class=\"kpi-label\">{_html_escape(label)}</div>"
+            f"<div class=\"kpi-value\">{_html_escape(val)}</div>"
+            f"<div class=\"kpi-delta\" style=\"display:none\"></div>"
+            f"{sub_html}"
+            f"{sparkline_html}"
+            f"</div>"
+        )
+
+    if wt == "table":
+        return (
+            f"<div class=\"tile table-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"style=\"{style}\">"
+            f"  <div class=\"tile-header\">"
+            f"    <div class=\"tile-title\">{_html_escape(title)}</div>"
+            f"  </div>"
+            f"  <div class=\"tile-body\" id=\"table-{_html_escape(wid)}\"></div>"
+            f"</div>"
+        )
+
+    if wt == "markdown":
+        return (
+            f"<div class=\"tile markdown-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"style=\"{style}\">"
+            f"  <div class=\"tile-body\">{_render_md(w.get('content', ''))}</div>"
+            f"</div>"
+        )
+
+    if wt == "divider":
+        return (
+            f"<div class=\"tile divider-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"style=\"{_span_style(cols, cols)};grid-column:1/-1\">"
+            f"<hr/></div>"
+        )
+
+    if wt == "stat_grid":
+        stats = w.get("stats", [])
+        cells: List[str] = []
+        for st in stats:
+            lbl = _html_escape(st.get("label", ""))
+            val = _html_escape(st.get("value", "--"))
+            sub = st.get("sub", "")
+            sub_html = f'<div class="stat-sub">{_html_escape(sub)}</div>' if sub else ""
+            cells.append(
+                f'<div class="stat-cell" data-stat-id="{_html_escape(st.get("id", ""))}">'
+                f'<div class="stat-label">{lbl}</div>'
+                f'<div class="stat-value">{val}</div>'
+                f'{sub_html}</div>'
+            )
+        return (
+            f"<div class=\"tile stat-grid-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"style=\"{style}\">"
+            f"  <div class=\"tile-header\">"
+            f"    <div class=\"tile-title\">{_html_escape(title)}</div>"
+            f"  </div>"
+            f"  <div class=\"tile-body\">"
+            f"    <div class=\"stat-grid\" id=\"stat-grid-{_html_escape(wid)}\">"
+            f"{''.join(cells)}</div>"
+            f"  </div>"
+            f"</div>"
+        )
+
+    if wt == "image":
+        src = w.get("src") or w.get("url") or ""
+        alt = _html_escape(w.get("alt", title))
+        link = w.get("link")
+        img_html = (
+            f'<img src="{_html_escape(src)}" alt="{alt}" '
+            f'loading="lazy"/>'
+        )
+        if link:
+            img_html = (
+                f'<a href="{_html_escape(link)}" target="_blank" '
+                f'rel="noopener noreferrer">{img_html}</a>'
+            )
+        header_html = (
+            f"<div class=\"tile-header\">"
+            f"<div class=\"tile-title\">{_html_escape(title)}</div></div>"
+            if title else ""
+        )
+        return (
+            f"<div class=\"tile image-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"style=\"{style}\">"
+            f"{header_html}"
+            f"<div class=\"tile-body\">{img_html}</div>"
+            f"</div>"
+        )
+
+    return ""
+
+
+def _render_md(src: str) -> str:
+    lines = str(src).splitlines()
+    html = []
+    buf_para: List[str] = []
+
+    def flush_para():
+        if buf_para:
+            html.append(f"<p>{_html_escape(' '.join(buf_para))}</p>")
+            buf_para.clear()
+
+    for line in lines:
+        if line.startswith("### "):
+            flush_para()
+            html.append(f"<h3>{_html_escape(line[4:])}</h3>")
+        elif line.startswith("## "):
+            flush_para()
+            html.append(f"<h2>{_html_escape(line[3:])}</h2>")
+        elif line.startswith("# "):
+            flush_para()
+            html.append(f"<h1>{_html_escape(line[2:])}</h1>")
+        elif line.strip() == "":
+            flush_para()
+        else:
+            buf_para.append(line.strip())
+    flush_para()
+    return "\n".join(html)
+
+
+def _render_rows(rows: List[List[Dict[str, Any]]], cols: int) -> str:
+    out = ["<div class=\"grid\">"]
+    for row in rows:
+        for w in row:
+            out.append(_render_widget(w, cols))
+    out.append("</div>")
+    return "\n".join(out)
+
+
+def _collect_specs(manifest: Dict[str, Any],
+                    chart_specs: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+
+    def visit_rows(rows):
+        for row in rows:
+            for w in row:
+                if w.get("widget") != "chart":
+                    continue
+                wid = w.get("id") or f"chart_{len(out)}"
+                if wid in chart_specs:
+                    out[wid] = chart_specs[wid]
+                elif isinstance(w.get("option"), dict):
+                    out[wid] = w["option"]
+                elif isinstance(w.get("option_inline"), dict):
+                    out[wid] = w["option_inline"]
+                else:
+                    out[wid] = {"series": []}
+
+    layout = manifest.get("layout", {})
+    if layout.get("kind") == "tabs":
+        for tab in layout.get("tabs", []) or []:
+            visit_rows(tab.get("rows", []) or [])
+    else:
+        visit_rows(layout.get("rows", []) or [])
+    return out
+
+
+def render_dashboard_html(
+    manifest: Dict[str, Any],
+    chart_specs: Dict[str, Dict[str, Any]],
+    filename_base: Optional[str] = None,
+) -> str:
+    from echart_studio import __version__ as VERSION
+    from datetime import datetime
+
+    layout = manifest.get("layout", {})
+    cols = int(layout.get("cols", 12))
+    kind = layout.get("kind", "grid")
+
+    # Tab bar + panels
+    if kind == "tabs":
+        tabs = layout.get("tabs", []) or []
+        tab_bar_html = "<nav class=\"tab-bar\">" + "".join(
+            f"<button class=\"tab-btn\" data-tab=\"{_html_escape(t['id'])}\">"
+            f"{_html_escape(t.get('label', t['id']))}</button>"
+            for t in tabs
+        ) + "</nav>"
+        panels_html = "\n".join(
+            f"<section class=\"tab-panel\" id=\"tab-panel-{_html_escape(t['id'])}\">"
+            + (
+                f"<div class=\"tab-panel-header\"><h2>{_html_escape(t.get('description', ''))}</h2></div>"
+                if t.get("description") else ""
+              )
+            + _render_rows(t.get("rows", []) or [], cols)
+            + "</section>"
+            for t in tabs
+        )
+    else:
+        tab_bar_html = ""
+        panels_html = (
+            "<section class=\"tab-panel active\" id=\"tab-panel-main\">"
+            + _render_rows(layout.get("rows", []) or [], cols)
+            + "</section>"
+        )
+
+    filters = manifest.get("filters", []) or []
+    filter_bar_html = _render_filter_controls(filters)
+
+    # Payload
+    # DATASETS should include full {source:..., ...} per manifest
+    specs = _collect_specs(manifest, chart_specs)
+    payload = {
+        "manifest": manifest,
+        "specs": specs,
+        "datasets": manifest.get("datasets", {}) or {},
+        "themes": {n: t["echarts"] for n, t in THEMES.items()},
+        "palettes": {n: {"colors": list(p["colors"]), "kind": p["kind"]}
+                      for n, p in PALETTES.items()},
+    }
+    payload_js = "var PAYLOAD = " + json.dumps(payload, default=str) + ";\n"
+
+    title = manifest.get("title", "Dashboard")
+    description = manifest.get("description", "")
+    theme_name = manifest.get("theme", "gs_clean")
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # GS brand tokens injected into CSS custom properties at render
+    # time (keeps the stylesheet in lockstep with config.py).
+    GS_TOKENS = {
+        "__GS_NAVY__":       GS_NAVY,
+        "__GS_NAVY_DEEP__":  GS_NAVY_DEEP,
+        "__GS_SKY__":        GS_SKY,
+        "__GS_INK__":        GS_INK,
+        "__GS_PAPER__":      GS_PAPER,
+        "__GS_BG__":         GS_BG,
+        "__GS_GREY_70__":    GS_GREY_70,
+        "__GS_GREY_40__":    GS_GREY_40,
+        "__GS_GREY_20__":    GS_GREY_20,
+        "__GS_GREY_10__":    GS_GREY_10,
+        "__GS_GREY_05__":    GS_GREY_05,
+        "__GS_POS__":        GS_POS,
+        "__GS_NEG__":        GS_NEG,
+        "__GS_FONT_SANS__":  GS_FONT_SANS,
+        "__GS_FONT_SERIF__": GS_FONT_SERIF,
+    }
+
+    html = DASHBOARD_SHELL
+    for k, v in GS_TOKENS.items():
+        html = html.replace(k, v)
+    html = (html
+            .replace("__TITLE__", _html_escape(title))
+            .replace("__DESCRIPTION__", _html_escape(description))
+            .replace("__THEME__", _html_escape(theme_name))
+            .replace("__COLS__", str(cols))
+            .replace("__TAB_BAR__", tab_bar_html)
+            .replace("__FILTER_BAR__", filter_bar_html)
+            .replace("__TAB_PANELS__", panels_html)
+            .replace("__TIMESTAMP__", _html_escape(ts))
+            .replace("__VERSION__", VERSION)
+            .replace("__PAYLOAD__", payload_js)
+            .replace("__APP__", DASHBOARD_APP_JS))
+    return html
+
+
+# =============================================================================
+# PART 3 -- PNG EXPORT (headless Chrome)
+# =============================================================================
+# Server-side PNG rendering via a tiny HTML harness + Chrome --screenshot.
+
+
+_HARNESS = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>chart</title>
+<style>
+html,body{{margin:0;padding:0;width:{width}px;height:{height}px;
+  background:{background};overflow:hidden;}}
+#chart{{width:{width}px;height:{height}px;}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+<div id="chart"></div>
+<script>
+(function(){{
+  // Revive string-encoded functions (renderItem, formatter, filter) into
+  // real JS functions. Python emits function bodies as strings because JSON
+  // cannot carry code; ECharts needs real functions at setOption() time.
+  function _isFnStr(s) {{
+    return typeof s === 'string' && /^\\s*function\\s*\\(/.test(s);
+  }}
+  function _reviveFns(x) {{
+    if (x == null) return x;
+    if (_isFnStr(x)) {{
+      try {{ return new Function('return (' + x + ')')(); }}
+      catch(e) {{ return x; }}
+    }}
+    if (Array.isArray(x)) {{
+      for (var i = 0; i < x.length; i++) x[i] = _reviveFns(x[i]);
+      return x;
+    }}
+    if (typeof x === 'object') {{
+      for (var k in x) {{
+        if (Object.prototype.hasOwnProperty.call(x, k)) {{
+          x[k] = _reviveFns(x[k]);
+        }}
+      }}
+    }}
+    return x;
+  }}
+
+  var OPTION = {option_json};
+  var THEMES = {themes_json};
+  var THEME_NAME = {theme_name_json};
+  Object.keys(THEMES).forEach(function(k){{
+    try {{ echarts.registerTheme(k, THEMES[k]); }} catch(e){{}}
+  }});
+  var inst = echarts.init(document.getElementById('chart'),
+                            THEME_NAME in THEMES ? THEME_NAME : null,
+                            {{renderer: 'canvas'}});
+  // Strip interactive-only UI elements from the PNG output.
+  delete OPTION.toolbox;
+  delete OPTION.dataZoom;
+  delete OPTION.brush;
+  OPTION.animation = false;
+  if (OPTION.series) {{
+    (Array.isArray(OPTION.series) ? OPTION.series : [OPTION.series])
+      .forEach(function(s){{ s.animation = false; }});
+  }}
+  OPTION = _reviveFns(OPTION);
+  inst.setOption(OPTION, true);
+  inst.on('finished', function(){{ document.title = 'rendered'; }});
+}})();
+</script>
+</body>
+</html>
+"""
+
+
+def find_chrome() -> str:
+    """Locate the Chrome/Chromium binary. Raises RuntimeError if not found.
+
+    Resolution order:
+      1. $CHROME_BIN env var (absolute path)
+      2. /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+      3. PATH lookup for google-chrome / chromium / chromium-browser / chrome
+    """
+    env = os.environ.get("CHROME_BIN")
+    if env:
+        p = Path(env).expanduser()
+        if p.is_file():
+            return str(p)
+        raise RuntimeError(
+            f"CHROME_BIN={env!r} is set but the file does not exist."
+        )
+    mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if Path(mac).is_file():
+        return mac
+    for candidate in ("google-chrome", "chromium", "chromium-browser",
+                       "chrome", "Chromium"):
+        path = shutil.which(candidate)
+        if path:
+            return path
+    raise RuntimeError(
+        "PNG export needs a Chrome/Chromium binary. Install Google Chrome "
+        "or set the CHROME_BIN environment variable to the binary path."
+    )
+
+
+def save_chart_png(
+    option: Union[Dict[str, Any], str],
+    output_path: Union[str, Path],
+    *,
+    width: int = 900,
+    height: int = 520,
+    theme: str = "gs_clean",
+    scale: int = 2,
+    background: str = "#ffffff",
+    virtual_time_ms: int = 2500,
+    timeout_s: float = 30.0,
+    verbose: bool = False,
+) -> Path:
+    """Render a single ECharts option to PNG via headless Chrome.
+
+    Parameters
+    ----------
+    option : dict | str
+        ECharts option object (or JSON string).
+    output_path : str | Path
+        Destination PNG path. Parent directories are created.
+    width, height : int
+        Logical chart dimensions (CSS pixels). Final PNG dimensions will
+        be `width * scale` x `height * scale`.
+    theme : str
+        Theme name to apply (one of the THEMES keys). Defaults to
+        ``gs_clean``. The theme spec is embedded and registered inline.
+    scale : int
+        Device-pixel multiplier (2 = retina). 1, 2, 3 supported.
+    background : str
+        Page background color. Use this for transparent exports by
+        passing ``'rgba(0,0,0,0)'`` plus `--default-background-color=00000000`.
+    virtual_time_ms : int
+        How long to advance Chrome's virtual clock before the screenshot.
+        Large charts with many series may need more.
+    timeout_s : float
+        Hard subprocess timeout.
+    verbose : bool
+        If True, prints the command line and the Chrome output.
+
+    Returns
+    -------
+    Path
+        Absolute path to the written PNG.
+    """
+    if isinstance(option, str):
+        option = json.loads(option)
+    if not isinstance(option, dict):
+        raise TypeError(
+            f"option must be a dict or JSON string, got {type(option).__name__}"
+        )
+
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    themes_payload = {n: t.get("echarts", {}) for n, t in THEMES.items()}
+    html = _HARNESS.format(
+        width=int(width),
+        height=int(height),
+        background=background,
+        option_json=json.dumps(option, default=str),
+        themes_json=json.dumps(themes_payload, default=str),
+        theme_name_json=json.dumps(theme),
+    )
+
+    chrome = find_chrome()
+    tmp = Path(tempfile.mkdtemp(prefix="echarts_png_"))
+    try:
+        harness = tmp / "chart.html"
+        harness.write_text(html, encoding="utf-8")
+        cmd = [
+            chrome,
+            "--headless=new",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--hide-scrollbars",
+            "--mute-audio",
+            "--allow-file-access-from-files",
+            f"--window-size={int(width)},{int(height)}",
+            f"--force-device-scale-factor={int(scale)}",
+            f"--virtual-time-budget={int(virtual_time_ms)}",
+            "--run-all-compositor-stages-before-draw",
+            f"--screenshot={output_path}",
+            f"file://{harness}",
+        ]
+        if verbose:
+            print("  [png_export] " + " ".join(cmd))
+        res = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=timeout_s)
+        if verbose:
+            if res.stdout:
+                print(res.stdout.strip())
+            if res.stderr:
+                print(res.stderr.strip(), file=sys.stderr)
+        if res.returncode != 0:
+            raise RuntimeError(
+                f"headless Chrome failed (exit {res.returncode}): "
+                f"{(res.stderr or res.stdout).strip()}"
+            )
+        if not output_path.is_file():
+            raise RuntimeError(
+                f"Chrome did not write PNG to {output_path}. stderr: "
+                f"{res.stderr.strip()}"
+            )
+        return output_path
+    finally:
+        try:
+            for f in tmp.iterdir():
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+            tmp.rmdir()
+        except OSError:
+            pass
+
+
+def _cell_px(w_cols: int, container_px: int, cols: int, gap_px: int) -> int:
+    """Approximate pixel width of a `w_cols`-wide cell in a `cols`-column grid.
+
+    `container_px` is the total usable width after gutters.
+    """
+    w_cols = max(1, min(w_cols, cols))
+    cell = (container_px - (cols - 1) * gap_px) / cols
+    return int(round(cell * w_cols + (w_cols - 1) * gap_px))
+
+
+def save_dashboard_pngs(
+    manifest: Dict[str, Any],
+    chart_specs: Dict[str, Dict[str, Any]],
+    output_dir: Union[str, Path],
+    *,
+    theme: Optional[str] = None,
+    scale: int = 2,
+    container_px: int = 1400,
+    gap_px: int = 14,
+    min_width: int = 480,
+    background: str = "#ffffff",
+    virtual_time_ms: int = 2500,
+    verbose: bool = False,
+) -> List[Path]:
+    """Render every chart widget in a dashboard as a separate PNG.
+
+    Widget ``id`` becomes the filename stem. Widget pixel width is
+    estimated from its grid span so the PNG matches the on-screen aspect.
+
+    Parameters
+    ----------
+    manifest : dict
+        The dashboard manifest (after validation).
+    chart_specs : dict
+        Mapping of chart widget id -> compiled ECharts option. This is
+        exactly the output of ``_resolve_chart_specs()`` in
+        ``echart_dashboard``.
+    output_dir : str | Path
+        Destination directory; created if missing.
+    theme : str, optional
+        Override theme; defaults to ``manifest['theme']`` or ``gs_clean``.
+    scale : int
+        Device-pixel multiplier.
+    container_px : int
+        Assumed dashboard container width (used to convert grid spans
+        to pixel widths).
+    gap_px : int
+        Grid gap (matches dashboard CSS ``--gap``).
+    min_width : int
+        Floor for tiny tiles so PNGs remain legible.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    theme_name = theme or manifest.get("theme", "gs_clean")
+    layout = manifest.get("layout", {}) or {}
+    cols = int(layout.get("cols", 12))
+    paths: List[Path] = []
+
+    def visit(rows: List[List[Dict[str, Any]]]) -> None:
+        for row in rows or []:
+            for w in row or []:
+                if w.get("widget") != "chart":
+                    continue
+                wid = w.get("id")
+                opt = chart_specs.get(wid) or w.get("option")
+                if not opt or not wid:
+                    continue
+                height = int(w.get("h_px", 320))
+                w_cols = int(w.get("w", cols))
+                width = max(
+                    min_width,
+                    _cell_px(w_cols, container_px, cols, gap_px),
+                )
+                out = output_dir / f"{wid}.png"
+                if verbose:
+                    print(f"  rendering {wid}: {width}x{height} "
+                          f"-> {out}")
+                save_chart_png(
+                    opt, out, width=width, height=height,
+                    theme=theme_name, scale=scale,
+                    background=background,
+                    virtual_time_ms=virtual_time_ms,
+                )
+                paths.append(out)
+
+    if layout.get("kind") == "tabs":
+        for tab in layout.get("tabs", []) or []:
+            visit(tab.get("rows", []))
+    else:
+        visit(layout.get("rows", []))
+    return paths
+
+
+def save_dashboard_html_png(
+    html_path: Union[str, Path],
+    output_path: Union[str, Path],
+    *,
+    width: int = 1400,
+    height: int = 1200,
+    scale: int = 2,
+    virtual_time_ms: int = 4500,
+    timeout_s: float = 45.0,
+    verbose: bool = False,
+) -> Path:
+    """Screenshot a full dashboard HTML file (or any local HTML) to PNG.
+
+    Unlike save_dashboard_pngs() which renders one PNG per chart widget,
+    this captures the entire dashboard page as a single PNG -- useful for
+    gallery thumbnails, email embeds, and report previews.
+
+    Width is the browser viewport; height should be enough to fit the
+    full dashboard (scroll height is NOT auto-detected; the PNG is
+    clipped to the viewport).
+
+    Raises RuntimeError on Chrome failure.
+    """
+    html_path = Path(html_path).resolve()
+    if not html_path.is_file():
+        raise FileNotFoundError(f"HTML file not found: {html_path}")
+
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    chrome = find_chrome()
+    cmd = [
+        chrome,
+        "--headless=new",
+        "--disable-gpu",
+        "--hide-scrollbars",
+        "--no-sandbox",
+        f"--window-size={int(width)},{int(height)}",
+        f"--force-device-scale-factor={int(scale)}",
+        f"--virtual-time-budget={int(virtual_time_ms)}",
+        "--run-all-compositor-stages-before-draw",
+        f"--screenshot={output_path}",
+        f"file://{html_path}",
+    ]
+    if verbose:
+        print("  [png_export] " + " ".join(cmd))
+    res = subprocess.run(cmd, capture_output=True, text=True,
+                          timeout=timeout_s)
+    if verbose:
+        if res.stdout:
+            print(res.stdout.strip())
+        if res.stderr:
+            print(res.stderr.strip(), file=sys.stderr)
+    if res.returncode != 0:
+        raise RuntimeError(
+            f"headless Chrome failed (exit {res.returncode}): "
+            f"{(res.stderr or res.stdout).strip()}"
+        )
+    if not output_path.is_file():
+        raise RuntimeError(
+            f"Chrome did not write PNG to {output_path}. stderr: "
+            f"{res.stderr.strip()}"
+        )
+    return output_path
+
+
+# =============================================================================
+# PUBLIC API
+# =============================================================================
+
+__all__ = [
+    "render_editor_html",
+    "render_dashboard_html",
+    "save_chart_png",
+    "save_dashboard_pngs",
+    "save_dashboard_html_png",
+    "find_chrome",
+]
+
+
+# =============================================================================
+# CLI (smoke test)
+# =============================================================================
+
+def _cli_interactive() -> int:
+    print("""
+rendering -- interactive menu
+
+  1. render one chart sample to PNG
+  2. render all chart samples to PNG (gs_clean theme)
+  3. print Chrome binary path
+  q. quit
+""")
+    choice = input("choice [q]: ").strip().lower() or "q"
+    if choice == "q":
+        return 0
+    if choice == "3":
+        try:
+            print(f"chrome: {find_chrome()}")
+        except RuntimeError as e:
+            print(f"ERROR: {e}")
+        return 0
+    from samples import SAMPLES
+    out_dir = input("output dir [pngs_demo]: ").strip() or "pngs_demo"
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    if choice == "1":
+        names = sorted(SAMPLES.keys())
+        print("\n".join(f"  {i+1}. {n}" for i, n in enumerate(names)))
+        pick = input("sample [1]: ").strip() or "1"
+        name = names[int(pick) - 1] if pick.isdigit() else pick
+        path = save_chart_png(SAMPLES[name](), out / f"{name}.png",
+                                verbose=True)
+        print(f"wrote {path}")
+    else:
+        for name, fn in sorted(SAMPLES.items()):
+            try:
+                path = save_chart_png(fn(), out / f"{name}.png")
+                print(f"  ok  {name:24s} -> {path}")
+            except Exception as e:
+                print(f"  FAIL {name}: {e}")
+    return 0
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    import argparse
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv:
+        return _cli_interactive()
+    p = argparse.ArgumentParser(
+        "rendering",
+        description="HTML + PNG rendering smoke test.",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    c1 = sub.add_parser("render",
+                          help="render one option JSON file to PNG")
+    c1.add_argument("input", help="path to JSON option file")
+    c1.add_argument("-o", "--output", required=True,
+                     help="output PNG path")
+    c1.add_argument("--width", type=int, default=900)
+    c1.add_argument("--height", type=int, default=520)
+    c1.add_argument("--theme", default="gs_clean")
+    c1.add_argument("--scale", type=int, default=2)
+    c1.add_argument("--background", default="#ffffff")
+    c1.add_argument("--verbose", action="store_true")
+
+    c2 = sub.add_parser("samples",
+                          help="render every chart sample to PNG")
+    c2.add_argument("--output-dir", default="pngs_demo")
+    c2.add_argument("--theme", default="gs_clean")
+    c2.add_argument("--scale", type=int, default=2)
+    c2.add_argument("--width", type=int, default=900)
+    c2.add_argument("--height", type=int, default=520)
+
+    c3 = sub.add_parser("chrome",
+                          help="print Chrome binary path")
+
+    args = p.parse_args(argv)
+    if args.cmd == "render":
+        option = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        path = save_chart_png(
+            option, args.output,
+            width=args.width, height=args.height,
+            theme=args.theme, scale=args.scale,
+            background=args.background,
+            verbose=args.verbose,
+        )
+        print(f"wrote {path}")
+        return 0
+    if args.cmd == "samples":
+        from samples import SAMPLES
+        out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
+        ok = fail = 0
+        for name, fn in sorted(SAMPLES.items()):
+            try:
+                save_chart_png(
+                    fn(), out / f"{name}.png",
+                    width=args.width, height=args.height,
+                    theme=args.theme, scale=args.scale,
+                )
+                print(f"  ok   {name:24s}")
+                ok += 1
+            except Exception as e:
+                print(f"  FAIL {name}: {e}")
+                fail += 1
+        print(f"\n{ok} ok, {fail} failed. dir: {out.resolve()}")
+        return 0 if fail == 0 else 1
+    if args.cmd == "chrome":
+        try:
+            print(find_chrome())
+            return 0
+        except RuntimeError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
