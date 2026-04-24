@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>GS echarts demo gallery</title>
+<style>
+  html, body { margin:0; padding:0; background:#f5f6fa;
+                 font-family: -apple-system, "Segoe UI", Roboto,
+                               Helvetica, Arial, sans-serif;
+                 color:#2d3748; }
+  header { background:#1a365d; color:white; padding:18px 28px;
+             display:flex; justify-content:space-between; align-items:center; }
+  header .brand { display:flex; align-items:center; gap:14px; }
+  header .brand .logo { background:#002f6c; color:white;
+                           padding:4px 8px; border-radius:3px;
+                           font-weight:700; font-size:14px; letter-spacing:0.8px; }
+  header h1 { font-size:22px; margin:0; font-weight:600; }
+  header .meta { font-size:12px; opacity:0.85; }
+  .wrap { padding:22px 28px 64px; }
+  .summary { display:flex; gap:18px; margin-bottom:22px;
+                font-size:13px; color:#2d3748; }
+  .summary .pill { background:white; border:1px solid #e2e8f0;
+                      border-radius:999px; padding:6px 14px; }
+  .grid { display:grid;
+             grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+             gap: 18px; }
+  .card { background:white; border:1px solid #e2e8f0; border-radius:10px;
+            box-shadow:0 1px 3px rgba(0,0,0,0.04); overflow:hidden;
+            display:flex; flex-direction:column; }
+  .card .head { padding:14px 18px; border-bottom:1px solid #edf2f7;
+                   display:flex; justify-content:space-between;
+                   align-items:center; gap:12px; }
+  .card .head h2 { font-size:15px; margin:0; font-weight:600;
+                      color:#1a365d; }
+  .card .head .kind { background:#edf2f7; color:#2d3748;
+                         padding:3px 10px; border-radius:999px;
+                         font-size:11px; font-weight:500; }
+  .card .body { padding:0; }
+  .card .body img { width:100%; display:block; background:#fafbfd;
+                       border-bottom:1px solid #edf2f7; }
+  .card .desc { padding:12px 18px; font-size:12px; color:#4a5568;
+                   line-height:1.55; min-height:38px; }
+  .card .actions { padding:10px 18px 16px; display:flex; gap:8px;
+                      flex-wrap:wrap; font-size:12px; }
+  .card .actions a { text-decoration:none; color:white;
+                        background:#3182ce; padding:6px 12px;
+                        border-radius:6px; font-weight:500; }
+  .card .actions a:hover { background:#2c5282; }
+  .card .actions a.secondary { background:#e2e8f0; color:#2d3748; }
+  .card .actions a.secondary:hover { background:#cbd5e0; }
+  .card .actions .mod { margin-left:auto; color:#718096; font-size:11px;
+                           align-self:center; }
+  .missing { background:#fff5f5; color:#c53030; padding:20px; text-align:center;
+                font-size:12px; }
+  footer { text-align:center; color:#a0aec0; font-size:11px;
+              padding:30px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="logo">GS</span>
+    <h1>Charts &amp; Dashboards Demo Gallery</h1>
+  </div>
+  <div class="meta">generated 2026-04-24 19:22:05 &middot; 9/9 demos succeeded</div>
+</header>
+<div class="wrap">
+  <div class="summary">
+    <div class="pill">Engine: ECharts (GS/viz/echarts)</div>
+    <div class="pill">Theme: gs_clean</div>
+    <div class="pill">Palettes: gs_primary / gs_blues / gs_diverging</div>
+    <div class="pill">9 demos / 9 OK</div>
+  </div>
+  <div class="grid">
+
+    <div class="card">
+      <div class="head">
+        <h2>Rates monitor (US + global CB)</h2>
+        <span class="kind">dashboard</span>
+      </div>
+      <div class="body"><img src="rates_monitor/thumbnail.png" alt="Rates monitor (US + global CB)"/></div>
+      <div class="desc">8-tab rates monitor: US curve overview / curve detail (brush) / macro overlay (dual-axis ISM) plus 5 identical-shape tabs for Fed / ECB / BoE / BoJ / EM with KPI + policy-rate line + cut-prob gauge + decisions bar. Stress-tests high-tab-count layouts.</div>
+      <div class="actions">
+        <a href="rates_monitor/dashboard.html" target="_blank">Open interactive</a><a class="secondary" href="rates_monitor/thumbnail.png" target="_blank">PNG</a><a class="secondary" href="rates_monitor/dashboard.json" target="_blank">JSON manifest</a>
+        <span class="mod">rates_monitor &middot; 2.88s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h2>Cross-asset snapshot</h2>
+        <span class="kind">composite</span>
+      </div>
+      <div class="body"><img src="cross_asset/composite.png" alt="Cross-asset snapshot"/></div>
+      <div class="desc">Four major asset classes in one conversational composite (SPX, DXY, WTI, Gold) with event annotations.</div>
+      <div class="actions">
+        <a href="cross_asset/echarts/composite.html" target="_blank">Open interactive</a><a class="secondary" href="cross_asset/composite.png" target="_blank">PNG</a>
+        <span class="mod">cross_asset &middot; 2.05s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h2>Risk regime monitor</h2>
+        <span class="kind">dashboard</span>
+      </div>
+      <div class="body"><img src="risk_regime/thumbnail.png" alt="Risk regime monitor"/></div>
+      <div class="desc">Cross-asset correlation heatmap, VIX term structure across regimes, factor-return boxplots, and running drawdown with a bear-market band.</div>
+      <div class="actions">
+        <a href="risk_regime/dashboard.html" target="_blank">Open interactive</a><a class="secondary" href="risk_regime/thumbnail.png" target="_blank">PNG</a><a class="secondary" href="risk_regime/dashboard.json" target="_blank">JSON manifest</a>
+        <span class="mod">risk_regime &middot; 2.09s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h2>FOMC policy monitor</h2>
+        <span class="kind">dashboard</span>
+      </div>
+      <div class="body"><img src="fomc_monitor/thumbnail.png" alt="FOMC policy monitor"/></div>
+      <div class="desc">Fed policy: probability gauge, FFR futures candlestick, dot plot vs realized (strokeDash), voter hawk/dove radar, decision calendar heatmap, dual-axis rates chart. Metadata + header_actions.</div>
+      <div class="actions">
+        <a href="fomc_monitor/dashboard.html" target="_blank">Open interactive</a><a class="secondary" href="fomc_monitor/thumbnail.png" target="_blank">PNG</a><a class="secondary" href="fomc_monitor/dashboard.json" target="_blank">JSON manifest</a>
+        <span class="mod">fomc_monitor &middot; 2.11s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h2>Global flows & allocation</h2>
+        <span class="kind">dashboard</span>
+      </div>
+      <div class="body"><img src="global_flows/thumbnail.png" alt="Global flows & allocation"/></div>
+      <div class="desc">Cross-border trade sankey + outbound donut, treemap + sunburst allocation, counterparty graph network, mandate funnel, stat_grid.</div>
+      <div class="actions">
+        <a href="global_flows/dashboard.html" target="_blank">Open interactive</a><a class="secondary" href="global_flows/thumbnail.png" target="_blank">PNG</a><a class="secondary" href="global_flows/dashboard.json" target="_blank">JSON manifest</a>
+        <span class="mod">global_flows &middot; 2.98s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h2>Equity deep dive</h2>
+        <span class="kind">dashboard</span>
+      </div>
+      <div class="body"><img src="equity_deep_dive/thumbnail.png" alt="Equity deep dive"/></div>
+      <div class="desc">Single-name tear sheet: candlestick + volume, EPS actuals vs consensus (strokeDash), analyst bar_horizontal, beta scatter-trendline, return histogram, valuation bullet, KPI info/popup, header_actions, refresh metadata.</div>
+      <div class="actions">
+        <a href="equity_deep_dive/dashboard.html" target="_blank">Open interactive</a><a class="secondary" href="equity_deep_dive/thumbnail.png" target="_blank">PNG</a><a class="secondary" href="equity_deep_dive/dashboard.json" target="_blank">JSON manifest</a>
+        <span class="mod">equity_deep_dive &middot; 2.05s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h2>Portfolio analytics</h2>
+        <span class="kind">dashboard</span>
+      </div>
+      <div class="body"><img src="portfolio_analytics/thumbnail.png" alt="Portfolio analytics"/></div>
+      <div class="desc">Multi-asset portfolio: VaR gauge, factor radar, allocation pie, stacked-area P&L, parallel-coords positions, return-distribution histogram, stat_grid.</div>
+      <div class="actions">
+        <a href="portfolio_analytics/dashboard.html" target="_blank">Open interactive</a><a class="secondary" href="portfolio_analytics/thumbnail.png" target="_blank">PNG</a><a class="secondary" href="portfolio_analytics/dashboard.json" target="_blank">JSON manifest</a>
+        <span class="mod">portfolio_analytics &middot; 2.15s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h2>Cross-asset end-of-day wrap</h2>
+        <span class="kind">dashboard</span>
+      </div>
+      <div class="body"><img src="markets_wrap/thumbnail.png" alt="Cross-asset end-of-day wrap"/></div>
+      <div class="desc">One big scrollable cross-asset wrap: KPI ribbon, equities / rates / FX / commodities sections, dual-axis + bar_horizontal charts, click-emit-filter, top-movers table with z-score colour scale. Stress-tests layout w/ 17 charts.</div>
+      <div class="actions">
+        <a href="markets_wrap/dashboard.html" target="_blank">Open interactive</a><a class="secondary" href="markets_wrap/thumbnail.png" target="_blank">PNG</a><a class="secondary" href="markets_wrap/dashboard.json" target="_blank">JSON manifest</a>
+        <span class="mod">markets_wrap &middot; 3.19s</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="head">
+        <h2>Screener studio (tables / filters / drill-down)</h2>
+        <span class="kind">dashboard</span>
+      </div>
+      <div class="body"><img src="screener_studio/thumbnail.png" alt="Screener studio (tables / filters / drill-down)"/></div>
+      <div class="desc">Three-tab toolbox. Tab 1: RV screen with conditional formatting + z-score colour scale + drill-down time-series. Tab 2: all 9 filter types on one dataset. Tab 3: bond universe with row_click.detail rich-modal (stats / markdown / charts / sub-table sections).</div>
+      <div class="actions">
+        <a href="screener_studio/dashboard.html" target="_blank">Open interactive</a><a class="secondary" href="screener_studio/thumbnail.png" target="_blank">PNG</a><a class="secondary" href="screener_studio/dashboard.json" target="_blank">JSON manifest</a>
+        <span class="mod">screener_studio &middot; 2.26s</span>
+      </div>
+    </div>
+  </div>
+</div>
+<footer>
+  GS/viz/echarts demos &middot; run via <code>python demos.py --all</code>
+</footer>
+</body>
+</html>

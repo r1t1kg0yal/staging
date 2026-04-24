@@ -23,8 +23,8 @@ Example: JSON-first (PRISM's preferred shape)
 
     manifest = {
       "schema_version": 1,
-      "id": "rates_daily",
-      "title": "US Rates Daily",
+      "id": "rates_monitor",
+      "title": "Rates monitor",
       "theme": "gs_clean",
       "datasets": {
         "rates": {"source": [
@@ -55,8 +55,8 @@ Example: JSON-first (PRISM's preferred shape)
     }
 
     r = compile_dashboard(manifest, session_path="sessions/demo")
-    # r.manifest_path -> sessions/demo/dashboards/rates_daily.json
-    # r.html_path     -> sessions/demo/dashboards/rates_daily.html
+    # r.manifest_path -> sessions/demo/dashboards/rates_monitor.json
+    # r.html_path     -> sessions/demo/dashboards/rates_monitor.html
 
 Example: Python builder
 -----------------------
@@ -65,7 +65,7 @@ Example: Python builder
         Dashboard, ChartRef, KPIRef, GlobalFilter, Link,
     )
 
-    db = (Dashboard(id="rates_daily", title="US Rates Daily")
+    db = (Dashboard(id="rates_monitor", title="Rates monitor")
           .add_dataset("rates", rates_df)
           .add_filter(GlobalFilter(id="dt", type="dateRange",
                                     default="6M", targets=["*"]))
@@ -145,6 +145,7 @@ def validate_manifest(manifest: Dict[str, Any]) -> Tuple[bool, List[str]]:
     # so validate_manifest accepts the same shapes compile_dashboard does.
     try:
         _normalize_manifest_datasets(manifest)
+        _augment_manifest(manifest)
     except Exception:  # noqa: BLE001
         pass  # let validation report the issue
     sv = manifest.get("schema_version")
@@ -1134,6 +1135,145 @@ def _normalize_manifest_datasets(manifest: Dict[str, Any]) -> Dict[str, Any]:
     return manifest
 
 
+def _augment_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Post-normalization, pre-validation enrichment that wires implicit
+    contracts so PRISM-written manifests behave the way they look:
+
+      1. chart widgets get ``dataset_ref`` auto-populated from
+         ``spec.dataset`` when missing, so the runtime filter-application
+         path (which keys off ``widget.dataset_ref``) reaches the chart.
+
+      2. filters get a ``scope`` field inferred from their targets.
+         If every resolved target lives in a single tab, ``scope`` is set
+         to ``"tab:<id>"`` so the filter can render inside that tab
+         (instead of squatting globally). If targets span tabs or include
+         the wildcard ``"*"``, ``scope`` defaults to ``"global"``.
+
+    Mutates the manifest in place and returns it.
+    """
+    layout = manifest.get("layout") or {}
+    kind = layout.get("kind", "grid")
+
+    widget_to_tab: Dict[str, Optional[str]] = {}
+    tab_widget_ids: Dict[str, List[str]] = {}
+    all_widgets: List[Dict[str, Any]] = []
+
+    def _visit_rows(rows, tab_id: Optional[str]):
+        if not isinstance(rows, list):
+            return
+        for row in rows:
+            if not isinstance(row, list):
+                continue
+            for w in row:
+                if not isinstance(w, dict):
+                    continue
+                all_widgets.append(w)
+                wid = w.get("id")
+                if wid:
+                    widget_to_tab[wid] = tab_id
+                    if tab_id is not None:
+                        tab_widget_ids.setdefault(tab_id, []).append(wid)
+
+    if kind == "tabs":
+        for t in layout.get("tabs", []) or []:
+            if not isinstance(t, dict):
+                continue
+            _visit_rows(t.get("rows", []) or [], t.get("id"))
+    else:
+        _visit_rows(layout.get("rows", []) or [], None)
+
+    filters = manifest.get("filters") or []
+
+    # Set of widget ids that ANY filter targets. We only auto-populate
+    # dataset_ref on widgets actually in the filter path so that charts
+    # with pre-baked computed data (histograms, trendlines, bullets,
+    # candlesticks, heatmaps, radar, gauge, sankey, treemap, funnel,
+    # etc.) are not silently rewired and broken.
+    targeted_ids: set = set()
+    wildcard = False
+    for f in filters:
+        if not isinstance(f, dict):
+            continue
+        for t in f.get("targets") or []:
+            if isinstance(t, str) and "*" in t:
+                wildcard = True
+            else:
+                targeted_ids.add(t)
+
+    # Chart types where the runtime rewire-on-filter path (dataset swap
+    # + series encode substitution) can safely produce the right series
+    # shape *without* access to the original builder. We only auto-wire
+    # dataset_ref for widgets whose (chart_type, mapping) shape is in
+    # this set. Anything else (computed series data, long-form with
+    # color grouping, stacked bars, scatter with size/trendline, etc.)
+    # keeps its pre-baked series.data and will not visually reshape on
+    # filter change -- filter state still tracks and affects tables /
+    # KPIs referencing the same dataset_ref.
+    def _is_safe_for_rewire(chart_type: Optional[str],
+                              mapping: Dict[str, Any]) -> bool:
+        if chart_type not in {"line", "bar", "area", "multi_line"}:
+            return False
+        if mapping.get("color") or mapping.get("colour"):
+            return False
+        if mapping.get("trendline") or mapping.get("trendlines"):
+            return False
+        if mapping.get("stack") is True:
+            return False
+        if mapping.get("dual_axis_series"):
+            # Dual-axis multi_line keeps wide-form compatibility; allow.
+            return chart_type == "multi_line"
+        return True
+
+    for w in all_widgets:
+        if w.get("widget") != "chart":
+            continue
+        if w.get("dataset_ref"):
+            continue
+        wid = w.get("id")
+        spec = w.get("spec")
+        if not isinstance(spec, dict):
+            continue
+        ds_name = spec.get("dataset")
+        if not ds_name:
+            continue
+        is_targeted = wildcard or (wid in targeted_ids)
+        if not is_targeted:
+            continue
+        if not _is_safe_for_rewire(spec.get("chart_type"),
+                                       spec.get("mapping") or {}):
+            continue
+        w["dataset_ref"] = ds_name
+
+    for f in filters:
+        if not isinstance(f, dict):
+            continue
+        if f.get("scope"):
+            continue
+        targets = f.get("targets") or []
+        if not targets:
+            f["scope"] = "global"
+            continue
+        has_wildcard = any(
+            isinstance(t, str) and ("*" in t) for t in targets
+        )
+        if has_wildcard:
+            f["scope"] = "global"
+            continue
+        resolved_tabs: set = set()
+        for t in targets:
+            tab = widget_to_tab.get(t)
+            if tab is None:
+                resolved_tabs.add("__none__")
+                break
+            resolved_tabs.add(tab)
+        if len(resolved_tabs) == 1 and "__none__" not in resolved_tabs:
+            f["scope"] = f"tab:{next(iter(resolved_tabs))}"
+        else:
+            f["scope"] = "global"
+
+    return manifest
+
+
 def manifest_template(manifest: Dict[str, Any]) -> Dict[str, Any]:
     """Return a data-free copy of ``manifest`` suitable to save to disk
     as a reusable dashboard template.
@@ -1360,7 +1500,392 @@ def _spec_to_option(
         combined.extend(list(spec_annotations))
     if combined:
         _apply_annotations(opt, combined)
+
+    # Post-build cosmetic pass: humanize series / legend labels, apply
+    # optional legend_position / legend_show overrides, and format
+    # date-like x-axis tick labels. Each of these is a "polish layer"
+    # applied uniformly across every chart type so individual builders
+    # don't all need to grow the same cosmetic knobs.
+    _apply_post_build_polish(opt, spec, mapping)
     return opt
+
+
+def _humanize_col(name: Any) -> str:
+    """Turn a column/series identifier into a readable label.
+
+    Rules:
+      * snake_case -> Title Case with spaces
+      * '_pct' -> '(%)'
+      * preserves all-uppercase tokens (e.g. 'us_10y' -> 'US 10Y')
+      * leaves non-string input untouched
+    """
+    if not isinstance(name, str) or not name:
+        return name
+    lowered = name.lower()
+    if lowered.endswith("_pct"):
+        lowered = lowered[:-4] + "_(%)"
+    parts = [p for p in lowered.split("_") if p]
+
+    def _tok(t: str) -> str:
+        if t == "(%)":
+            return "(%)"
+        if t in {"us", "eu", "uk", "jp", "cn", "em", "dm", "hk"}:
+            return t.upper()
+        if len(t) <= 3 and any(ch.isdigit() for ch in t):
+            return t.upper()
+        if t in {"pnl", "mtd", "ytd", "yoy", "mom", "wow", "eps", "dxy",
+                  "gdp", "cpi", "pmi", "ism", "nfp", "oas", "vix", "var",
+                  "fx", "hy", "ig", "ir"}:
+            return t.upper()
+        return t.capitalize()
+    return " ".join(_tok(p) for p in parts)
+
+
+def _apply_post_build_polish(opt: Dict[str, Any],
+                               spec: Dict[str, Any],
+                               mapping: Dict[str, Any]) -> None:
+    """Apply polish layers to an already-built chart option in place.
+
+    Polish layers:
+      * legend position/visibility (spec.legend_position, legend_show)
+      * humanize series names unless mapping.humanize is False, or override
+        via mapping.series_labels = {raw_name: display_name}
+      * x-axis tick date formatting via mapping.x_date_format
+    """
+    # Legend visibility + position overrides. These are top-level knobs
+    # that apply uniformly to every chart type.
+    legend = opt.get("legend") or {}
+    legend_show = spec.get("legend_show")
+    if legend_show is not None:
+        legend["show"] = bool(legend_show)
+    pos = spec.get("legend_position") or mapping.get("legend_position")
+    if pos:
+        # reset any prior side settings so the assignment is crisp
+        for k in ("left", "right", "top", "bottom", "orient"):
+            legend.pop(k, None)
+        pos = str(pos).lower()
+        if pos == "top":
+            legend["top"] = 8
+            legend["left"] = "center"
+            legend["orient"] = "horizontal"
+        elif pos == "bottom":
+            legend["bottom"] = 8
+            legend["left"] = "center"
+            legend["orient"] = "horizontal"
+        elif pos == "left":
+            legend["left"] = 8
+            legend["top"] = "middle"
+            legend["orient"] = "vertical"
+        elif pos == "right":
+            legend["right"] = 8
+            legend["top"] = "middle"
+            legend["orient"] = "vertical"
+        elif pos == "none":
+            legend["show"] = False
+        # Plain (wrapping) legend is easier to read on dashboards than
+        # the paginated default when many items don't fit on one line.
+        legend["type"] = "plain"
+        legend.setdefault("itemGap", 14)
+        legend.setdefault("textStyle", {"fontSize": 12})
+    if legend:
+        opt["legend"] = legend
+
+    # Humanize series names + legend entries. Caller can disable
+    # globally with mapping.humanize = False or override per-series
+    # with mapping.series_labels = {raw: display}.
+    humanize = mapping.get("humanize")
+    overrides = mapping.get("series_labels") or {}
+    if humanize is None:
+        humanize = True
+    def _maybe_humanize(name: str) -> Optional[str]:
+        if name in overrides:
+            return overrides[name]
+        if not humanize:
+            return None
+        if "_" in name:
+            return _humanize_col(name)
+        # single-word lowercase token: capitalize it (so axis labels
+        # like "beta" render as "Beta"). Multi-case tokens like "SPX"
+        # or "AAA" are left alone.
+        if name.isalpha() and name.islower():
+            return _humanize_col(name)
+        return None
+
+    rename: Dict[str, str] = {}
+    for s in opt.get("series") or []:
+        if not isinstance(s, dict):
+            continue
+        orig = s.get("name")
+        if not isinstance(orig, str) or not orig:
+            continue
+        new = _maybe_humanize(orig)
+        if new and new != orig:
+            # Preserve the raw column name on the series so the
+            # runtime (materializeOption) can still look up the right
+            # dataset column when rewiring filter state. Without this,
+            # a humanised name like "ECB" doesn't match the lowercase
+            # dataset column "ecb" and ECharts falls back to positional
+            # index, which is wrong for long-form datasets.
+            s["_column"] = orig
+            s["name"] = new
+            rename[orig] = new
+
+    if rename and isinstance(opt.get("legend"), dict):
+        ld = opt["legend"].get("data")
+        if isinstance(ld, list):
+            opt["legend"]["data"] = [
+                rename.get(n, n) if isinstance(n, str) else n
+                for n in ld
+            ]
+
+    # Parallel coordinates axis names come from column names; humanize
+    # them unless mapping.humanize is False.
+    if isinstance(opt.get("parallelAxis"), list):
+        for ax in opt["parallelAxis"]:
+            if not isinstance(ax, dict):
+                continue
+            nm = ax.get("name")
+            if not isinstance(nm, str):
+                continue
+            new = _maybe_humanize(nm)
+            if new:
+                ax["name"] = new
+
+    # Pie / donut polish:
+    #   * When the legend sits at the bottom, the slice-edge labels
+    #     duplicate what's in the legend AND get truncated into the
+    #     tile walls ("United States..."). Hide them and rely on the
+    #     legend. Users can force them back with
+    #     `mapping.show_slice_labels: True`.
+    #   * Also recenter / slightly shrink the pie so the plot itself
+    #     is vertically centered above the legend.
+    show_slice = bool(mapping.get("show_slice_labels", False))
+    for s in opt.get("series") or []:
+        if not isinstance(s, dict):
+            continue
+        if s.get("type") != "pie":
+            continue
+        if pos in ("top", "bottom") and not show_slice:
+            label = s.get("label") or {}
+            label["show"] = False
+            s["label"] = label
+            # Also suppress label lines connecting to hidden labels.
+            s["labelLine"] = {"show": False}
+            if pos == "bottom":
+                s.setdefault("center", ["50%", "42%"])
+            else:
+                s.setdefault("center", ["50%", "58%"])
+            # Give the pie a bit more breathing room now that labels
+            # are gone.
+            cur_r = s.get("radius")
+            if isinstance(cur_r, list) and len(cur_r) == 2:
+                # donut: keep the ring ratio, bump outer radius a touch
+                s["radius"] = [cur_r[0], "78%"]
+            else:
+                s["radius"] = "72%"
+
+    # X-axis date formatting. ECharts understands JS format functions;
+    # we emit a string that the rendering layer's _reviveFns treats as
+    # a live JS function so the tick label looks like "Apr 15" etc.
+    x_fmt = mapping.get("x_date_format") or spec.get("x_date_format")
+    if x_fmt:
+        x_axis = opt.get("xAxis")
+        axes: List[Dict[str, Any]]
+        if isinstance(x_axis, list):
+            axes = x_axis
+        elif isinstance(x_axis, dict):
+            axes = [x_axis]
+        else:
+            axes = []
+        for ax in axes:
+            al = ax.setdefault("axisLabel", {})
+            if x_fmt == "auto":
+                al["formatter"] = (
+                    "function(v){"
+                    " var d = new Date(v);"
+                    " if (isNaN(d.getTime())) return v;"
+                    " var m = ['Jan','Feb','Mar','Apr','May','Jun',"
+                    "'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];"
+                    " return m + ' ' + d.getDate();"
+                    "}"
+                )
+            else:
+                al["formatter"] = str(x_fmt)
+
+    # Axis range overrides. `y_min` / `y_max` / `x_min` / `x_max` on
+    # mapping or spec get applied to the corresponding axis. Helpful
+    # when auto-scale zooms the chart out to include 0 and squashes
+    # the signal (e.g. rates around 5% plotted on a 0-9 axis).
+    def _axis_range(axis_key: str, min_key: str, max_key: str):
+        mn = mapping.get(min_key)
+        mx = mapping.get(max_key)
+        if mn is None and mx is None:
+            mn = spec.get(min_key)
+            mx = spec.get(max_key)
+        if mn is None and mx is None:
+            return
+        axis = opt.get(axis_key)
+        axes_: List[Dict[str, Any]]
+        if isinstance(axis, list):
+            axes_ = axis
+        elif isinstance(axis, dict):
+            axes_ = [axis]
+        else:
+            return
+        for a in axes_:
+            if mn is not None:
+                a["min"] = mn
+            if mx is not None:
+                a["max"] = mx
+
+    _axis_range("yAxis", "y_min", "y_max")
+    _axis_range("xAxis", "x_min", "x_max")
+
+    # `axis_format` / `y_format` / `x_format` shortcut for common
+    # numeric label styles without writing raw ECharts functions.
+    def _axis_number_format(axis_key: str, key: str):
+        fmt = mapping.get(key) or spec.get(key)
+        if not fmt:
+            return
+        axis = opt.get(axis_key)
+        axes_: List[Dict[str, Any]] = (
+            axis if isinstance(axis, list)
+            else ([axis] if isinstance(axis, dict) else [])
+        )
+        fmt_str: Optional[str] = None
+        if fmt == "percent":
+            fmt_str = ("function(v){ return (v*100).toFixed(1) + '%'; }")
+        elif fmt == "bp":
+            fmt_str = ("function(v){ return v.toFixed(0) + ' bp'; }")
+        elif fmt == "usd":
+            fmt_str = ("function(v){ return '$' + v.toLocaleString(); }")
+        elif fmt == "compact":
+            fmt_str = (
+                "function(v){"
+                " var a = Math.abs(v);"
+                " if (a >= 1e12) return (v/1e12).toFixed(1) + 'T';"
+                " if (a >= 1e9)  return (v/1e9).toFixed(1) + 'B';"
+                " if (a >= 1e6)  return (v/1e6).toFixed(1) + 'M';"
+                " if (a >= 1e3)  return (v/1e3).toFixed(1) + 'K';"
+                " return v.toString();"
+                "}"
+            )
+        else:
+            fmt_str = str(fmt)
+        for a in axes_:
+            al = a.setdefault("axisLabel", {})
+            al["formatter"] = fmt_str
+
+    _axis_number_format("yAxis", "y_format")
+    _axis_number_format("xAxis", "x_format")
+
+    # Axis cosmetic toggles.
+    def _axis_cosmetics(axis_key: str):
+        axis = opt.get(axis_key)
+        if isinstance(axis, list):
+            axes_ = axis
+        elif isinstance(axis, dict):
+            axes_ = [axis]
+        else:
+            return
+        show_grid = spec.get("show_grid", mapping.get("show_grid"))
+        show_axis_line = spec.get(
+            "show_axis_line", mapping.get("show_axis_line"))
+        show_axis_ticks = spec.get(
+            "show_axis_ticks", mapping.get("show_axis_ticks"))
+        for a in axes_:
+            if show_grid is not None:
+                a.setdefault("splitLine", {})["show"] = bool(show_grid)
+            if show_axis_line is not None:
+                a.setdefault("axisLine", {})["show"] = bool(show_axis_line)
+            if show_axis_ticks is not None:
+                a.setdefault("axisTick", {})["show"] = bool(show_axis_ticks)
+    _axis_cosmetics("xAxis")
+    _axis_cosmetics("yAxis")
+
+    # `tooltip`: per-spec chart tooltip override. Accepts an ECharts
+    # tooltip dict directly, or a sugared form:
+    #   "tooltip": {
+    #       "trigger": "axis" | "item" | "none",
+    #       "decimals": 2,                      # format numeric values
+    #       "formatter": "<fn string>",         # raw ECharts formatter
+    #       "show": False,                      # hide tooltip entirely
+    #   }
+    tip_cfg = spec.get("tooltip")
+    if tip_cfg is not None:
+        tt = opt.get("tooltip") or {}
+        if not isinstance(tt, dict):
+            tt = {}
+        if isinstance(tip_cfg, dict):
+            if "show" in tip_cfg:
+                tt["show"] = bool(tip_cfg["show"])
+            if "trigger" in tip_cfg:
+                tt["trigger"] = tip_cfg["trigger"]
+            if "formatter" in tip_cfg:
+                tt["formatter"] = tip_cfg["formatter"]
+            if "decimals" in tip_cfg:
+                d = int(tip_cfg["decimals"])
+                tt["valueFormatter"] = (
+                    "function(v){"
+                    f" if (v == null) return '';"
+                    f" var n = Number(v);"
+                    f" if (isNaN(n)) return String(v);"
+                    f" return n.toLocaleString(undefined,"
+                    f" {{minimumFractionDigits: {d},"
+                    f"   maximumFractionDigits: {d}}});"
+                    "}"
+                )
+            # Pass through any unknown keys verbatim so callers can
+            # reach ECharts-native tooltip options.
+            for k, v in tip_cfg.items():
+                if k in {"show", "trigger", "formatter", "decimals"}:
+                    continue
+                tt[k] = v
+        opt["tooltip"] = tt
+
+    # Per-series color overrides. `mapping.series_colors = {raw_col:
+    # "#hex"}`. We look up by either the pre-humanise `_column` or the
+    # final `name`, so callers can reference whichever is natural.
+    series_colors = mapping.get("series_colors") or {}
+    if isinstance(series_colors, dict) and series_colors:
+        for s in opt.get("series") or []:
+            if not isinstance(s, dict):
+                continue
+            col_key = s.get("_column") or s.get("name")
+            if col_key in series_colors:
+                s.setdefault("itemStyle", {})["color"] = \
+                    series_colors[col_key]
+                s.setdefault("lineStyle", {})["color"] = \
+                    series_colors[col_key]
+
+    # `grid_padding`: per-spec grid override. Accepts a dict with any
+    # subset of {top, right, bottom, left} and merges into the option's
+    # grid. Useful when a chart has an especially long y-axis title
+    # or tick labels that need more breathing room. Auto-bumps
+    # `right` when a dual-axis chart emits a right-side axis name so
+    # the rotated label doesn't clip against the tile edge.
+    pad = (spec.get("grid_padding") or mapping.get("grid_padding")
+           or {})
+    grid = opt.get("grid") or {}
+    if isinstance(grid, list):
+        grids = grid
+    elif isinstance(grid, dict):
+        grids = [grid]
+    else:
+        grids = []
+    yaxes = opt.get("yAxis")
+    has_right_axis_name = (
+        isinstance(yaxes, list) and len(yaxes) >= 2
+        and isinstance(yaxes[1], dict) and yaxes[1].get("name")
+    )
+    for g in grids:
+        for k in ("top", "right", "bottom", "left"):
+            if k in pad:
+                g[k] = pad[k]
+        if has_right_axis_name and "right" not in pad:
+            # Ensure the rotated right-axis name has room even when
+            # tick labels run to 4 or 5 digits on the right side.
+            g["right"] = max(int(g.get("right", 24) or 24), 56)
 
 
 def _resolve_chart_specs(manifest: Dict[str, Any],
@@ -1382,6 +1907,26 @@ def _resolve_chart_specs(manifest: Dict[str, Any],
     manifest_theme = manifest.get("theme", "gs_clean")
     manifest_palette = manifest.get("palette")
 
+    def _suppress_chart_title_if_widget_has_one(w, opt):
+        """When the widget has its own title rendered in the tile
+        header, clear the internal ECharts title to avoid the double
+        "ACME daily OHLC / ACME daily OHLC" headline. The chart's
+        subtitle stays so callers can use `spec.subtitle` for extra
+        context (e.g. "daily OHLC"). Widget author can override by
+        setting ``spec.keep_title: True``.
+        """
+        if not isinstance(opt, dict):
+            return opt
+        if not w.get("title"):
+            return opt
+        spec_obj = w.get("spec") or {}
+        if isinstance(spec_obj, dict) and spec_obj.get("keep_title"):
+            return opt
+        title = opt.get("title")
+        if isinstance(title, dict):
+            title["text"] = ""
+        return opt
+
     def visit(rows):
         for row in rows or []:
             for w in row:
@@ -1391,24 +1936,35 @@ def _resolve_chart_specs(manifest: Dict[str, Any],
                 if not wid:
                     continue
                 if isinstance(w.get("spec"), dict):
-                    specs[wid] = _spec_to_option(
+                    opt = _spec_to_option(
                         w["spec"], datasets, manifest_theme, manifest_palette
                     )
+                    specs[wid] = _suppress_chart_title_if_widget_has_one(w, opt)
                     continue
                 if isinstance(w.get("option"), dict):
-                    specs[wid] = w["option"]
+                    specs[wid] = _suppress_chart_title_if_widget_has_one(
+                        w, w["option"]
+                    )
                     continue
                 if isinstance(w.get("option_inline"), dict):
-                    specs[wid] = w["option_inline"]
+                    specs[wid] = _suppress_chart_title_if_widget_has_one(
+                        w, w["option_inline"]
+                    )
                     continue
                 ref = w.get("ref")
                 if ref and base_dir:
                     candidate = (Path(base_dir) / ref)
                     if candidate.is_file():
-                        specs[wid] = json.loads(candidate.read_text(encoding="utf-8"))
+                        specs[wid] = _suppress_chart_title_if_widget_has_one(
+                            w,
+                            json.loads(candidate.read_text(encoding="utf-8"))
+                        )
                         continue
                 if ref and Path(ref).is_file():
-                    specs[wid] = json.loads(Path(ref).read_text(encoding="utf-8"))
+                    specs[wid] = _suppress_chart_title_if_widget_has_one(
+                        w,
+                        json.loads(Path(ref).read_text(encoding="utf-8"))
+                    )
 
     layout = manifest.get("layout", {}) or {}
     if layout.get("kind") == "tabs":
@@ -1438,6 +1994,7 @@ def render_dashboard(manifest: Dict[str, Any],
     for the entry itself) are transparently converted to source arrays.
     """
     _normalize_manifest_datasets(manifest)
+    _augment_manifest(manifest)
     ok, errs = validate_manifest(manifest)
     if not ok:
         return DashboardResult(
@@ -1532,6 +2089,7 @@ def compile_dashboard(
         )
 
     _normalize_manifest_datasets(manifest_dict)
+    _augment_manifest(manifest_dict)
 
     ok, errs = validate_manifest(manifest_dict)
     if not ok:

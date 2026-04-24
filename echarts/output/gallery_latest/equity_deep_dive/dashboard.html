@@ -1,0 +1,2559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ACME Corp. (ACME) deep dive</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+/* =============================================================
+   Goldman Sachs canonical design tokens (synced with
+   GS/viz/echarts/config.py). There is one style -- this one.
+   ============================================================= */
+:root {
+  --gs-navy:       #002F6C;
+  --gs-navy-deep:  #001B40;
+  --gs-sky:        #7399C6;
+  --gs-ink:        #1A1A1A;
+  --gs-paper:      #FFFFFF;
+  --gs-bg:         #F7F9FB;
+  --gs-grey-70:    #595959;
+  --gs-grey-40:    #999999;
+  --gs-grey-20:    #BFBFBF;
+  --gs-grey-10:    #D9DCE1;
+  --gs-grey-05:    #EEF1F5;
+  --gs-pos:        #2E7D32;
+  --gs-neg:        #B3261E;
+  --gs-font-sans:  "Goldman Sans", "GS Sans", "Basis Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --gs-font-serif: "GS Serif", Georgia, "Times New Roman", serif;
+
+  /* semantic slots used by the chrome */
+  --bg:            var(--gs-bg);
+  --surface:       var(--gs-paper);
+  --surface-2:     var(--gs-grey-05);
+  --surface-hover: #F2F5FA;
+  --text:          var(--gs-ink);
+  --text-dim:      var(--gs-grey-70);
+  --text-faint:    var(--gs-grey-40);
+  --border:        var(--gs-grey-10);
+  --border-strong: var(--gs-grey-20);
+  --accent:        var(--gs-navy);
+  --accent-2:      var(--gs-sky);
+  --accent-soft:   rgba(115,153,198,0.16);
+  --accent-ring:   rgba(0,47,108,0.14);
+  --pos:           var(--gs-pos);
+  --pos-soft:      rgba(46,125,50,0.12);
+  --neg:           var(--gs-neg);
+  --neg-soft:      rgba(179,38,30,0.10);
+
+  /* surface geometry */
+  --shadow-sm:  0 1px 2px rgba(10,18,40,0.04);
+  --shadow:     0 1px 3px rgba(10,18,40,0.06),
+                0 1px 2px rgba(10,18,40,0.04);
+  --shadow-md:  0 4px 8px -2px rgba(10,18,40,0.08),
+                0 2px 4px -2px rgba(10,18,40,0.05);
+  --shadow-lg:  0 12px 24px -4px rgba(10,18,40,0.12),
+                0 4px 8px -4px rgba(10,18,40,0.08);
+  --radius:     6px;
+  --radius-sm:  4px;
+  --bounce:     cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease:       cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg); color: var(--text);
+  font-family: var(--gs-font-sans);
+  font-size: 14px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "ss02", "kern", "liga", "tnum";
+  transition: background-color 0.15s var(--ease),
+              color 0.15s var(--ease);
+}
+
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* GS brand mark -- a compact navy "blue-box" reminiscent of the
+   historic Goldman Sachs logo. Pure CSS, no images. */
+.gs-mark {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--gs-font-serif); letter-spacing: 0.01em;
+}
+.gs-mark .gs-box {
+  width: 28px; height: 28px; background: var(--gs-navy);
+  color: #fff; display: inline-flex; align-items: center;
+  justify-content: center;
+  font-family: var(--gs-font-serif); font-weight: 700;
+  font-size: 13px; letter-spacing: 0.02em;
+}
+.gs-mark .gs-wordmark {
+  font-family: var(--gs-font-serif); font-weight: 600;
+  font-size: 13px; color: var(--gs-ink);
+  letter-spacing: 0.03em; white-space: nowrap;
+}
+
+header.app-header {
+  background: var(--surface);
+  border-bottom: 2px solid var(--gs-navy);
+  padding: 16px 28px 14px 28px;
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 18px; flex-wrap: wrap;
+}
+.header-titles { flex: 1 1 auto; min-width: 280px;
+                   display: flex; flex-direction: column; gap: 4px; }
+.header-titles h1 {
+  font-family: var(--gs-font-serif);
+  font-size: 22px; margin: 2px 0 0 0; font-weight: 600;
+  letter-spacing: -0.005em; color: var(--gs-ink);
+}
+.header-titles .subtitle {
+  color: var(--text-dim); font-size: 13px;
+  max-width: 820px; font-family: var(--gs-font-sans);
+}
+.header-meta { color: var(--text-faint); font-size: 12px;
+                 display: flex; align-items: center; gap: 10px;
+                 font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+.header-meta .meta-dot {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; background: var(--gs-grey-05);
+  border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text-dim); font-size: 11px;
+}
+.header-meta .meta-dot span { color: var(--gs-ink); font-weight: 600; }
+.header-actions .icon-btn.refreshing {
+  background: var(--gs-grey-05); color: var(--text-dim);
+  cursor: wait; opacity: 0.9;
+}
+.header-actions .icon-btn.refresh-success {
+  background: var(--pos); color: #fff; border-color: var(--pos);
+}
+.header-actions .icon-btn.refresh-error {
+  background: var(--neg); color: #fff; border-color: var(--neg);
+}
+.badge {
+  padding: 3px 9px; font-size: 10px; border-radius: 2px;
+  background: var(--gs-navy); color: #fff;
+  font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  font-family: var(--gs-font-sans);
+}
+.header-actions { display: flex; gap: 6px; align-items: center; }
+.icon-btn {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 12px;
+  cursor: pointer; color: var(--text); font-size: 12px;
+  font-family: var(--gs-font-sans); font-weight: 500;
+  letter-spacing: 0.01em;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: background-color 0.12s var(--ease),
+              border-color 0.12s var(--ease),
+              color 0.12s var(--ease),
+              transform 0.12s var(--bounce);
+}
+.icon-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent-2);
+  color: var(--accent);
+}
+.icon-btn:active { transform: scale(0.97); }
+.icon-btn.primary {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.icon-btn.primary:hover {
+  background: var(--gs-navy-deep); border-color: var(--gs-navy-deep);
+  color: #fff;
+}
+
+nav.tab-bar {
+  display: flex; gap: 0; padding: 0 28px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: thin;
+}
+.tab-btn {
+  background: none; border: none;
+  padding: 12px 18px; font-size: 12px; color: var(--text-dim);
+  border-bottom: 2px solid transparent; cursor: pointer;
+  transition: color 0.12s var(--ease),
+              border-color 0.15s var(--ease),
+              background-color 0.12s var(--ease);
+  font-family: var(--gs-font-sans);
+  white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.tab-btn:hover { color: var(--accent); background: var(--surface-hover); }
+.tab-btn.active {
+  color: var(--accent); border-bottom-color: var(--gs-navy);
+  background: var(--gs-grey-05);
+}
+
+.filter-bar {
+  background: var(--surface); padding: 12px 28px;
+  border-bottom: 1px solid var(--border);
+  display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+}
+.filter-item {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-dim);
+  font-family: var(--gs-font-sans);
+}
+.filter-item label {
+  font-weight: 600; color: var(--text);
+  letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.filter-info {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--text-faint); cursor: pointer;
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+  border-radius: 50%; user-select: none;
+}
+.filter-info:hover { color: var(--accent);
+                      background: var(--surface-hover); }
+.filter-info:focus { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.filter-item select, .filter-item input[type=text], .filter-item input[type=date],
+.filter-item input[type=number] {
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface);
+  font-size: 13px; color: var(--text); font-family: inherit;
+  min-width: 120px;
+  transition: border-color 0.15s var(--ease),
+              box-shadow 0.15s var(--ease);
+}
+.filter-item select[multiple] {
+  min-width: 160px; min-height: 68px;
+  padding: 4px 8px;
+}
+.filter-item.slider input[type=range] { min-width: 140px; }
+.filter-item select:focus, .filter-item input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.filter-item input[type=checkbox] {
+  accent-color: var(--accent); width: 15px; height: 15px;
+}
+.filter-reset { margin-left: auto; }
+
+.tab-filter-bar {
+  display: inline-flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  padding: 8px 12px; margin-bottom: 14px;
+  background: var(--gs-grey-05);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.tab-filter-bar .filter-item { font-size: 12px; }
+.tab-filter-bar .filter-item label { font-size: 10.5px; }
+.tab-filter-bar .filter-item select,
+.tab-filter-bar .filter-item input[type=text],
+.tab-filter-bar .filter-item input[type=number],
+.tab-filter-bar .filter-item input[type=date] {
+  padding: 4px 8px; font-size: 12px;
+}
+.tab-filter-bar .filter-reset {
+  margin-left: 0; padding: 4px 10px; font-size: 11px;
+}
+
+main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
+
+.tab-panel {
+  display: none;
+  animation: fadeInUp 0.22s var(--ease);
+}
+.tab-panel.active { display: block; }
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tab-panel-header {
+  margin-bottom: 14px;
+  display: flex; justify-content: space-between; align-items: baseline;
+  border-left: 3px solid var(--gs-navy); padding-left: 10px;
+}
+.tab-panel-header h2 {
+  font-family: var(--gs-font-serif);
+  font-size: 13px; margin: 0; color: var(--text-dim);
+  font-weight: 500; font-style: italic;
+}
+
+.grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  transition: box-shadow 0.18s var(--ease),
+              border-color 0.18s var(--ease);
+  display: flex; flex-direction: column;
+}
+.tile:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent-2);
+}
+.tile.is-fullscreen {
+  position: fixed; inset: 16px; z-index: 50;
+  box-shadow: var(--shadow-lg);
+  grid-column: 1/-1 !important;
+}
+.tile-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  background: var(--surface);
+}
+.tile-title-wrap {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.tile-title {
+  font-family: var(--gs-font-sans);
+  font-size: 12px; font-weight: 600; color: var(--gs-ink);
+  letter-spacing: 0.04em; text-transform: uppercase;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+  min-width: 0;
+}
+.tile-subtitle {
+  font-family: var(--gs-font-serif);
+  font-size: 11px; color: var(--text-dim);
+  font-style: italic; font-weight: 400;
+  letter-spacing: 0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tile-info {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; font-size: 13px; color: var(--text-faint);
+  cursor: pointer; border-radius: 50%; user-select: none;
+  text-transform: none; letter-spacing: 0;
+  transition: color 0.12s var(--ease),
+              background-color 0.12s var(--ease);
+}
+.tile-info:hover { color: var(--accent); background: var(--surface-hover); }
+.tile-info:focus { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.tile-info:hover { color: var(--accent); }
+.tile-info-kpi { margin-left: 6px; vertical-align: middle; }
+.tile-badge {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; border-radius: 999px;
+  font-family: var(--gs-font-sans); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  background: var(--gs-navy); color: white;
+}
+.tile-badge[data-color="gs-navy"] { background: var(--gs-navy); color: white; }
+.tile-badge[data-color="sky"]     { background: var(--gs-sky);
+                                      color: var(--gs-navy-deep); }
+.tile-badge[data-color="pos"]     { background: var(--pos-soft);
+                                      color: var(--pos); }
+.tile-badge[data-color="neg"]     { background: var(--neg-soft);
+                                      color: var(--neg); }
+.tile-badge[data-color="muted"]   { background: var(--surface-2);
+                                      color: var(--text-dim); }
+.tile-actions { display: flex; gap: 2px; flex: 0 0 auto; }
+.tile-btn, a.tile-btn {
+  background: none; border: 1px solid transparent;
+  border-radius: var(--radius-sm); padding: 3px 8px;
+  cursor: pointer; color: var(--text-faint); font-size: 11px;
+  font-family: var(--gs-font-sans); font-weight: 600;
+  letter-spacing: 0.04em; text-decoration: none;
+  transition: color 0.12s var(--ease),
+              background-color 0.12s var(--ease),
+              border-color 0.12s var(--ease);
+}
+.tile-btn:hover, a.tile-btn:hover { background: var(--surface-2);
+                                      color: var(--accent);
+                                      border-color: var(--accent-2); }
+.tile-btn.primary, a.tile-btn.primary {
+  background: var(--gs-navy); color: white;
+  border-color: var(--gs-navy);
+}
+.tile-btn.primary:hover, a.tile-btn.primary:hover {
+  background: var(--gs-navy-deep); color: white;
+  border-color: var(--gs-navy-deep);
+}
+.tile-btn-custom { padding: 3px 10px; }
+.tile-body { padding: 10px 14px; flex: 1 1 auto; position: relative; }
+
+.tile-footer {
+  padding: 6px 14px 8px; font-size: 11px; color: var(--text-faint);
+  font-family: var(--gs-font-sans); border-top: 1px dashed var(--border);
+  background: var(--surface);
+  line-height: 1.45;
+}
+.tile-emphasis {
+  border-color: var(--gs-navy);
+  box-shadow: 0 0 0 1px var(--gs-navy), var(--shadow-md);
+}
+.tile-emphasis::before {
+  content: ''; display: block; height: 3px; background: var(--gs-navy);
+  margin: -1px -1px 0 -1px;
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
+}
+.tile-emphasis.kpi-tile { border-top-width: 3px;
+                            border-top-color: var(--gs-sky); }
+.tile-emphasis.kpi-tile::before { display: none; }
+.tile-pinned {
+  position: sticky; top: 12px; z-index: 5;
+}
+
+/* chart tile */
+.chart-tile .tile-body { padding: 6px 8px 8px; }
+.chart-div { width: 100%; min-height: 240px; }
+
+/* kpi tile */
+.kpi-tile {
+  padding: 16px 20px 18px 20px;
+  display: flex; flex-direction: column; justify-content: center;
+  min-height: 118px; gap: 0;
+  border-top: 3px solid var(--gs-navy);
+}
+.kpi-label {
+  font-family: var(--gs-font-sans);
+  font-size: 10px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.09em;
+  font-weight: 700;
+}
+.kpi-value {
+  font-family: var(--gs-font-serif);
+  font-size: 32px; font-weight: 600; margin-top: 8px;
+  line-height: 1.02; color: var(--gs-navy);
+  font-feature-settings: "tnum";
+  letter-spacing: -0.015em;
+}
+.kpi-value.small { font-size: 24px; }
+.kpi-delta {
+  font-family: var(--gs-font-sans);
+  font-size: 11px; margin-top: 6px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 2px; align-self: flex-start;
+  letter-spacing: 0.02em;
+}
+.kpi-delta.pos { color: var(--pos); background: var(--pos-soft); }
+.kpi-delta.neg { color: var(--neg); background: var(--neg-soft); }
+.kpi-delta.flat { color: var(--text-dim); background: var(--surface-2); }
+.kpi-sub { font-size: 11px; color: var(--text-faint); margin-top: 6px;
+           font-family: var(--gs-font-sans); }
+.kpi-sparkline { height: 32px; margin-top: 10px;
+                  margin-left: -4px; margin-right: -4px; }
+
+/* markdown tile */
+.markdown-tile {
+  background: transparent; border: none; box-shadow: none;
+  padding: 0;
+}
+.markdown-tile .tile-body { padding: 12px 4px; }
+.markdown-tile h1, .markdown-tile h2, .markdown-tile h3 {
+  margin: 6px 0 6px 0; color: var(--text);
+  font-family: var(--gs-font-serif); font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.markdown-tile h1 { font-size: 20px; }
+.markdown-tile h2 { font-size: 15px; }
+.markdown-tile h3 {
+  font-family: var(--gs-font-sans);
+  font-size: 11px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700;
+}
+.markdown-tile p { margin: 4px 0; color: var(--text-dim); line-height: 1.6;
+                    font-family: var(--gs-font-sans); }
+.markdown-tile a { color: var(--accent); text-decoration: underline;
+                    text-decoration-color: var(--accent-2);
+                    text-underline-offset: 3px; }
+.markdown-tile a:hover { color: var(--gs-navy-deep); }
+
+/* divider tile */
+.divider-tile {
+  background: transparent; border: none; box-shadow: none;
+  padding: 8px 0;
+}
+.divider-tile hr {
+  border: none; border-top: 1px solid var(--gs-grey-20);
+  margin: 0;
+}
+
+/* table tile */
+.table-tile .tile-body { padding: 0; }
+.data-table {
+  border-collapse: collapse; width: 100%; font-size: 12px;
+  font-family: var(--gs-font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.data-table thead { background: var(--gs-grey-05);
+                      position: sticky; top: 0;
+                      border-bottom: 2px solid var(--gs-navy); }
+.data-table th {
+  padding: 8px 12px; text-align: left; font-weight: 700;
+  color: var(--gs-ink); text-transform: uppercase;
+  letter-spacing: 0.08em; font-size: 10px;
+}
+.data-table td {
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--surface-hover); }
+.data-table.compact th { padding: 5px 8px; font-size: 9px; }
+.data-table.compact td { padding: 5px 8px; font-size: 11px; }
+.data-table.clickable tbody tr { cursor: pointer; }
+.data-table th.sortable { cursor: pointer; user-select: none; }
+.data-table th.sortable:hover { background: var(--gs-grey-10); }
+
+/* Row highlight buckets (see row_highlight on table widgets).
+   Subtle left-border accent + tinted background so the row pops
+   without stomping the per-cell conditional colors. */
+.data-table tr.row-hl-pos td   { background: color-mix(in srgb,
+                                    var(--pos-soft) 80%, transparent); }
+.data-table tr.row-hl-pos td:first-child {
+  box-shadow: inset 3px 0 0 var(--pos);
+}
+.data-table tr.row-hl-neg td   { background: color-mix(in srgb,
+                                    var(--neg-soft) 80%, transparent); }
+.data-table tr.row-hl-neg td:first-child {
+  box-shadow: inset 3px 0 0 var(--neg);
+}
+.data-table tr.row-hl-warn td  { background: rgba(221, 107, 32, 0.08); }
+.data-table tr.row-hl-warn td:first-child {
+  box-shadow: inset 3px 0 0 #dd6b20;
+}
+.data-table tr.row-hl-info td  { background: rgba(49, 130, 206, 0.07); }
+.data-table tr.row-hl-info td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.data-table tr.row-hl-muted td { background: var(--gs-grey-05);
+                                   color: var(--text-dim); }
+
+.table-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; background: var(--gs-grey-05);
+  border-bottom: 1px solid var(--border);
+}
+.table-toolbar .table-search {
+  flex: 1; min-width: 120px; max-width: 320px;
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 4px; font-size: 12px; font-family: var(--gs-font-sans);
+  background: var(--surface);
+}
+.table-toolbar .table-search:focus { outline: none; border-color: var(--gs-navy); }
+.table-toolbar .table-count {
+  color: var(--text-faint); font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.table-empty {
+  padding: 32px 16px; text-align: center; color: var(--text-faint);
+  font-size: 12px; font-style: italic;
+}
+
+/* modal popup (row-click details) */
+.ed-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(26, 54, 93, 0.45);
+  display: none; align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.ed-modal {
+  background: var(--surface); border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  max-width: 640px; min-width: 360px;
+  max-height: 86vh; overflow: auto;
+  border-top: 4px solid var(--gs-navy);
+}
+.ed-modal.wide {
+  max-width: 880px; min-width: 560px;
+}
+.ed-modal-header {
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 14px;
+}
+.ed-modal-title-wrap { flex: 1 1 auto; min-width: 0; }
+.ed-modal-title { font-weight: 600; font-size: 16px; color: var(--gs-navy);
+                    font-family: var(--gs-font-serif); }
+.ed-modal-subtitle {
+  font-size: 12px; color: var(--text-dim); font-style: italic;
+  margin-top: 2px; display: none;
+}
+.ed-modal-close {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 16px; color: var(--text-faint); padding: 4px 8px;
+}
+.ed-modal-close:hover { color: var(--text); }
+.ed-modal-body {
+  padding: 16px 18px; font-size: 13px; line-height: 1.55;
+  color: var(--text);
+}
+.ed-modal-body p { margin: 0 0 10px; }
+.ed-modal-body p:last-child { margin-bottom: 0; }
+.ed-modal-body h1, .ed-modal-body h2, .ed-modal-body h3 {
+  font-family: var(--gs-font-sans); color: var(--gs-navy);
+  margin: 0 0 10px; font-weight: 600;
+}
+.ed-modal-body h1 { font-size: 16px; }
+.ed-modal-body h2 { font-size: 14px; }
+.ed-modal-body h3 { font-size: 13px; text-transform: uppercase;
+                     letter-spacing: 0.04em; color: var(--text-faint); }
+.ed-modal-body ul { margin: 6px 0 12px 18px; padding: 0; }
+.ed-modal-body li { margin-bottom: 4px; }
+.ed-modal-body strong { color: var(--gs-navy); font-weight: 600; }
+.ed-modal-body em { color: var(--text); }
+.ed-modal-body code {
+  background: var(--gs-grey-05); padding: 1px 6px;
+  border-radius: 3px; font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.ed-modal-body a {
+  color: var(--accent); text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ed-modal-body a:hover { color: var(--gs-navy); }
+.modal-detail-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.modal-detail-table th {
+  text-align: left; padding: 6px 12px 6px 0; width: 42%;
+  color: var(--text-faint); font-weight: 500; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.modal-detail-table td {
+  padding: 6px 0; color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.modal-detail-table tr:last-child td { border-bottom: none; }
+.modal-extra {
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid var(--border); font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* Rich row-click detail layout (row_click.detail.sections) */
+.detail-section-title {
+  font-family: var(--gs-font-sans); font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); font-weight: 600;
+  margin: 18px 0 8px;
+}
+.detail-section-title:first-child { margin-top: 4px; }
+.detail-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1px; background: var(--border);
+  border-radius: 4px; overflow: hidden;
+  margin-bottom: 6px;
+}
+.detail-stat {
+  background: var(--surface); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.detail-stat-label {
+  font-size: 10px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600;
+}
+.detail-stat-value {
+  font-family: var(--gs-font-serif); font-size: 18px;
+  color: var(--gs-navy); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.detail-stat.pos .detail-stat-value { color: var(--pos); }
+.detail-stat.neg .detail-stat-value { color: var(--neg); }
+.detail-stat-sub { font-size: 10px; color: var(--text-dim); }
+.detail-chart {
+  width: 100%; margin: 4px 0 12px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface);
+}
+.detail-chart-empty {
+  padding: 24px; text-align: center; color: var(--text-faint);
+  font-size: 12px; font-style: italic;
+}
+.detail-markdown {
+  font-size: 13px; color: var(--text); line-height: 1.55;
+  margin: 4px 0 12px;
+}
+.detail-markdown p { margin: 0 0 8px; }
+.detail-markdown ul { margin: 4px 0 8px 16px; }
+.detail-markdown strong { color: var(--gs-navy); }
+.detail-markdown code {
+  background: var(--gs-grey-05); padding: 1px 5px;
+  border-radius: 3px; font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.detail-markdown a {
+  color: var(--accent); text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.modal-detail-table.sub th {
+  font-size: 10px; padding-top: 4px;
+}
+.modal-detail-table.sub td {
+  font-size: 12px; padding: 4px 8px 4px 0;
+}
+
+/* filter widgets extensions */
+.filter-item.slider { min-width: 200px; }
+.filter-item.slider .slider-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.filter-item.slider input[type="range"] { flex: 1; }
+.filter-item.slider .slider-val {
+  min-width: 36px; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--gs-navy);
+  font-weight: 600; font-size: 12px;
+}
+.filter-item.radio-group .radio-row {
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+}
+.filter-item.radio-group label.radio-opt {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--text); font-weight: 400;
+  text-transform: none; letter-spacing: 0; cursor: pointer;
+}
+.filter-item.text input[type="text"],
+.filter-item.number input[type="number"] {
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 4px; font-size: 12px;
+  font-family: var(--gs-font-sans);
+  background: var(--surface);
+  min-width: 120px;
+}
+.filter-item.text input[type="text"]:focus,
+.filter-item.number input[type="number"]:focus {
+  outline: none; border-color: var(--gs-navy);
+}
+
+/* stat_grid widget */
+.stat-grid-tile .tile-body { padding: 0; }
+.stat-grid-tile .stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1px; background: var(--border);
+}
+.stat-grid-tile .stat-cell {
+  background: var(--surface); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+  cursor: default;
+}
+.stat-grid-tile .stat-label {
+  font-size: 10px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.stat-grid-tile .stat-info {
+  font-size: 11px; color: var(--text-faint); cursor: pointer;
+  text-transform: none; border-radius: 50%;
+}
+.stat-grid-tile .stat-info:hover { color: var(--accent);
+                                     background: var(--surface-hover); }
+.stat-grid-tile .stat-info:focus { outline: 2px solid var(--accent-ring);
+                                     outline-offset: 2px; }
+.stat-grid-tile .stat-value {
+  font-size: 18px; color: var(--gs-navy); font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: baseline; gap: 6px;
+}
+.stat-grid-tile .stat-trend {
+  font-size: 12px;
+}
+.stat-grid-tile .stat-trend.pos  { color: var(--pos); }
+.stat-grid-tile .stat-trend.neg  { color: var(--neg); }
+.stat-grid-tile .stat-trend.flat { color: var(--text-faint); }
+.stat-grid-tile .stat-sub {
+  font-size: 10px; color: var(--text-faint);
+}
+
+/* image widget */
+.image-tile .tile-body {
+  padding: 0; display: flex; align-items: center; justify-content: center;
+}
+.image-tile img { max-width: 100%; max-height: 100%; display: block; }
+
+.status { color: var(--text-faint); font-size: 11px;
+          font-family: var(--gs-font-sans);
+          font-variant-numeric: tabular-nums; }
+
+footer.app-footer {
+  padding: 14px 28px; border-top: 1px solid var(--border);
+  background: var(--gs-grey-05); color: var(--text-faint);
+  font-size: 11px; font-family: var(--gs-font-sans);
+  letter-spacing: 0.02em;
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 8px;
+}
+footer.app-footer .gs-mark .gs-box {
+  width: 22px; height: 22px; font-size: 11px;
+}
+footer.app-footer .gs-mark .gs-wordmark { font-size: 12px; }
+
+/* responsive */
+@media (max-width: 1024px) {
+  .grid > .tile { grid-column: span 6; }
+}
+@media (max-width: 720px) {
+  .grid > .tile { grid-column: span 12; }
+  header.app-header { padding: 14px 16px; }
+  nav.tab-bar { padding: 0 16px; }
+  .filter-bar { padding: 10px 16px; }
+  main.app-main { padding: 14px 16px; }
+}
+
+/* motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="app-header">
+    <div class="header-titles">
+      <span class="gs-mark">
+        <span class="gs-box">GS</span>
+        <span class="gs-wordmark">Goldman Sachs</span>
+      </span>
+      <h1>ACME Corp. (ACME) deep dive</h1>
+      <div class="subtitle">Single-name equity tear-sheet: price + volume, earnings vs consensus, analyst ratings, beta regression, valuation vs 5Y range, return distribution.</div>
+    </div>
+    <div class="header-meta">
+      <span class="meta-dot" id="data-as-of" style="display:none">
+        Data as of <span id="data-as-of-val"></span>
+      </span>
+      <span id="chart-count"></span>
+    </div>
+    <div class="header-actions" id="header-actions">
+      <button class="icon-btn" id="refresh-btn"
+              title="Refresh dashboard data" style="display:none">
+        <span id="refresh-btn-label">Refresh</span>
+      </button>
+      <button class="icon-btn primary" id="export-all"
+              title="Download all charts as PNG (2x)">
+        Download PNGs
+      </button>
+    </div>
+  </header>
+  <nav class="tab-bar"><button class="tab-btn" data-tab="price" title="Daily OHLC with the 60D KPI ribbon.">Price &amp; volume</button><button class="tab-btn" data-tab="fundamentals" title="Quarterly EPS actuals vs consensus and analyst rating distribution.">Fundamentals</button><button class="tab-btn" data-tab="risk" title="Beta regression, return distribution, valuation vs 5Y range.">Risk &amp; valuation</button></nav>
+  
+  <main class="app-main">
+    <section class="tab-panel" id="tab-panel-price"><div class="tab-panel-header"><h2>Daily OHLC with the 60D KPI ribbon.</h2></div><div class="tab-filter-bar">
+<div class="filter-item"><label>Price lookback</label><select id="filter-dt"><option value="1M">1M</option><option value="3M">3M</option><option value="6M">6M</option><option value="YTD">YTD</option><option value="1Y" selected>1Y</option><option value="2Y">2Y</option><option value="5Y">5Y</option><option value="All">All</option></select></div>
+<button class="icon-btn filter-reset" data-filter-reset>Reset</button>
+</div><div class="grid">
+<div class="tile kpi-tile tile-emphasis" id="kpi-k_px" data-tile-id="k_px" style="grid-column: span 3;"><div class="kpi-label">Close<span class="tile-info tile-info-kpi" tabindex="0" role="button" aria-label="More info" title="Close price" data-popup-title="Close price" data-popup-body="### Definition
+
+**Close** is the last printed trade on the primary listing exchange for the current trading session.
+
+### Data sourcing
+
+- Feed: *GS Market Data* (equities)
+- Latency: roughly 100ms intraday, snapshot at session close
+- Adjustments: cash dividends and splits are applied retroactively
+
+### Related
+
+See the [price history chart](#price_chart) below and the full OHLC candle detail in the ECharts tooltip.">ⓘ</span></div><div class="kpi-value">--</div><div class="kpi-delta" style="display:none"></div><div class="kpi-sparkline"></div></div>
+<div class="tile kpi-tile" id="kpi-k_mc" data-tile-id="k_mc" style="grid-column: span 3;"><div class="kpi-label">Market cap</div><div class="kpi-value">--</div><div class="kpi-delta" style="display:none"></div><div class="kpi-sparkline"></div></div>
+<div class="tile kpi-tile" id="kpi-k_pe" data-tile-id="k_pe" style="grid-column: span 3;"><div class="kpi-label">P/E NTM<span class="tile-info tile-info-kpi" tabindex="0" role="button" aria-label="More info" title="Forward P/E on next-12-month consensus EPS." data-popup-title="P/E NTM" data-popup-body="Forward P/E on next-12-month consensus EPS.">ⓘ</span></div><div class="kpi-value">--</div><div class="kpi-delta" style="display:none"></div><div class="kpi-sparkline"></div></div>
+<div class="tile kpi-tile" id="kpi-k_iv" data-tile-id="k_iv" style="grid-column: span 3;"><div class="kpi-label">IV 30D (%)</div><div class="kpi-value">--</div><div class="kpi-delta" style="display:none"></div><div class="kpi-sparkline"></div></div>
+<div class="tile chart-tile" data-tile-id="price_chart" style="grid-column: span 12;">  <div class="tile-header">    <div class="tile-title-wrap"><div class="tile-title">ACME daily OHLC (1Y)<span class="tile-info" tabindex="0" role="button" aria-label="More info" title="Daily OHLC with dataZoom brush at the bottom. Drag the brush to zoom in on a date range." data-popup-title="ACME daily OHLC (1Y)" data-popup-body="Daily OHLC with dataZoom brush at the bottom. Drag the brush to zoom in on a date range.">ⓘ</span><span class="tile-badge" data-color="pos">LIVE</span></div></div>    <div class="tile-actions"><a class="tile-btn tile-btn-custom" href="https://example.com/acme" title="Open ACME page" target="_blank" rel="noopener">Open in portal</a><button class="tile-btn download" title="PNG 2x">PNG</button><button class="tile-btn fullscreen" title="Fullscreen">&#x26F6;</button></div>  </div>  <div class="tile-body">    <div id="chart-price_chart" class="chart-div" style="height:440px"></div>  </div>  <div class="tile-footer">Source: GS Market Data. Updated at market close.</div></div>
+<div class="tile chart-tile" data-tile-id="vol_chart" style="grid-column: span 12;">  <div class="tile-header">    <div class="tile-title-wrap"><div class="tile-title"></div></div>    <div class="tile-actions"><button class="tile-btn download" title="PNG 2x">PNG</button><button class="tile-btn fullscreen" title="Fullscreen">&#x26F6;</button></div>  </div>  <div class="tile-body">    <div id="chart-vol_chart" class="chart-div" style="height:220px"></div>  </div>  </div>
+</div></section>
+<section class="tab-panel" id="tab-panel-fundamentals"><div class="tab-panel-header"><h2>Quarterly EPS actuals vs consensus and analyst rating distribution.</h2></div><div class="grid">
+<div class="tile chart-tile" data-tile-id="eps_chart" style="grid-column: span 8;">  <div class="tile-header">    <div class="tile-title-wrap"><div class="tile-title"></div></div>    <div class="tile-actions"><button class="tile-btn download" title="PNG 2x">PNG</button><button class="tile-btn fullscreen" title="Fullscreen">&#x26F6;</button></div>  </div>  <div class="tile-body">    <div id="chart-eps_chart" class="chart-div" style="height:380px"></div>  </div>  </div>
+<div class="tile chart-tile" data-tile-id="rating_chart" style="grid-column: span 4;">  <div class="tile-header">    <div class="tile-title-wrap"><div class="tile-title"></div></div>    <div class="tile-actions"><button class="tile-btn download" title="PNG 2x">PNG</button><button class="tile-btn fullscreen" title="Fullscreen">&#x26F6;</button></div>  </div>  <div class="tile-body">    <div id="chart-rating_chart" class="chart-div" style="height:380px"></div>  </div>  </div>
+<div class="tile markdown-tile" data-tile-id="thesis" style="grid-column: span 12;">  <div class="tile-body"><h3>Thesis</h3>
+<p>ACME has beaten consensus EPS in 7 of the last 9 quarters, with the magnitude of beat widening on services revenue. Sell-side skew remains bullish (40 Buy+ vs 4 Sell-). Near-term catalyst: Q1 print in 3 weeks.</p></div>  </div>
+</div></section>
+<section class="tab-panel" id="tab-panel-risk"><div class="tab-panel-header"><h2>Beta regression, return distribution, valuation vs 5Y range.</h2></div><div class="grid">
+<div class="tile chart-tile" data-tile-id="beta_chart" style="grid-column: span 6;">  <div class="tile-header">    <div class="tile-title-wrap"><div class="tile-title"></div></div>    <div class="tile-actions"><button class="tile-btn download" title="PNG 2x">PNG</button><button class="tile-btn fullscreen" title="Fullscreen">&#x26F6;</button></div>  </div>  <div class="tile-body">    <div id="chart-beta_chart" class="chart-div" style="height:360px"></div>  </div>  </div>
+<div class="tile chart-tile" data-tile-id="hist_chart" style="grid-column: span 6;">  <div class="tile-header">    <div class="tile-title-wrap"><div class="tile-title"></div></div>    <div class="tile-actions"><button class="tile-btn download" title="PNG 2x">PNG</button><button class="tile-btn fullscreen" title="Fullscreen">&#x26F6;</button></div>  </div>  <div class="tile-body">    <div id="chart-hist_chart" class="chart-div" style="height:360px"></div>  </div>  </div>
+<div class="tile chart-tile" data-tile-id="val_bullet" style="grid-column: span 12;">  <div class="tile-header">    <div class="tile-title-wrap"><div class="tile-title"></div></div>    <div class="tile-actions"><button class="tile-btn download" title="PNG 2x">PNG</button><button class="tile-btn fullscreen" title="Fullscreen">&#x26F6;</button></div>  </div>  <div class="tile-body">    <div id="chart-val_bullet" class="chart-div" style="height:360px"></div>  </div>  </div>
+</div></section>
+  </main>
+  <footer class="app-footer">
+    <span class="gs-mark">
+      <span class="gs-box">GS</span>
+      <span class="gs-wordmark">Goldman Sachs</span>
+    </span>
+    <span class="status">
+      echart_dashboard v0.1.0 &middot; ECharts@5 &middot; 2026-04-24 19:21
+    </span>
+  </footer>
+</div>
+<script>
+var PAYLOAD = {"manifest": {"schema_version": 1, "id": "equity_deep_dive", "title": "ACME Corp. (ACME) deep dive", "description": "Single-name equity tear-sheet: price + volume, earnings vs consensus, analyst ratings, beta regression, valuation vs 5Y range, return distribution.", "theme": "gs_clean", "palette": "gs_primary", "metadata": {"kerberos": "goyairl", "dashboard_id": "equity_deep_dive", "data_as_of": "2026-04-24T20:00:00Z", "generated_at": "2026-04-24T20:05:00Z", "sources": ["GS Market Data", "Visible Alpha"], "refresh_frequency": "daily", "refresh_enabled": true, "tags": ["equity", "single_name"], "version": "1.0.0"}, "header_actions": [{"label": "Company filings", "icon": "\u2197", "href": "https://www.sec.gov/"}, {"label": "GIR research", "icon": "\u2197", "href": "https://research.gs.com/"}, {"label": "Model refresh", "icon": "\u21bb", "onclick": "customRun", "primary": true}], "datasets": {"ohlc": {"source": [["date", "open", "close", "low", "high", "volume_m"], ["2025-05-06", 185.0, 183.1, 182.3, 186.09, 57.4], ["2025-05-07", 183.1, 177.52, 177.4, 183.72, 62.0], ["2025-05-08", 177.52, 178.69, 176.46, 179.82, 80.6], ["2025-05-09", 178.69, 180.31, 178.1, 180.82, 66.2], ["2025-05-12", 180.31, 183.63, 180.28, 184.35, 64.0], ["2025-05-13", 183.63, 185.45, 183.45, 185.49, 67.8], ["2025-05-14", 185.45, 184.2, 183.92, 186.64, 90.9], ["2025-05-15", 184.2, 188.4, 184.13, 188.9, 56.5], ["2025-05-16", 188.4, 190.77, 187.58, 191.57, 79.0], ["2025-05-19", 190.77, 191.63, 190.45, 191.94, 73.3], ["2025-05-20", 191.63, 190.57, 190.01, 192.23, 46.0], ["2025-05-21", 190.57, 189.05, 188.78, 190.74, 48.1], ["2025-05-22", 189.05, 188.7, 187.68, 190.5, 50.7], ["2025-05-23", 188.7, 189.37, 187.59, 190.28, 88.4], ["2025-05-26", 189.37, 188.7, 188.05, 191.04, 61.3], ["2025-05-27", 188.7, 189.71, 188.26, 189.76, 58.1], ["2025-05-28", 189.71, 193.9, 188.03, 195.0, 59.1], ["2025-05-29", 193.9, 189.53, 189.03, 194.19, 69.2], ["2025-05-30", 189.53, 187.89, 186.96, 189.8, 53.6], ["2025-06-02", 187.89, 189.77, 187.6, 191.17, 97.0], ["2025-06-03", 189.77, 191.08, 188.55, 191.22, 64.5], ["2025-06-04", 191.08, 195.79, 191.0, 196.22, 61.5], ["2025-06-05", 195.79, 195.18, 195.11, 197.24, 63.7], ["2025-06-06", 195.18, 191.1, 190.78, 196.05, 52.4], ["2025-06-09", 191.1, 198.87, 190.97, 199.51, 62.4], ["2025-06-10", 198.87, 199.71, 198.74, 200.41, 64.7], ["2025-06-11", 199.71, 195.81, 194.96, 200.13, 57.1], ["2025-06-12", 195.81, 194.11, 193.26, 196.1, 71.7], ["2025-06-13", 194.11, 193.52, 192.6, 194.6, 27.7], ["2025-06-16", 193.52, 186.85, 186.29, 194.68, 57.6], ["2025-06-17", 186.85, 188.21, 185.34, 188.5, 87.7], ["2025-06-18", 188.21, 189.71, 187.94, 190.24, 54.6], ["2025-06-19", 189.71, 194.52, 189.18, 195.24, 61.8], ["2025-06-20", 194.52, 194.49, 194.27, 195.77, 81.7], ["2025-06-23", 194.49, 198.05, 193.48, 198.98, 70.5], ["2025-06-24", 198.05, 197.24, 196.81, 198.83, 40.5], ["2025-06-25", 197.24, 194.47, 193.86, 198.23, 73.4], ["2025-06-26", 194.47, 202.11, 193.04, 202.19, 70.0], ["2025-06-27", 202.11, 206.14, 200.94, 207.21, 62.9], ["2025-06-30", 206.14, 216.06, 205.89, 217.04, 64.0], ["2025-07-01", 216.06, 205.49, 204.84, 217.09, 82.1], ["2025-07-02", 205.49, 204.35, 203.09, 206.53, 64.1], ["2025-07-03", 204.35, 199.87, 198.95, 204.62, 58.5], ["2025-07-04", 199.87, 205.27, 199.77, 206.12, 48.0], ["2025-07-07", 205.27, 206.77, 205.01, 207.38, 53.5], ["2025-07-08", 206.77, 201.56, 200.96, 208.68, 53.9], ["2025-07-09", 201.56, 204.28, 200.62, 204.76, 80.8], ["2025-07-10", 204.28, 202.84, 202.76, 204.82, 67.9], ["2025-07-11", 202.84, 205.71, 202.3, 206.59, 55.4], ["2025-07-14", 205.71, 206.33, 205.08, 206.6, 68.1], ["2025-07-15", 206.33, 207.28, 204.45, 207.72, 39.1], ["2025-07-16", 207.28, 206.22, 205.05, 207.4, 67.2], ["2025-07-17", 206.22, 199.95, 199.74, 206.76, 56.2], ["2025-07-18", 199.95, 206.06, 199.9, 206.52, 87.3], ["2025-07-21", 206.06, 214.75, 205.87, 215.04, 81.4], ["2025-07-22", 214.75, 216.85, 213.77, 218.05, 69.7], ["2025-07-23", 216.85, 219.19, 216.17, 219.82, 41.3], ["2025-07-24", 219.19, 214.79, 214.28, 219.36, 37.7], ["2025-07-25", 214.79, 216.24, 214.48, 216.61, 48.3], ["2025-07-28", 216.24, 219.99, 215.19, 220.62, 57.4], ["2025-07-29", 219.99, 212.76, 212.63, 220.55, 40.6], ["2025-07-30", 212.76, 212.31, 211.99, 213.16, 68.7], ["2025-07-31", 212.31, 214.0, 210.89, 214.07, 54.3], ["2025-08-01", 214.0, 207.28, 207.04, 214.43, 56.0], ["2025-08-04", 207.28, 209.45, 206.81, 209.73, 59.0], ["2025-08-05", 209.45, 204.59, 204.32, 209.85, 39.0], ["2025-08-06", 204.59, 202.29, 201.2, 206.41, 62.0], ["2025-08-07", 202.29, 197.6, 197.1, 202.64, 54.8], ["2025-08-08", 197.6, 199.12, 197.08, 199.82, 74.4], ["2025-08-11", 199.12, 204.17, 198.76, 206.4, 63.1], ["2025-08-12", 204.17, 201.89, 201.62, 204.94, 45.2], ["2025-08-13", 201.89, 194.8, 194.23, 202.56, 70.6], ["2025-08-14", 194.8, 194.65, 194.09, 195.14, 62.1], ["2025-08-15", 194.65, 199.87, 193.65, 200.17, 69.6], ["2025-08-18", 199.87, 200.48, 199.53, 200.66, 72.0], ["2025-08-19", 200.48, 195.2, 194.85, 200.95, 50.1], ["2025-08-20", 195.2, 199.05, 194.12, 199.54, 56.1], ["2025-08-21", 199.05, 199.24, 197.73, 200.35, 52.3], ["2025-08-22", 199.24, 196.79, 196.35, 199.56, 64.8], ["2025-08-25", 196.79, 203.41, 195.53, 203.86, 69.1], ["2025-08-26", 203.41, 200.3, 199.59, 204.48, 49.0], ["2025-08-27", 200.3, 201.09, 199.47, 201.76, 58.5], ["2025-08-28", 201.09, 205.41, 200.79, 205.78, 72.8], ["2025-08-29", 205.41, 211.13, 205.3, 211.6, 50.9], ["2025-09-01", 211.13, 213.32, 209.83, 213.44, 56.0], ["2025-09-02", 213.32, 212.89, 212.52, 214.5, 80.2], ["2025-09-03", 212.89, 200.5, 199.98, 213.06, 83.2], ["2025-09-04", 200.5, 203.18, 200.3, 205.97, 62.4], ["2025-09-05", 203.18, 201.95, 201.52, 203.36, 83.2], ["2025-09-08", 201.95, 197.51, 197.09, 202.08, 51.4], ["2025-09-09", 197.51, 198.35, 196.48, 198.43, 61.9], ["2025-09-10", 198.35, 201.17, 197.25, 201.72, 64.2], ["2025-09-11", 201.17, 196.06, 195.95, 201.71, 54.7], ["2025-09-12", 196.06, 203.05, 193.97, 203.57, 65.8], ["2025-09-15", 203.05, 197.05, 196.9, 203.82, 67.3], ["2025-09-16", 197.05, 196.78, 196.19, 197.8, 49.3], ["2025-09-17", 196.78, 198.68, 196.46, 199.52, 73.3], ["2025-09-18", 198.68, 198.41, 198.11, 200.05, 72.7], ["2025-09-19", 198.41, 197.95, 197.93, 198.91, 50.0], ["2025-09-22", 197.95, 201.47, 197.68, 202.8, 56.9], ["2025-09-23", 201.47, 205.86, 201.1, 206.25, 59.9], ["2025-09-24", 205.86, 197.11, 196.7, 206.57, 53.1], ["2025-09-25", 197.11, 199.03, 197.1, 200.03, 61.2], ["2025-09-26", 199.03, 201.21, 198.49, 202.09, 53.5], ["2025-09-29", 201.21, 203.17, 201.08, 203.82, 40.5], ["2025-09-30", 203.17, 206.1, 202.81, 207.06, 54.6], ["2025-10-01", 206.1, 204.18, 203.79, 206.22, 56.6], ["2025-10-02", 204.18, 203.64, 202.64, 206.7, 47.5], ["2025-10-03", 203.64, 209.41, 202.68, 209.47, 60.5], ["2025-10-06", 209.41, 208.37, 207.42, 210.32, 50.2], ["2025-10-07", 208.37, 210.65, 206.81, 211.28, 77.7], ["2025-10-08", 210.65, 211.83, 210.04, 213.32, 74.7], ["2025-10-09", 211.83, 217.87, 210.77, 217.94, 30.9], ["2025-10-10", 217.87, 216.3, 216.15, 218.96, 73.4], ["2025-10-13", 216.3, 226.19, 214.57, 226.64, 75.8], ["2025-10-14", 226.19, 222.81, 221.39, 227.64, 65.7], ["2025-10-15", 222.81, 220.96, 219.98, 223.72, 77.9], ["2025-10-16", 220.96, 217.83, 217.77, 221.87, 65.3], ["2025-10-17", 217.83, 222.15, 216.86, 223.78, 41.2], ["2025-10-20", 222.15, 225.86, 221.68, 226.2, 54.6], ["2025-10-21", 225.86, 223.6, 222.76, 227.14, 45.3], ["2025-10-22", 223.6, 218.67, 218.58, 224.46, 35.5], ["2025-10-23", 218.67, 223.88, 217.86, 224.15, 63.4], ["2025-10-24", 223.88, 224.19, 223.38, 224.73, 49.3], ["2025-10-27", 224.19, 226.26, 223.51, 227.13, 40.4], ["2025-10-28", 226.26, 224.44, 224.32, 226.81, 45.1], ["2025-10-29", 224.44, 225.67, 224.41, 225.71, 75.5], ["2025-10-30", 225.67, 225.63, 225.39, 226.52, 68.8], ["2025-10-31", 225.63, 234.01, 225.23, 234.15, 76.1], ["2025-11-03", 234.01, 232.32, 230.97, 234.74, 81.8], ["2025-11-04", 232.32, 230.71, 229.97, 233.11, 35.7], ["2025-11-05", 230.71, 234.65, 230.57, 234.71, 59.1], ["2025-11-06", 234.65, 244.68, 234.28, 246.19, 65.7], ["2025-11-07", 244.68, 240.86, 240.27, 244.93, 60.8], ["2025-11-10", 240.86, 246.15, 240.4, 246.63, 53.8], ["2025-11-11", 246.15, 243.08, 242.32, 246.34, 60.8], ["2025-11-12", 243.08, 239.64, 239.59, 243.29, 57.2], ["2025-11-13", 239.64, 248.99, 238.68, 249.52, 55.9], ["2025-11-14", 248.99, 251.7, 247.95, 251.85, 65.1], ["2025-11-17", 251.7, 250.75, 250.13, 251.82, 41.8], ["2025-11-18", 250.75, 251.28, 249.5, 252.49, 69.9], ["2025-11-19", 251.28, 246.48, 246.11, 251.49, 24.2], ["2025-11-20", 246.48, 247.62, 246.3, 247.73, 64.3], ["2025-11-21", 247.62, 243.5, 242.87, 248.7, 84.7], ["2025-11-24", 243.5, 244.78, 243.29, 245.67, 70.8], ["2025-11-25", 244.78, 242.99, 242.37, 245.14, 45.3], ["2025-11-26", 242.99, 249.48, 241.5, 250.32, 48.2], ["2025-11-27", 249.48, 255.32, 248.77, 256.32, 69.1], ["2025-11-28", 255.32, 269.76, 255.21, 270.1, 89.4], ["2025-12-01", 269.76, 266.34, 264.21, 270.28, 63.7], ["2025-12-02", 266.34, 265.1, 263.3, 267.1, 55.7], ["2025-12-03", 265.1, 258.5, 257.15, 266.03, 69.2], ["2025-12-04", 258.5, 257.13, 255.95, 258.96, 95.8], ["2025-12-05", 257.13, 255.41, 255.32, 257.54, 79.4], ["2025-12-08", 255.41, 261.66, 254.88, 262.03, 65.2], ["2025-12-09", 261.66, 267.3, 261.64, 267.31, 58.0], ["2025-12-10", 267.3, 268.89, 266.67, 269.5, 71.3], ["2025-12-11", 268.89, 268.06, 267.83, 269.06, 71.6], ["2025-12-12", 268.06, 266.47, 266.25, 268.89, 78.8], ["2025-12-15", 266.47, 264.33, 263.75, 266.92, 80.6], ["2025-12-16", 264.33, 261.57, 260.17, 264.59, 77.8], ["2025-12-17", 261.57, 252.48, 251.68, 261.68, 77.2], ["2025-12-18", 252.48, 264.11, 251.52, 264.36, 52.1], ["2025-12-19", 264.11, 257.08, 256.97, 264.8, 72.6], ["2025-12-22", 257.08, 251.77, 251.38, 258.23, 67.9], ["2025-12-23", 251.77, 252.21, 251.22, 252.29, 52.0], ["2025-12-24", 252.21, 249.99, 249.86, 253.02, 69.4], ["2025-12-25", 249.99, 241.22, 241.05, 250.27, 71.1], ["2025-12-26", 241.22, 237.76, 237.12, 242.08, 62.5], ["2025-12-29", 237.76, 237.39, 237.17, 237.85, 54.7], ["2025-12-30", 237.39, 230.9, 230.63, 238.95, 53.2], ["2025-12-31", 230.9, 232.06, 230.53, 232.23, 63.7], ["2026-01-01", 232.06, 235.61, 231.08, 235.77, 56.0], ["2026-01-02", 235.61, 236.62, 235.5, 237.37, 40.2], ["2026-01-05", 236.62, 236.71, 235.82, 238.3, 42.4], ["2026-01-06", 236.71, 232.33, 231.71, 238.53, 74.3], ["2026-01-07", 232.33, 235.86, 231.71, 236.07, 67.2], ["2026-01-08", 235.86, 234.5, 234.45, 236.33, 53.3], ["2026-01-09", 234.5, 242.27, 233.77, 242.87, 52.4], ["2026-01-12", 242.27, 241.34, 241.01, 242.29, 40.6], ["2026-01-13", 241.34, 244.9, 241.33, 245.62, 63.6], ["2026-01-14", 244.9, 250.91, 244.67, 252.1, 85.1], ["2026-01-15", 250.91, 254.3, 250.61, 255.34, 67.1], ["2026-01-16", 254.3, 255.31, 253.84, 256.07, 64.2], ["2026-01-19", 255.31, 250.97, 249.73, 256.1, 73.2], ["2026-01-20", 250.97, 257.4, 248.46, 258.94, 60.5], ["2026-01-21", 257.4, 255.97, 254.71, 257.68, 35.3], ["2026-01-22", 255.97, 263.77, 255.38, 264.41, 64.3], ["2026-01-23", 263.77, 267.4, 263.34, 268.37, 54.8], ["2026-01-26", 267.4, 272.31, 266.91, 273.07, 69.1], ["2026-01-27", 272.31, 276.59, 271.13, 276.74, 69.2], ["2026-01-28", 276.59, 274.92, 274.72, 277.1, 49.2], ["2026-01-29", 274.92, 270.99, 270.81, 275.43, 73.3], ["2026-01-30", 270.99, 272.48, 270.95, 272.53, 85.0], ["2026-02-02", 272.48, 285.29, 271.37, 285.45, 29.4], ["2026-02-03", 285.29, 285.7, 285.15, 286.11, 35.7], ["2026-02-04", 285.7, 287.53, 285.54, 288.02, 56.5], ["2026-02-05", 287.53, 281.22, 281.15, 288.25, 61.1], ["2026-02-06", 281.22, 276.07, 275.24, 281.38, 68.1], ["2026-02-09", 276.07, 270.38, 270.17, 276.13, 77.0], ["2026-02-10", 270.38, 270.56, 269.93, 271.35, 48.8], ["2026-02-11", 270.56, 273.35, 269.06, 273.73, 77.6], ["2026-02-12", 273.35, 267.2, 265.91, 274.47, 74.9], ["2026-02-13", 267.2, 271.87, 266.39, 272.32, 56.5], ["2026-02-16", 271.87, 270.84, 270.17, 273.87, 52.3], ["2026-02-17", 270.84, 273.28, 270.1, 273.42, 61.4], ["2026-02-18", 273.28, 271.78, 271.58, 273.41, 68.1], ["2026-02-19", 271.78, 283.31, 271.49, 284.04, 75.6], ["2026-02-20", 283.31, 279.44, 279.32, 283.83, 47.6], ["2026-02-23", 279.44, 282.96, 278.81, 284.34, 53.4], ["2026-02-24", 282.96, 282.89, 282.85, 282.99, 61.3], ["2026-02-25", 282.89, 292.85, 282.09, 293.21, 62.9], ["2026-02-26", 292.85, 289.9, 289.85, 292.91, 77.1], ["2026-02-27", 289.9, 288.36, 288.19, 290.61, 65.9], ["2026-03-02", 288.36, 286.15, 285.55, 289.79, 83.3], ["2026-03-03", 286.15, 292.44, 285.94, 293.5, 67.6], ["2026-03-04", 292.44, 292.99, 291.7, 293.05, 79.7], ["2026-03-05", 292.99, 287.33, 286.45, 293.45, 61.7], ["2026-03-06", 287.33, 283.45, 283.38, 289.24, 71.3], ["2026-03-09", 283.45, 283.47, 282.95, 283.78, 67.4], ["2026-03-10", 283.47, 287.25, 283.33, 287.7, 46.7], ["2026-03-11", 287.25, 288.53, 286.47, 289.13, 68.5], ["2026-03-12", 288.53, 285.21, 284.23, 288.69, 54.9], ["2026-03-13", 285.21, 290.28, 283.58, 291.55, 56.7], ["2026-03-16", 290.28, 283.41, 283.3, 290.83, 68.3], ["2026-03-17", 283.41, 287.49, 283.32, 287.91, 51.2], ["2026-03-18", 287.49, 286.45, 285.65, 288.57, 82.0], ["2026-03-19", 286.45, 286.81, 285.53, 287.61, 43.6], ["2026-03-20", 286.81, 282.39, 281.72, 287.92, 62.6], ["2026-03-23", 282.39, 275.66, 275.57, 282.84, 93.9], ["2026-03-24", 275.66, 271.02, 270.92, 277.11, 83.1], ["2026-03-25", 271.02, 270.36, 270.1, 272.01, 63.1], ["2026-03-26", 270.36, 271.12, 270.24, 271.66, 55.0], ["2026-03-27", 271.12, 268.35, 268.0, 271.76, 61.2], ["2026-03-30", 268.35, 265.05, 265.01, 268.88, 75.6], ["2026-03-31", 265.05, 254.35, 254.16, 266.81, 45.0], ["2026-04-01", 254.35, 250.96, 250.44, 254.69, 65.8], ["2026-04-02", 250.96, 247.32, 245.08, 252.05, 36.0], ["2026-04-03", 247.32, 251.16, 247.04, 251.34, 61.1], ["2026-04-06", 251.16, 251.98, 250.79, 252.09, 84.8], ["2026-04-07", 251.98, 254.57, 250.59, 255.21, 74.1], ["2026-04-08", 254.57, 247.76, 246.53, 255.79, 77.6], ["2026-04-09", 247.76, 247.56, 246.92, 248.08, 41.9], ["2026-04-10", 247.56, 240.42, 240.02, 247.85, 54.0], ["2026-04-13", 240.42, 237.54, 236.82, 240.44, 63.9], ["2026-04-14", 237.54, 235.5, 235.48, 238.97, 43.3], ["2026-04-15", 235.5, 239.08, 234.54, 240.39, 63.1], ["2026-04-16", 239.08, 239.15, 239.03, 239.24, 52.8], ["2026-04-17", 239.15, 239.15, 238.63, 239.27, 69.9], ["2026-04-20", 239.15, 237.34, 237.12, 239.57, 67.7], ["2026-04-21", 237.34, 237.85, 236.82, 239.57, 71.5], ["2026-04-22", 237.85, 246.53, 237.33, 247.23, 62.1]]}, "earn": {"source": [["quarter", "eps", "type"], ["Q1-24", 1.68, "Actual"], ["Q1-24", 1.6, "Consensus"], ["Q2-24", 1.52, "Actual"], ["Q2-24", 1.55, "Consensus"], ["Q3-24", 1.72, "Actual"], ["Q3-24", 1.7, "Consensus"], ["Q4-24", 2.18, "Actual"], ["Q4-24", 2.12, "Consensus"], ["Q1-25", 1.88, "Actual"], ["Q1-25", 1.82, "Consensus"], ["Q2-25", 1.62, "Actual"], ["Q2-25", 1.66, "Consensus"], ["Q3-25", 1.95, "Actual"], ["Q3-25", 1.88, "Consensus"], ["Q4-25", 2.35, "Actual"], ["Q4-25", 2.28, "Consensus"], ["Q1-26", 2.05, "Actual"], ["Q1-26", 2.02, "Consensus"]]}, "rat": {"source": [["rating", "count"], ["Strong Sell", 1], ["Sell", 3], ["Hold", 11], ["Buy", 22], ["Strong Buy", 18]]}, "beta": {"source": [["mkt_return_pct", "stk_return_pct"], [1.18, 1.37], [-0.89, -0.69], [-0.23, 0.29], [0.94, 1.21], [-0.53, 0.37], [0.39, 1.59], [-0.16, -0.32], [0.45, 1.08], [0.52, 0.42], [-0.06, -1.12], [2.81, 5.06], [0.81, 1.87], [-1.17, -0.71], [0.67, 1.93], [0.48, 0.86], [-0.16, 0.58], [-1.05, -1.04], [0.06, 0.07], [-0.02, 0.27], [1.51, 2.39], [-1.06, -1.34], [1.48, 2.19], [1.84, 1.6], [0.74, -0.79], [-0.28, -0.84], [-0.29, -0.86], [-0.2, 0.43], [0.86, 0.66], [1.25, 2.19], [0.38, 0.99], [-0.31, -1.41], [-0.05, -0.44], [1.23, 2.26], [0.92, 2.16], [0.36, -0.17], [-0.14, -0.62], [-0.77, 0.25], [0.79, 1.32], [0.9, 1.31], [2.17, 3.16], [-0.84, -0.54], [-0.25, 1.0], [0.36, -0.66], [0.82, 1.27], [-0.59, -2.05], [-1.48, -1.45], [-0.49, 0.24], [-1.38, -2.26], [1.72, 1.72], [-1.53, -2.17], [0.67, 0.62], [-0.86, -0.9], [0.68, 0.44], [-0.87, -1.35], [-0.29, -0.87], [-0.92, -0.36], [-0.24, 0.5], [-0.53, -1.27], [2.08, 2.69], [-0.79, -1.1], [-0.35, -0.16], [1.38, 1.89], [0.2, -0.11], [0.32, 0.2], [-1.14, -3.21], [-0.02, -0.79], [0.05, 2.15], [1.35, 0.86], [1.0, 0.17], [-0.68, -0.56], [0.7, 1.67], [0.03, -0.66], [-0.19, 0.4], [-0.49, -0.4], [-0.47, -0.72], [0.33, 0.83], [-0.59, -0.51], [-1.5, -2.17], [-0.68, -1.53], [0.83, 0.18], [-0.17, -0.33], [-1.95, -1.89], [0.22, 1.06], [0.03, 0.33], [0.13, 0.76], [-1.21, -0.45], [1.2, 1.2], [0.16, 1.08], [0.07, 1.27], [0.12, -1.41], [-1.4, -2.09], [1.02, 0.75], [0.47, -0.01], [-0.8, -0.06], [-0.08, 0.94], [-1.03, -1.75], [0.14, 1.17], [-1.1, -0.86], [0.08, 0.23], [0.01, 0.09], [0.67, 0.72], [0.0, 1.0], [-1.47, -1.09], [-0.13, -0.14], [-0.14, 0.02], [0.48, -0.68], [0.21, 0.54], [1.18, 0.62], [0.5, 0.14], [-0.89, -0.06], [-0.24, 0.04], [-1.69, -1.59], [0.8, 1.45], [0.58, 0.76], [-0.39, -0.62], [0.39, -0.11], [-0.63, -0.25], [0.9, 0.94], [0.75, 0.59], [1.71, 1.41], [0.52, 0.08], [1.7, 1.84], [-0.36, -1.16], [0.24, 1.77], [0.48, 0.67], [0.08, -0.64], [1.4, 1.41], [0.93, 1.08], [1.87, 1.36], [-0.68, -1.1], [-0.77, -0.65], [0.25, -0.35], [0.41, 0.33], [-0.65, -0.22], [1.13, 1.2], [-0.96, -0.87], [-1.63, -2.26], [0.17, 0.9], [0.79, 1.22], [-1.05, -2.09], [-0.99, -0.83], [-0.64, -0.26], [0.42, 2.2], [-0.42, -1.87], [0.13, -0.52], [-0.54, -0.94], [-2.02, -1.72], [0.29, -0.27], [0.36, 1.32], [1.58, 2.89], [0.33, 0.57], [-0.17, -1.07], [-0.5, -1.39], [-1.42, -2.02], [-0.32, -1.86], [-0.11, -0.44], [0.63, 0.98], [-1.51, -1.42], [1.7, 2.48], [-0.17, 1.39], [0.88, -0.5], [-0.13, 0.95], [-0.12, -0.13], [-0.01, 0.3], [-0.51, -0.31], [0.27, -0.26], [-0.84, -0.08], [1.8, 2.12], [-2.27, -3.54], [-1.33, -1.93], [-1.42, -1.82], [1.47, 0.97], [-0.26, -0.49], [-1.25, -0.16], [-0.9, 0.06], [-0.8, -0.4], [-0.46, -0.52], [0.96, 2.54], [0.79, 0.54], [0.29, 0.9], [-0.53, -0.83], [0.9, 0.4], [0.73, 1.14], [1.3, 0.92], [-0.42, -0.24], [0.86, 0.84], [0.24, 0.9], [-1.56, -2.07], [-0.56, -1.24], [1.8, 2.91], [1.42, 1.24], [-1.03, -1.43], [-0.74, -0.05], [2.07, 3.14], [-0.92, -1.09], [-0.63, -0.12], [-0.83, -1.03], [0.2, -0.23], [-0.81, -1.2], [0.25, -0.58], [-0.46, 0.2], [0.35, 0.12], [0.9, 1.12], [0.59, 0.98], [0.49, 0.81], [-1.58, -2.32], [-0.39, -1.18], [1.04, 1.56], [1.08, 1.09], [0.09, -0.28], [-1.59, -2.33], [0.24, 1.28], [0.11, -1.31], [0.7, 0.03], [1.61, 2.17], [-0.21, 1.51], [-1.59, -2.08], [-0.3, -0.77], [-0.68, 1.17], [0.74, 0.22], [-0.84, -0.5], [0.48, 0.78], [-0.58, 1.31], [-0.88, -1.61], [-1.82, -1.11], [0.2, -0.44], [0.66, 1.36], [1.1, 3.6], [1.27, 1.23], [0.29, 0.06], [0.83, 1.64], [0.63, 1.12], [2.15, 2.45], [0.92, 0.93], [0.25, 0.32], [1.31, 1.73], [0.11, 0.53], [-1.72, -2.4], [0.19, 1.34], [0.37, 0.66], [0.3, 0.53], [-1.47, -1.26], [1.32, 1.66], [-0.48, 0.11], [-0.62, -0.64], [-0.97, -0.75], [0.25, -0.55], [-0.12, 1.02], [1.12, 1.59], [-1.52, -1.44], [-1.81, -2.89], [1.0, 1.39]]}, "val": {"source": [["metric", "current", "low_5y", "high_5y", "z"], ["P/E NTM", 29.4, 16.2, 35.1, 1.1], ["EV/EBITDA", 22.1, 12.5, 26.4, 1.3], ["P/S NTM", 7.8, 3.9, 9.2, 1.4], ["FCF yield (%)", 3.1, 2.4, 6.8, -1.2], ["Dividend yld", 0.48, 0.42, 0.95, -1.0], ["PEG", 2.4, 1.1, 2.8, 1.5]]}, "ret": {"source": [["return_pct"], [2.54], [-0.83], [-0.58], [-1.29], [-0.44], [-0.21], [2.0], [1.49], [0.63], [-1.0], [0.9], [-1.85], [0.78], [0.85], [-0.62], [0.37], [1.45], [0.14], [0.93], [-0.5], [-2.66], [0.74], [-2.78], [2.3], [-0.9], [-1.46], [1.83], [0.07], [0.8], [-0.79], [-3.22], [1.02], [0.46], [-0.69], [-1.0], [-2.28], [-1.47], [2.77], [1.22], [-0.84], [-0.01], [0.44], [0.55], [1.13], [0.01], [0.62], [0.87], [0.57], [0.49], [-0.41], [-1.62], [0.74], [-1.66], [0.81], [0.04], [-0.39], [1.73], [0.19], [-1.73], [-0.8], [-0.39], [-0.87], [-1.62], [2.38], [-0.32], [1.47], [1.46], [-0.31], [-0.2], [0.39], [-0.74], [-1.44], [-2.95], [1.49], [1.64], [0.39], [2.33], [2.21], [-0.18], [2.06], [3.12], [1.35], [-0.44], [0.08], [-0.97], [-0.33], [1.2], [0.13], [1.18], [3.94], [1.59], [-1.09], [1.89], [-0.44], [-3.08], [-1.81], [1.77], [-0.22], [0.35], [0.82], [-1.1], [1.74], [-2.35], [2.02], [-0.23], [-2.62], [0.92], [0.06], [0.24], [1.7], [-2.46], [0.75], [-0.47], [1.8], [-1.65], [1.42], [-0.09], [-0.17], [-3.51], [-2.61], [1.55], [0.3], [0.28], [-1.03], [0.75], [0.67], [-0.76], [-2.48], [-0.07], [-1.91], [-1.84], [1.83], [-1.98], [-0.08], [-0.02], [-0.9], [0.18], [3.52], [0.16], [-1.52], [-0.22], [-1.38], [-1.9], [0.09], [-1.11], [-0.01], [-0.65], [0.05], [1.31], [1.35], [-0.77], [0.53], [-0.17], [-1.64], [-0.1], [0.81], [-0.1], [1.72], [0.63], [-3.63], [0.23], [-0.64], [-0.97], [-1.09], [3.22], [1.13], [1.49], [2.16], [0.49], [0.87], [2.05], [-1.55], [-0.68], [0.42], [1.41], [-0.16], [-0.42], [1.62], [3.32], [1.58], [0.88], [-0.22], [0.31], [-1.11], [-1.25], [-2.85], [-0.12], [-0.51], [0.48], [-2.02], [-0.16], [0.9], [0.05], [-2.17], [0.62], [0.37], [3.08], [1.73], [-0.54], [-1.12], [0.01], [0.85], [-1.45], [2.32], [-3.03], [-2.87], [1.91], [0.89], [0.38], [0.26], [-0.55], [-1.27], [-1.11], [-1.34], [-3.22], [0.44], [0.62], [0.35], [-2.34], [0.53], [2.03], [-1.67], [0.57], [-1.09], [3.48], [-1.09], [0.85], [-0.83], [0.75], [-2.62], [-1.2], [-0.36], [-0.08], [-0.57], [-1.18], [1.52], [1.09], [-2.18], [-0.64], [1.09], [1.39], [1.47], [-1.16], [2.33], [-0.72], [0.24], [-0.44], [0.75], [-1.06], [-1.27], [0.97], [-1.99], [-2.08], [-0.1], [-0.07], [-1.62], [-2.93], [0.8], [-2.63], [1.56], [3.04], [1.01], [-2.42], [0.57], [0.36], [-1.18], [-1.39], [0.34], [-1.2], [-1.39], [-3.61], [0.18], [-0.06], [-1.66], [-0.75], [-0.56], [0.25], [1.59], [-3.16], [0.5], [-1.97], [0.98], [-1.68], [-1.81], [-1.13], [3.41], [-0.52], [0.51], [-1.53], [-0.53], [0.09], [-1.22], [0.38], [-2.29], [-1.24], [-0.59], [-1.19], [-0.49], [0.82], [2.23], [-0.9], [-0.08], [-0.29], [0.61], [5.69], [-0.02], [0.05], [3.08], [-1.26], [0.4], [1.45], [-1.5], [0.86], [-0.0], [1.72], [-0.85], [0.99], [2.09], [0.74], [0.69], [-1.15], [-0.63], [-1.54], [0.21], [1.58], [-0.99], [-1.78], [3.71], [-2.16], [-0.04], [0.48], [1.73], [-3.17], [-0.2], [-0.32], [-0.03], [-0.18], [1.46], [-1.6], [-3.18], [0.79], [2.24], [1.08], [3.96], [0.31], [1.23], [2.03], [1.47], [-1.48], [1.85], [-1.17], [-1.5], [-0.53], [2.05], [0.13], [3.26], [1.56], [0.29], [0.53], [-1.38], [-2.37], [1.23], [-2.99], [0.73], [-0.45], [1.72], [1.72], [0.13], [1.18], [1.02], [-0.46], [2.28], [-1.92], [-2.11], [-2.15], [1.28], [-1.22], [-0.1], [1.18], [-4.2], [-0.47], [-0.16], [0.84], [-0.18], [-1.58], [-1.5], [-0.89], [0.7], [0.4], [2.52], [-0.48], [0.91], [-1.0], [0.06], [3.38], [0.38], [0.29], [-0.66], [0.3], [1.34], [1.69], [-0.43], [-0.94], [0.36], [0.81], [-1.48], [-0.54], [-1.17], [-0.55], [-0.7], [0.33], [1.81], [-2.85], [-0.65], [1.72], [-0.41], [1.07], [-1.3], [0.71], [-0.28], [1.67], [1.39], [-0.64], [-1.0], [0.3], [1.38], [2.63], [-1.34], [-0.54], [0.58], [1.92], [-0.17], [-0.74], [1.52], [0.49], [2.75], [-0.9], [2.59], [-0.07], [1.58], [0.84], [-1.13], [1.84], [-0.36], [-1.89], [-0.07], [2.64], [3.13], [1.65], [0.16], [1.45], [-1.34], [-0.73], [0.43], [-0.17], [1.64], [1.27], [0.82], [-0.54], [1.16], [1.41], [-2.74], [0.82], [-0.81], [0.97], [-0.66], [0.57], [-0.28], [0.54], [-2.6], [-1.98], [-0.8], [0.9], [1.12], [-1.55], [0.7], [1.97], [2.18], [-3.4], [0.36], [2.33], [0.99], [-0.09], [-2.59], [1.26], [0.24], [0.22], [0.93], [-1.66], [4.68], [-0.17], [0.15], [0.79], [-0.85], [2.04], [0.99], [1.16], [-1.64], [-0.49], [2.7]]}, "kpi": {"source": [["date", "price", "mcap_bn", "pe", "iv_30d"], ["2026-01-29", 187.44, 2857.6, 29.19, 24.22], ["2026-01-30", 191.76, 2850.5, 29.39, 24.2], ["2026-02-02", 195.93, 2734.1, 29.45, 23.79], ["2026-02-03", 194.41, 2705.6, 29.32, 24.09], ["2026-02-04", 192.95, 2650.4, 29.12, 23.7], ["2026-02-05", 195.01, 2691.7, 29.29, 23.9], ["2026-02-06", 190.53, 2695.1, 29.14, 23.36], ["2026-02-09", 193.44, 2743.8, 29.24, 23.48], ["2026-02-10", 192.98, 2758.1, 29.03, 24.18], ["2026-02-11", 201.11, 2748.4, 28.9, 24.72], ["2026-02-12", 201.6, 2805.8, 29.04, 24.77], ["2026-02-13", 204.88, 2840.0, 29.02, 24.58], ["2026-02-16", 202.22, 2817.6, 29.01, 25.0], ["2026-02-17", 206.39, 2838.5, 29.1, 25.11], ["2026-02-18", 207.59, 2762.9, 29.14, 25.13], ["2026-02-19", 210.63, 2752.4, 29.22, 24.52], ["2026-02-20", 210.65, 2735.8, 29.27, 24.6], ["2026-02-23", 208.44, 2706.3, 29.33, 24.67], ["2026-02-24", 209.5, 2705.9, 29.37, 25.22], ["2026-02-25", 211.73, 2770.5, 29.03, 25.78], ["2026-02-26", 218.19, 2762.9, 29.13, 26.08], ["2026-02-27", 216.91, 2749.2, 29.1, 26.1], ["2026-03-02", 216.85, 2831.2, 29.21, 25.51], ["2026-03-03", 217.76, 2719.2, 29.16, 25.28], ["2026-03-04", 218.82, 2760.3, 29.3, 25.32], ["2026-03-05", 221.38, 2787.0, 29.13, 25.41], ["2026-03-06", 224.12, 2825.4, 29.11, 25.48], ["2026-03-09", 227.04, 2767.0, 28.91, 25.41], ["2026-03-10", 223.36, 2841.3, 29.08, 25.26], ["2026-03-11", 222.22, 2794.3, 29.03, 25.32], ["2026-03-12", 218.47, 2803.5, 28.99, 25.97], ["2026-03-13", 217.27, 2840.5, 29.2, 25.54], ["2026-03-16", 221.92, 2926.0, 29.3, 24.73], ["2026-03-17", 220.7, 2864.9, 29.01, 24.81], ["2026-03-18", 221.93, 2858.1, 28.98, 24.83], ["2026-03-19", 220.12, 2865.3, 28.82, 25.38], ["2026-03-20", 219.89, 2862.0, 28.74, 24.5], ["2026-03-23", 222.06, 2766.3, 28.74, 24.21], ["2026-03-24", 219.09, 2860.0, 28.87, 23.85], ["2026-03-25", 217.12, 2860.8, 28.72, 23.58], ["2026-03-26", 214.97, 2896.2, 28.87, 22.57], ["2026-03-27", 215.25, 2913.8, 28.89, 22.84], ["2026-03-30", 206.29, 2960.8, 28.68, 22.52], ["2026-03-31", 209.87, 3003.8, 28.63, 22.7], ["2026-04-01", 210.21, 3018.8, 28.53, 22.32], ["2026-04-02", 209.88, 2992.1, 28.57, 22.71], ["2026-04-03", 209.04, 2993.3, 28.61, 22.53], ["2026-04-06", 215.34, 2955.0, 28.53, 22.6], ["2026-04-07", 213.7, 2965.4, 28.65, 21.94], ["2026-04-08", 207.5, 2998.9, 28.88, 22.22], ["2026-04-09", 202.95, 3035.7, 28.68, 22.49], ["2026-04-10", 201.95, 3058.3, 28.47, 23.04], ["2026-04-13", 197.69, 3096.7, 28.45, 23.33], ["2026-04-14", 195.17, 3087.1, 28.37, 23.13], ["2026-04-15", 198.29, 3063.0, 28.5, 23.28], ["2026-04-16", 199.92, 3089.1, 28.59, 23.39], ["2026-04-17", 202.96, 3038.2, 28.35, 23.89], ["2026-04-20", 208.06, 3077.3, 28.6, 23.4], ["2026-04-21", 206.07, 3161.7, 28.57, 23.13], ["2026-04-22", 204.65, 3090.5, 28.59, 23.83]]}}, "filters": [{"id": "dt", "type": "dateRange", "default": "1Y", "targets": ["price_chart", "vol_chart"], "field": "date", "label": "Price lookback", "scope": "tab:price"}], "layout": {"kind": "tabs", "tabs": [{"id": "price", "label": "Price & volume", "description": "Daily OHLC with the 60D KPI ribbon.", "rows": [[{"widget": "kpi", "id": "k_px", "label": "Close", "source": "kpi.latest.price", "delta_source": "kpi.prev.price", "sparkline_source": "kpi.price", "prefix": "$", "decimals": 2, "w": 3, "emphasis": true, "info": "Last-trade equity price.", "popup": {"title": "Close price", "body": "### Definition\n\n**Close** is the last printed trade on the primary listing exchange for the current trading session.\n\n### Data sourcing\n\n- Feed: *GS Market Data* (equities)\n- Latency: roughly 100ms intraday, snapshot at session close\n- Adjustments: cash dividends and splits are applied retroactively\n\n### Related\n\nSee the [price history chart](#price_chart) below and the full OHLC candle detail in the ECharts tooltip."}}, {"widget": "kpi", "id": "k_mc", "label": "Market cap", "source": "kpi.latest.mcap_bn", "delta_source": "kpi.prev.mcap_bn", "sparkline_source": "kpi.mcap_bn", "suffix": " bn", "decimals": 0, "w": 3}, {"widget": "kpi", "id": "k_pe", "label": "P/E NTM", "source": "kpi.latest.pe", "delta_source": "kpi.prev.pe", "sparkline_source": "kpi.pe", "decimals": 2, "w": 3, "info": "Forward P/E on next-12-month consensus EPS."}, {"widget": "kpi", "id": "k_iv", "label": "IV 30D (%)", "source": "kpi.latest.iv_30d", "delta_source": "kpi.prev.iv_30d", "sparkline_source": "kpi.iv_30d", "suffix": "%", "decimals": 2, "w": 3}], [{"widget": "chart", "id": "price_chart", "w": 12, "h_px": 440, "title": "ACME daily OHLC (1Y)", "badge": "LIVE", "badge_color": "pos", "info": "Daily OHLC with dataZoom brush at the bottom. Drag the brush to zoom in on a date range.", "footer": "Source: GS Market Data. Updated at market close.", "action_buttons": [{"label": "Open in portal", "icon": "\u2197", "href": "https://example.com/acme", "title": "Open ACME page"}], "spec": {"chart_type": "candlestick", "dataset": "ohlc", "mapping": {"x": "date", "open": "open", "close": "close", "low": "low", "high": "high"}, "title": "ACME daily OHLC (1Y)"}}], [{"widget": "chart", "id": "vol_chart", "w": 12, "h_px": 220, "spec": {"chart_type": "bar", "dataset": "ohlc", "mapping": {"x": "date", "y": "volume_m", "y_title": "Volume (M sh)", "x_date_format": "auto", "series_labels": {"volume_m": "Volume"}, "legend_position": "none"}, "title": "Daily volume"}, "dataset_ref": "ohlc"}]]}, {"id": "fundamentals", "label": "Fundamentals", "description": "Quarterly EPS actuals vs consensus and analyst rating distribution.", "rows": [[{"widget": "chart", "id": "eps_chart", "w": 8, "h_px": 380, "spec": {"chart_type": "multi_line", "dataset": "earn", "mapping": {"x": "quarter", "y": "eps", "color": "type", "strokeDash": "type", "strokeDashScale": {"domain": ["Actual", "Consensus"], "range": ["solid", [6, 4]]}, "x_type": "category", "x_sort": ["Q1-24", "Q2-24", "Q3-24", "Q4-24", "Q1-25", "Q2-25", "Q3-25", "Q4-25", "Q1-26"], "y_title": "EPS ($)"}, "title": "Quarterly EPS: actuals vs consensus", "subtitle": "solid = actual, dashed = consensus", "annotations": [{"type": "vline", "x": "Q1-26", "label": "Current qtr", "color": "#1a365d", "style": "dashed"}]}}, {"widget": "chart", "id": "rating_chart", "w": 4, "h_px": 380, "spec": {"chart_type": "bar_horizontal", "dataset": "rat", "mapping": {"x": "count", "y": "rating", "x_title": "# analysts", "legend_position": "none"}, "title": "Sell-side distribution"}}], [{"widget": "markdown", "id": "thesis", "w": 12, "content": "### Thesis\n\nACME has beaten consensus EPS in 7 of the last 9 quarters, with the magnitude of beat widening on services revenue. Sell-side skew remains bullish (40 Buy+ vs 4 Sell-). Near-term catalyst: Q1 print in 3 weeks."}]]}, {"id": "risk", "label": "Risk & valuation", "description": "Beta regression, return distribution, valuation vs 5Y range.", "rows": [[{"widget": "chart", "id": "beta_chart", "w": 6, "h_px": 360, "spec": {"chart_type": "scatter", "dataset": "beta", "mapping": {"x": "mkt_return_pct", "y": "stk_return_pct", "trendline": true, "x_title": "Market daily return (%)", "y_title": "ACME daily return (%)"}, "title": "Beta regression (1Y daily)", "subtitle": "trendline = OLS slope"}}, {"widget": "chart", "id": "hist_chart", "w": 6, "h_px": 360, "spec": {"chart_type": "histogram", "dataset": "ret", "mapping": {"x": "return_pct", "bins": 30, "x_title": "Daily return (%)", "y_title": "Frequency"}, "title": "Daily return distribution (2Y)"}}], [{"widget": "chart", "id": "val_bullet", "w": 12, "h_px": 360, "spec": {"chart_type": "bullet", "dataset": "val", "mapping": {"y": "metric", "x": "current", "x_low": "low_5y", "x_high": "high_5y", "color_by": "z"}, "title": "Valuation vs 5Y range (z-score colored)"}}]]}]}, "links": []}, "specs": {"price_chart": {"title": {"text": "", "subtext": "", "left": "left"}, "tooltip": {"show": true, "trigger": "axis", "axisPointer": {"type": "cross"}}, "legend": {"show": true, "top": 42, "right": 10, "orient": "horizontal", "type": "scroll", "data": ["OHLC"]}, "grid": {"top": 80, "right": 20, "bottom": 84, "left": 76, "containLabel": true}, "toolbox": {"show": true, "top": 8, "right": 10, "itemSize": 14, "itemGap": 8, "feature": {"saveAsImage": {"show": true, "title": "Save"}, "dataZoom": {"show": true, "title": {"zoom": "Zoom", "back": "Reset zoom"}}, "restore": {"show": true, "title": "Restore"}}}, "animation": true, "animationDuration": 600, "color": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "xAxis": {"type": "time"}, "yAxis": {"type": "value", "scale": true}, "series": [{"type": "candlestick", "name": "OHLC", "data": [["2025-05-06", 185.0, 183.1, 182.3, 186.09], ["2025-05-07", 183.1, 177.52, 177.4, 183.72], ["2025-05-08", 177.52, 178.69, 176.46, 179.82], ["2025-05-09", 178.69, 180.31, 178.1, 180.82], ["2025-05-12", 180.31, 183.63, 180.28, 184.35], ["2025-05-13", 183.63, 185.45, 183.45, 185.49], ["2025-05-14", 185.45, 184.2, 183.92, 186.64], ["2025-05-15", 184.2, 188.4, 184.13, 188.9], ["2025-05-16", 188.4, 190.77, 187.58, 191.57], ["2025-05-19", 190.77, 191.63, 190.45, 191.94], ["2025-05-20", 191.63, 190.57, 190.01, 192.23], ["2025-05-21", 190.57, 189.05, 188.78, 190.74], ["2025-05-22", 189.05, 188.7, 187.68, 190.5], ["2025-05-23", 188.7, 189.37, 187.59, 190.28], ["2025-05-26", 189.37, 188.7, 188.05, 191.04], ["2025-05-27", 188.7, 189.71, 188.26, 189.76], ["2025-05-28", 189.71, 193.9, 188.03, 195.0], ["2025-05-29", 193.9, 189.53, 189.03, 194.19], ["2025-05-30", 189.53, 187.89, 186.96, 189.8], ["2025-06-02", 187.89, 189.77, 187.6, 191.17], ["2025-06-03", 189.77, 191.08, 188.55, 191.22], ["2025-06-04", 191.08, 195.79, 191.0, 196.22], ["2025-06-05", 195.79, 195.18, 195.11, 197.24], ["2025-06-06", 195.18, 191.1, 190.78, 196.05], ["2025-06-09", 191.1, 198.87, 190.97, 199.51], ["2025-06-10", 198.87, 199.71, 198.74, 200.41], ["2025-06-11", 199.71, 195.81, 194.96, 200.13], ["2025-06-12", 195.81, 194.11, 193.26, 196.1], ["2025-06-13", 194.11, 193.52, 192.6, 194.6], ["2025-06-16", 193.52, 186.85, 186.29, 194.68], ["2025-06-17", 186.85, 188.21, 185.34, 188.5], ["2025-06-18", 188.21, 189.71, 187.94, 190.24], ["2025-06-19", 189.71, 194.52, 189.18, 195.24], ["2025-06-20", 194.52, 194.49, 194.27, 195.77], ["2025-06-23", 194.49, 198.05, 193.48, 198.98], ["2025-06-24", 198.05, 197.24, 196.81, 198.83], ["2025-06-25", 197.24, 194.47, 193.86, 198.23], ["2025-06-26", 194.47, 202.11, 193.04, 202.19], ["2025-06-27", 202.11, 206.14, 200.94, 207.21], ["2025-06-30", 206.14, 216.06, 205.89, 217.04], ["2025-07-01", 216.06, 205.49, 204.84, 217.09], ["2025-07-02", 205.49, 204.35, 203.09, 206.53], ["2025-07-03", 204.35, 199.87, 198.95, 204.62], ["2025-07-04", 199.87, 205.27, 199.77, 206.12], ["2025-07-07", 205.27, 206.77, 205.01, 207.38], ["2025-07-08", 206.77, 201.56, 200.96, 208.68], ["2025-07-09", 201.56, 204.28, 200.62, 204.76], ["2025-07-10", 204.28, 202.84, 202.76, 204.82], ["2025-07-11", 202.84, 205.71, 202.3, 206.59], ["2025-07-14", 205.71, 206.33, 205.08, 206.6], ["2025-07-15", 206.33, 207.28, 204.45, 207.72], ["2025-07-16", 207.28, 206.22, 205.05, 207.4], ["2025-07-17", 206.22, 199.95, 199.74, 206.76], ["2025-07-18", 199.95, 206.06, 199.9, 206.52], ["2025-07-21", 206.06, 214.75, 205.87, 215.04], ["2025-07-22", 214.75, 216.85, 213.77, 218.05], ["2025-07-23", 216.85, 219.19, 216.17, 219.82], ["2025-07-24", 219.19, 214.79, 214.28, 219.36], ["2025-07-25", 214.79, 216.24, 214.48, 216.61], ["2025-07-28", 216.24, 219.99, 215.19, 220.62], ["2025-07-29", 219.99, 212.76, 212.63, 220.55], ["2025-07-30", 212.76, 212.31, 211.99, 213.16], ["2025-07-31", 212.31, 214.0, 210.89, 214.07], ["2025-08-01", 214.0, 207.28, 207.04, 214.43], ["2025-08-04", 207.28, 209.45, 206.81, 209.73], ["2025-08-05", 209.45, 204.59, 204.32, 209.85], ["2025-08-06", 204.59, 202.29, 201.2, 206.41], ["2025-08-07", 202.29, 197.6, 197.1, 202.64], ["2025-08-08", 197.6, 199.12, 197.08, 199.82], ["2025-08-11", 199.12, 204.17, 198.76, 206.4], ["2025-08-12", 204.17, 201.89, 201.62, 204.94], ["2025-08-13", 201.89, 194.8, 194.23, 202.56], ["2025-08-14", 194.8, 194.65, 194.09, 195.14], ["2025-08-15", 194.65, 199.87, 193.65, 200.17], ["2025-08-18", 199.87, 200.48, 199.53, 200.66], ["2025-08-19", 200.48, 195.2, 194.85, 200.95], ["2025-08-20", 195.2, 199.05, 194.12, 199.54], ["2025-08-21", 199.05, 199.24, 197.73, 200.35], ["2025-08-22", 199.24, 196.79, 196.35, 199.56], ["2025-08-25", 196.79, 203.41, 195.53, 203.86], ["2025-08-26", 203.41, 200.3, 199.59, 204.48], ["2025-08-27", 200.3, 201.09, 199.47, 201.76], ["2025-08-28", 201.09, 205.41, 200.79, 205.78], ["2025-08-29", 205.41, 211.13, 205.3, 211.6], ["2025-09-01", 211.13, 213.32, 209.83, 213.44], ["2025-09-02", 213.32, 212.89, 212.52, 214.5], ["2025-09-03", 212.89, 200.5, 199.98, 213.06], ["2025-09-04", 200.5, 203.18, 200.3, 205.97], ["2025-09-05", 203.18, 201.95, 201.52, 203.36], ["2025-09-08", 201.95, 197.51, 197.09, 202.08], ["2025-09-09", 197.51, 198.35, 196.48, 198.43], ["2025-09-10", 198.35, 201.17, 197.25, 201.72], ["2025-09-11", 201.17, 196.06, 195.95, 201.71], ["2025-09-12", 196.06, 203.05, 193.97, 203.57], ["2025-09-15", 203.05, 197.05, 196.9, 203.82], ["2025-09-16", 197.05, 196.78, 196.19, 197.8], ["2025-09-17", 196.78, 198.68, 196.46, 199.52], ["2025-09-18", 198.68, 198.41, 198.11, 200.05], ["2025-09-19", 198.41, 197.95, 197.93, 198.91], ["2025-09-22", 197.95, 201.47, 197.68, 202.8], ["2025-09-23", 201.47, 205.86, 201.1, 206.25], ["2025-09-24", 205.86, 197.11, 196.7, 206.57], ["2025-09-25", 197.11, 199.03, 197.1, 200.03], ["2025-09-26", 199.03, 201.21, 198.49, 202.09], ["2025-09-29", 201.21, 203.17, 201.08, 203.82], ["2025-09-30", 203.17, 206.1, 202.81, 207.06], ["2025-10-01", 206.1, 204.18, 203.79, 206.22], ["2025-10-02", 204.18, 203.64, 202.64, 206.7], ["2025-10-03", 203.64, 209.41, 202.68, 209.47], ["2025-10-06", 209.41, 208.37, 207.42, 210.32], ["2025-10-07", 208.37, 210.65, 206.81, 211.28], ["2025-10-08", 210.65, 211.83, 210.04, 213.32], ["2025-10-09", 211.83, 217.87, 210.77, 217.94], ["2025-10-10", 217.87, 216.3, 216.15, 218.96], ["2025-10-13", 216.3, 226.19, 214.57, 226.64], ["2025-10-14", 226.19, 222.81, 221.39, 227.64], ["2025-10-15", 222.81, 220.96, 219.98, 223.72], ["2025-10-16", 220.96, 217.83, 217.77, 221.87], ["2025-10-17", 217.83, 222.15, 216.86, 223.78], ["2025-10-20", 222.15, 225.86, 221.68, 226.2], ["2025-10-21", 225.86, 223.6, 222.76, 227.14], ["2025-10-22", 223.6, 218.67, 218.58, 224.46], ["2025-10-23", 218.67, 223.88, 217.86, 224.15], ["2025-10-24", 223.88, 224.19, 223.38, 224.73], ["2025-10-27", 224.19, 226.26, 223.51, 227.13], ["2025-10-28", 226.26, 224.44, 224.32, 226.81], ["2025-10-29", 224.44, 225.67, 224.41, 225.71], ["2025-10-30", 225.67, 225.63, 225.39, 226.52], ["2025-10-31", 225.63, 234.01, 225.23, 234.15], ["2025-11-03", 234.01, 232.32, 230.97, 234.74], ["2025-11-04", 232.32, 230.71, 229.97, 233.11], ["2025-11-05", 230.71, 234.65, 230.57, 234.71], ["2025-11-06", 234.65, 244.68, 234.28, 246.19], ["2025-11-07", 244.68, 240.86, 240.27, 244.93], ["2025-11-10", 240.86, 246.15, 240.4, 246.63], ["2025-11-11", 246.15, 243.08, 242.32, 246.34], ["2025-11-12", 243.08, 239.64, 239.59, 243.29], ["2025-11-13", 239.64, 248.99, 238.68, 249.52], ["2025-11-14", 248.99, 251.7, 247.95, 251.85], ["2025-11-17", 251.7, 250.75, 250.13, 251.82], ["2025-11-18", 250.75, 251.28, 249.5, 252.49], ["2025-11-19", 251.28, 246.48, 246.11, 251.49], ["2025-11-20", 246.48, 247.62, 246.3, 247.73], ["2025-11-21", 247.62, 243.5, 242.87, 248.7], ["2025-11-24", 243.5, 244.78, 243.29, 245.67], ["2025-11-25", 244.78, 242.99, 242.37, 245.14], ["2025-11-26", 242.99, 249.48, 241.5, 250.32], ["2025-11-27", 249.48, 255.32, 248.77, 256.32], ["2025-11-28", 255.32, 269.76, 255.21, 270.1], ["2025-12-01", 269.76, 266.34, 264.21, 270.28], ["2025-12-02", 266.34, 265.1, 263.3, 267.1], ["2025-12-03", 265.1, 258.5, 257.15, 266.03], ["2025-12-04", 258.5, 257.13, 255.95, 258.96], ["2025-12-05", 257.13, 255.41, 255.32, 257.54], ["2025-12-08", 255.41, 261.66, 254.88, 262.03], ["2025-12-09", 261.66, 267.3, 261.64, 267.31], ["2025-12-10", 267.3, 268.89, 266.67, 269.5], ["2025-12-11", 268.89, 268.06, 267.83, 269.06], ["2025-12-12", 268.06, 266.47, 266.25, 268.89], ["2025-12-15", 266.47, 264.33, 263.75, 266.92], ["2025-12-16", 264.33, 261.57, 260.17, 264.59], ["2025-12-17", 261.57, 252.48, 251.68, 261.68], ["2025-12-18", 252.48, 264.11, 251.52, 264.36], ["2025-12-19", 264.11, 257.08, 256.97, 264.8], ["2025-12-22", 257.08, 251.77, 251.38, 258.23], ["2025-12-23", 251.77, 252.21, 251.22, 252.29], ["2025-12-24", 252.21, 249.99, 249.86, 253.02], ["2025-12-25", 249.99, 241.22, 241.05, 250.27], ["2025-12-26", 241.22, 237.76, 237.12, 242.08], ["2025-12-29", 237.76, 237.39, 237.17, 237.85], ["2025-12-30", 237.39, 230.9, 230.63, 238.95], ["2025-12-31", 230.9, 232.06, 230.53, 232.23], ["2026-01-01", 232.06, 235.61, 231.08, 235.77], ["2026-01-02", 235.61, 236.62, 235.5, 237.37], ["2026-01-05", 236.62, 236.71, 235.82, 238.3], ["2026-01-06", 236.71, 232.33, 231.71, 238.53], ["2026-01-07", 232.33, 235.86, 231.71, 236.07], ["2026-01-08", 235.86, 234.5, 234.45, 236.33], ["2026-01-09", 234.5, 242.27, 233.77, 242.87], ["2026-01-12", 242.27, 241.34, 241.01, 242.29], ["2026-01-13", 241.34, 244.9, 241.33, 245.62], ["2026-01-14", 244.9, 250.91, 244.67, 252.1], ["2026-01-15", 250.91, 254.3, 250.61, 255.34], ["2026-01-16", 254.3, 255.31, 253.84, 256.07], ["2026-01-19", 255.31, 250.97, 249.73, 256.1], ["2026-01-20", 250.97, 257.4, 248.46, 258.94], ["2026-01-21", 257.4, 255.97, 254.71, 257.68], ["2026-01-22", 255.97, 263.77, 255.38, 264.41], ["2026-01-23", 263.77, 267.4, 263.34, 268.37], ["2026-01-26", 267.4, 272.31, 266.91, 273.07], ["2026-01-27", 272.31, 276.59, 271.13, 276.74], ["2026-01-28", 276.59, 274.92, 274.72, 277.1], ["2026-01-29", 274.92, 270.99, 270.81, 275.43], ["2026-01-30", 270.99, 272.48, 270.95, 272.53], ["2026-02-02", 272.48, 285.29, 271.37, 285.45], ["2026-02-03", 285.29, 285.7, 285.15, 286.11], ["2026-02-04", 285.7, 287.53, 285.54, 288.02], ["2026-02-05", 287.53, 281.22, 281.15, 288.25], ["2026-02-06", 281.22, 276.07, 275.24, 281.38], ["2026-02-09", 276.07, 270.38, 270.17, 276.13], ["2026-02-10", 270.38, 270.56, 269.93, 271.35], ["2026-02-11", 270.56, 273.35, 269.06, 273.73], ["2026-02-12", 273.35, 267.2, 265.91, 274.47], ["2026-02-13", 267.2, 271.87, 266.39, 272.32], ["2026-02-16", 271.87, 270.84, 270.17, 273.87], ["2026-02-17", 270.84, 273.28, 270.1, 273.42], ["2026-02-18", 273.28, 271.78, 271.58, 273.41], ["2026-02-19", 271.78, 283.31, 271.49, 284.04], ["2026-02-20", 283.31, 279.44, 279.32, 283.83], ["2026-02-23", 279.44, 282.96, 278.81, 284.34], ["2026-02-24", 282.96, 282.89, 282.85, 282.99], ["2026-02-25", 282.89, 292.85, 282.09, 293.21], ["2026-02-26", 292.85, 289.9, 289.85, 292.91], ["2026-02-27", 289.9, 288.36, 288.19, 290.61], ["2026-03-02", 288.36, 286.15, 285.55, 289.79], ["2026-03-03", 286.15, 292.44, 285.94, 293.5], ["2026-03-04", 292.44, 292.99, 291.7, 293.05], ["2026-03-05", 292.99, 287.33, 286.45, 293.45], ["2026-03-06", 287.33, 283.45, 283.38, 289.24], ["2026-03-09", 283.45, 283.47, 282.95, 283.78], ["2026-03-10", 283.47, 287.25, 283.33, 287.7], ["2026-03-11", 287.25, 288.53, 286.47, 289.13], ["2026-03-12", 288.53, 285.21, 284.23, 288.69], ["2026-03-13", 285.21, 290.28, 283.58, 291.55], ["2026-03-16", 290.28, 283.41, 283.3, 290.83], ["2026-03-17", 283.41, 287.49, 283.32, 287.91], ["2026-03-18", 287.49, 286.45, 285.65, 288.57], ["2026-03-19", 286.45, 286.81, 285.53, 287.61], ["2026-03-20", 286.81, 282.39, 281.72, 287.92], ["2026-03-23", 282.39, 275.66, 275.57, 282.84], ["2026-03-24", 275.66, 271.02, 270.92, 277.11], ["2026-03-25", 271.02, 270.36, 270.1, 272.01], ["2026-03-26", 270.36, 271.12, 270.24, 271.66], ["2026-03-27", 271.12, 268.35, 268.0, 271.76], ["2026-03-30", 268.35, 265.05, 265.01, 268.88], ["2026-03-31", 265.05, 254.35, 254.16, 266.81], ["2026-04-01", 254.35, 250.96, 250.44, 254.69], ["2026-04-02", 250.96, 247.32, 245.08, 252.05], ["2026-04-03", 247.32, 251.16, 247.04, 251.34], ["2026-04-06", 251.16, 251.98, 250.79, 252.09], ["2026-04-07", 251.98, 254.57, 250.59, 255.21], ["2026-04-08", 254.57, 247.76, 246.53, 255.79], ["2026-04-09", 247.76, 247.56, 246.92, 248.08], ["2026-04-10", 247.56, 240.42, 240.02, 247.85], ["2026-04-13", 240.42, 237.54, 236.82, 240.44], ["2026-04-14", 237.54, 235.5, 235.48, 238.97], ["2026-04-15", 235.5, 239.08, 234.54, 240.39], ["2026-04-16", 239.08, 239.15, 239.03, 239.24], ["2026-04-17", 239.15, 239.15, 238.63, 239.27], ["2026-04-20", 239.15, 237.34, 237.12, 239.57], ["2026-04-21", 237.34, 237.85, 236.82, 239.57], ["2026-04-22", 237.85, 246.53, 237.33, 247.23]]}], "dataZoom": [{"type": "inside"}, {"type": "slider"}]}, "vol_chart": {"title": {"text": "Daily volume", "subtext": "", "left": "left"}, "tooltip": {"show": true, "trigger": "axis", "axisPointer": {"type": "shadow"}}, "legend": {"show": false, "type": "plain", "data": ["Volume"], "itemGap": 14, "textStyle": {"fontSize": 12}}, "grid": {"top": 80, "right": 20, "bottom": 84, "left": 100, "containLabel": true}, "toolbox": {"show": true, "top": 8, "right": 10, "itemSize": 14, "itemGap": 8, "feature": {"saveAsImage": {"show": true, "title": "Save"}, "dataZoom": {"show": true, "title": {"zoom": "Zoom", "back": "Reset zoom"}}, "restore": {"show": true, "title": "Restore"}}}, "animation": true, "animationDuration": 600, "color": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "xAxis": {"type": "category", "name": "", "data": ["2025-05-06", "2025-05-07", "2025-05-08", "2025-05-09", "2025-05-12", "2025-05-13", "2025-05-14", "2025-05-15", "2025-05-16", "2025-05-19", "2025-05-20", "2025-05-21", "2025-05-22", "2025-05-23", "2025-05-26", "2025-05-27", "2025-05-28", "2025-05-29", "2025-05-30", "2025-06-02", "2025-06-03", "2025-06-04", "2025-06-05", "2025-06-06", "2025-06-09", "2025-06-10", "2025-06-11", "2025-06-12", "2025-06-13", "2025-06-16", "2025-06-17", "2025-06-18", "2025-06-19", "2025-06-20", "2025-06-23", "2025-06-24", "2025-06-25", "2025-06-26", "2025-06-27", "2025-06-30", "2025-07-01", "2025-07-02", "2025-07-03", "2025-07-04", "2025-07-07", "2025-07-08", "2025-07-09", "2025-07-10", "2025-07-11", "2025-07-14", "2025-07-15", "2025-07-16", "2025-07-17", "2025-07-18", "2025-07-21", "2025-07-22", "2025-07-23", "2025-07-24", "2025-07-25", "2025-07-28", "2025-07-29", "2025-07-30", "2025-07-31", "2025-08-01", "2025-08-04", "2025-08-05", "2025-08-06", "2025-08-07", "2025-08-08", "2025-08-11", "2025-08-12", "2025-08-13", "2025-08-14", "2025-08-15", "2025-08-18", "2025-08-19", "2025-08-20", "2025-08-21", "2025-08-22", "2025-08-25", "2025-08-26", "2025-08-27", "2025-08-28", "2025-08-29", "2025-09-01", "2025-09-02", "2025-09-03", "2025-09-04", "2025-09-05", "2025-09-08", "2025-09-09", "2025-09-10", "2025-09-11", "2025-09-12", "2025-09-15", "2025-09-16", "2025-09-17", "2025-09-18", "2025-09-19", "2025-09-22", "2025-09-23", "2025-09-24", "2025-09-25", "2025-09-26", "2025-09-29", "2025-09-30", "2025-10-01", "2025-10-02", "2025-10-03", "2025-10-06", "2025-10-07", "2025-10-08", "2025-10-09", "2025-10-10", "2025-10-13", "2025-10-14", "2025-10-15", "2025-10-16", "2025-10-17", "2025-10-20", "2025-10-21", "2025-10-22", "2025-10-23", "2025-10-24", "2025-10-27", "2025-10-28", "2025-10-29", "2025-10-30", "2025-10-31", "2025-11-03", "2025-11-04", "2025-11-05", "2025-11-06", "2025-11-07", "2025-11-10", "2025-11-11", "2025-11-12", "2025-11-13", "2025-11-14", "2025-11-17", "2025-11-18", "2025-11-19", "2025-11-20", "2025-11-21", "2025-11-24", "2025-11-25", "2025-11-26", "2025-11-27", "2025-11-28", "2025-12-01", "2025-12-02", "2025-12-03", "2025-12-04", "2025-12-05", "2025-12-08", "2025-12-09", "2025-12-10", "2025-12-11", "2025-12-12", "2025-12-15", "2025-12-16", "2025-12-17", "2025-12-18", "2025-12-19", "2025-12-22", "2025-12-23", "2025-12-24", "2025-12-25", "2025-12-26", "2025-12-29", "2025-12-30", "2025-12-31", "2026-01-01", "2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13", "2026-01-14", "2026-01-15", "2026-01-16", "2026-01-19", "2026-01-20", "2026-01-21", "2026-01-22", "2026-01-23", "2026-01-26", "2026-01-27", "2026-01-28", "2026-01-29", "2026-01-30", "2026-02-02", "2026-02-03", "2026-02-04", "2026-02-05", "2026-02-06", "2026-02-09", "2026-02-10", "2026-02-11", "2026-02-12", "2026-02-13", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-23", "2026-02-24", "2026-02-25", "2026-02-26", "2026-02-27", "2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05", "2026-03-06", "2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12", "2026-03-13", "2026-03-16", "2026-03-17", "2026-03-18", "2026-03-19", "2026-03-20", "2026-03-23", "2026-03-24", "2026-03-25", "2026-03-26", "2026-03-27", "2026-03-30", "2026-03-31", "2026-04-01", "2026-04-02", "2026-04-03", "2026-04-06", "2026-04-07", "2026-04-08", "2026-04-09", "2026-04-10", "2026-04-13", "2026-04-14", "2026-04-15", "2026-04-16", "2026-04-17", "2026-04-20", "2026-04-21", "2026-04-22"], "axisLabel": {"formatter": "function(v){ var d = new Date(v); if (isNaN(d.getTime())) return v; var m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]; return m + ' ' + d.getDate();}"}}, "yAxis": {"type": "value", "name": "Volume (M sh)", "inverse": false, "nameLocation": "middle", "nameGap": 56}, "series": [{"type": "bar", "name": "Volume", "data": [57.4, 62.0, 80.6, 66.2, 64.0, 67.8, 90.9, 56.5, 79.0, 73.3, 46.0, 48.1, 50.7, 88.4, 61.3, 58.1, 59.1, 69.2, 53.6, 97.0, 64.5, 61.5, 63.7, 52.4, 62.4, 64.7, 57.1, 71.7, 27.7, 57.6, 87.7, 54.6, 61.8, 81.7, 70.5, 40.5, 73.4, 70.0, 62.9, 64.0, 82.1, 64.1, 58.5, 48.0, 53.5, 53.9, 80.8, 67.9, 55.4, 68.1, 39.1, 67.2, 56.2, 87.3, 81.4, 69.7, 41.3, 37.7, 48.3, 57.4, 40.6, 68.7, 54.3, 56.0, 59.0, 39.0, 62.0, 54.8, 74.4, 63.1, 45.2, 70.6, 62.1, 69.6, 72.0, 50.1, 56.1, 52.3, 64.8, 69.1, 49.0, 58.5, 72.8, 50.9, 56.0, 80.2, 83.2, 62.4, 83.2, 51.4, 61.9, 64.2, 54.7, 65.8, 67.3, 49.3, 73.3, 72.7, 50.0, 56.9, 59.9, 53.1, 61.2, 53.5, 40.5, 54.6, 56.6, 47.5, 60.5, 50.2, 77.7, 74.7, 30.9, 73.4, 75.8, 65.7, 77.9, 65.3, 41.2, 54.6, 45.3, 35.5, 63.4, 49.3, 40.4, 45.1, 75.5, 68.8, 76.1, 81.8, 35.7, 59.1, 65.7, 60.8, 53.8, 60.8, 57.2, 55.9, 65.1, 41.8, 69.9, 24.2, 64.3, 84.7, 70.8, 45.3, 48.2, 69.1, 89.4, 63.7, 55.7, 69.2, 95.8, 79.4, 65.2, 58.0, 71.3, 71.6, 78.8, 80.6, 77.8, 77.2, 52.1, 72.6, 67.9, 52.0, 69.4, 71.1, 62.5, 54.7, 53.2, 63.7, 56.0, 40.2, 42.4, 74.3, 67.2, 53.3, 52.4, 40.6, 63.6, 85.1, 67.1, 64.2, 73.2, 60.5, 35.3, 64.3, 54.8, 69.1, 69.2, 49.2, 73.3, 85.0, 29.4, 35.7, 56.5, 61.1, 68.1, 77.0, 48.8, 77.6, 74.9, 56.5, 52.3, 61.4, 68.1, 75.6, 47.6, 53.4, 61.3, 62.9, 77.1, 65.9, 83.3, 67.6, 79.7, 61.7, 71.3, 67.4, 46.7, 68.5, 54.9, 56.7, 68.3, 51.2, 82.0, 43.6, 62.6, 93.9, 83.1, 63.1, 55.0, 61.2, 75.6, 45.0, 65.8, 36.0, 61.1, 84.8, 74.1, 77.6, 41.9, 54.0, 63.9, 43.3, 63.1, 52.8, 69.9, 67.7, 71.5, 62.1], "_column": "volume_m"}]}, "eps_chart": {"title": {"text": "Quarterly EPS: actuals vs consensus", "subtext": "solid = actual, dashed = consensus", "left": "left"}, "tooltip": {"show": true, "trigger": "axis", "axisPointer": {"type": "cross"}}, "legend": {"show": true, "top": 42, "right": 10, "orient": "horizontal", "type": "scroll", "data": ["Actual", "Consensus"]}, "grid": {"top": 80, "right": 20, "bottom": 84, "left": 100, "containLabel": true}, "toolbox": {"show": true, "top": 8, "right": 10, "itemSize": 14, "itemGap": 8, "feature": {"saveAsImage": {"show": true, "title": "Save"}, "dataZoom": {"show": true, "title": {"zoom": "Zoom", "back": "Reset zoom"}}, "restore": {"show": true, "title": "Restore"}}}, "animation": true, "animationDuration": 600, "color": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "xAxis": {"type": "category", "axisLabel": {"hideOverlap": true}, "name": "", "data": ["Q1-24", "Q2-24", "Q3-24", "Q4-24", "Q1-25", "Q2-25", "Q3-25", "Q4-25", "Q1-26"]}, "yAxis": {"type": "value", "name": "EPS ($)", "scale": true, "inverse": false, "axisLabel": {"hideOverlap": true}, "nameLocation": "middle", "nameGap": 56}, "series": [{"type": "line", "name": "Actual \u2014 Actual", "data": [["Q1-24", 1.68], ["Q2-24", 1.52], ["Q3-24", 1.72], ["Q4-24", 2.18], ["Q1-25", 1.88], ["Q2-25", 1.62], ["Q3-25", 1.95], ["Q4-25", 2.35], ["Q1-26", 2.05]], "showSymbol": true, "symbolSize": 6, "emphasis": {"focus": "series", "scale": true}, "lineStyle": {"width": 2, "type": "solid", "color": "#002F6C"}, "itemStyle": {"color": "#002F6C"}, "markLine": {"symbol": ["none", "none"], "silent": false, "animation": false, "data": [{"xAxis": "Q1-26", "name": "Current qtr", "lineStyle": {"color": "#1a365d", "width": 1.5, "type": "dashed"}, "label": {"show": true, "formatter": "Current qtr", "color": "#1a365d", "position": "end"}}]}}, {"type": "line", "name": "Consensus \u2014 Consensus", "data": [["Q1-24", 1.6], ["Q2-24", 1.55], ["Q3-24", 1.7], ["Q4-24", 2.12], ["Q1-25", 1.82], ["Q2-25", 1.66], ["Q3-25", 1.88], ["Q4-25", 2.28], ["Q1-26", 2.02]], "showSymbol": true, "symbolSize": 6, "emphasis": {"focus": "series", "scale": true}, "lineStyle": {"width": 2, "type": [6, 4], "color": "#7399C6"}, "itemStyle": {"color": "#7399C6"}}]}, "rating_chart": {"title": {"text": "Sell-side distribution", "subtext": "", "left": "left"}, "tooltip": {"show": true, "trigger": "axis", "axisPointer": {"type": "shadow"}}, "legend": {"show": false, "type": "plain", "data": ["Count"], "itemGap": 14, "textStyle": {"fontSize": 12}}, "grid": {"top": 80, "right": 20, "bottom": 130, "left": 100, "containLabel": true}, "toolbox": {"show": true, "top": 8, "right": 10, "itemSize": 14, "itemGap": 8, "feature": {"saveAsImage": {"show": true, "title": "Save"}, "dataZoom": {"show": true, "title": {"zoom": "Zoom", "back": "Reset zoom"}}, "restore": {"show": true, "title": "Restore"}}}, "animation": true, "animationDuration": 600, "color": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "xAxis": {"type": "value", "name": "", "inverse": false}, "yAxis": {"type": "category", "name": "# analysts", "data": ["Strong Sell", "Sell", "Hold", "Buy", "Strong Buy"], "nameLocation": "middle", "nameGap": 56}, "series": [{"type": "bar", "name": "Count", "data": [1, 3, 11, 22, 18], "_column": "count"}]}, "beta_chart": {"title": {"text": "Beta regression (1Y daily)", "subtext": "trendline = OLS slope", "left": "left"}, "tooltip": {"show": true, "trigger": "item", "axisPointer": {"type": "cross"}}, "legend": {"show": true, "top": 42, "right": 10, "orient": "horizontal", "type": "scroll", "data": ["Stk Return (%)", "Trend"]}, "grid": {"top": 80, "right": 20, "bottom": 130, "left": 100, "containLabel": true}, "toolbox": {"show": true, "top": 8, "right": 10, "itemSize": 14, "itemGap": 8, "feature": {"saveAsImage": {"show": true, "title": "Save"}, "dataZoom": {"show": true, "title": {"zoom": "Zoom", "back": "Reset zoom"}}, "restore": {"show": true, "title": "Restore"}}}, "animation": true, "animationDuration": 600, "color": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "xAxis": {"type": "value", "name": "Market daily return (%)", "nameLocation": "middle", "nameGap": 40}, "yAxis": {"type": "value", "name": "ACME daily return (%)", "inverse": false, "nameLocation": "middle", "nameGap": 56}, "series": [{"type": "scatter", "name": "Stk Return (%)", "data": [[1.18, 1.37], [-0.89, -0.69], [-0.23, 0.29], [0.94, 1.21], [-0.53, 0.37], [0.39, 1.59], [-0.16, -0.32], [0.45, 1.08], [0.52, 0.42], [-0.06, -1.12], [2.81, 5.06], [0.81, 1.87], [-1.17, -0.71], [0.67, 1.93], [0.48, 0.86], [-0.16, 0.58], [-1.05, -1.04], [0.06, 0.07], [-0.02, 0.27], [1.51, 2.39], [-1.06, -1.34], [1.48, 2.19], [1.84, 1.6], [0.74, -0.79], [-0.28, -0.84], [-0.29, -0.86], [-0.2, 0.43], [0.86, 0.66], [1.25, 2.19], [0.38, 0.99], [-0.31, -1.41], [-0.05, -0.44], [1.23, 2.26], [0.92, 2.16], [0.36, -0.17], [-0.14, -0.62], [-0.77, 0.25], [0.79, 1.32], [0.9, 1.31], [2.17, 3.16], [-0.84, -0.54], [-0.25, 1.0], [0.36, -0.66], [0.82, 1.27], [-0.59, -2.05], [-1.48, -1.45], [-0.49, 0.24], [-1.38, -2.26], [1.72, 1.72], [-1.53, -2.17], [0.67, 0.62], [-0.86, -0.9], [0.68, 0.44], [-0.87, -1.35], [-0.29, -0.87], [-0.92, -0.36], [-0.24, 0.5], [-0.53, -1.27], [2.08, 2.69], [-0.79, -1.1], [-0.35, -0.16], [1.38, 1.89], [0.2, -0.11], [0.32, 0.2], [-1.14, -3.21], [-0.02, -0.79], [0.05, 2.15], [1.35, 0.86], [1.0, 0.17], [-0.68, -0.56], [0.7, 1.67], [0.03, -0.66], [-0.19, 0.4], [-0.49, -0.4], [-0.47, -0.72], [0.33, 0.83], [-0.59, -0.51], [-1.5, -2.17], [-0.68, -1.53], [0.83, 0.18], [-0.17, -0.33], [-1.95, -1.89], [0.22, 1.06], [0.03, 0.33], [0.13, 0.76], [-1.21, -0.45], [1.2, 1.2], [0.16, 1.08], [0.07, 1.27], [0.12, -1.41], [-1.4, -2.09], [1.02, 0.75], [0.47, -0.01], [-0.8, -0.06], [-0.08, 0.94], [-1.03, -1.75], [0.14, 1.17], [-1.1, -0.86], [0.08, 0.23], [0.01, 0.09], [0.67, 0.72], [0.0, 1.0], [-1.47, -1.09], [-0.13, -0.14], [-0.14, 0.02], [0.48, -0.68], [0.21, 0.54], [1.18, 0.62], [0.5, 0.14], [-0.89, -0.06], [-0.24, 0.04], [-1.69, -1.59], [0.8, 1.45], [0.58, 0.76], [-0.39, -0.62], [0.39, -0.11], [-0.63, -0.25], [0.9, 0.94], [0.75, 0.59], [1.71, 1.41], [0.52, 0.08], [1.7, 1.84], [-0.36, -1.16], [0.24, 1.77], [0.48, 0.67], [0.08, -0.64], [1.4, 1.41], [0.93, 1.08], [1.87, 1.36], [-0.68, -1.1], [-0.77, -0.65], [0.25, -0.35], [0.41, 0.33], [-0.65, -0.22], [1.13, 1.2], [-0.96, -0.87], [-1.63, -2.26], [0.17, 0.9], [0.79, 1.22], [-1.05, -2.09], [-0.99, -0.83], [-0.64, -0.26], [0.42, 2.2], [-0.42, -1.87], [0.13, -0.52], [-0.54, -0.94], [-2.02, -1.72], [0.29, -0.27], [0.36, 1.32], [1.58, 2.89], [0.33, 0.57], [-0.17, -1.07], [-0.5, -1.39], [-1.42, -2.02], [-0.32, -1.86], [-0.11, -0.44], [0.63, 0.98], [-1.51, -1.42], [1.7, 2.48], [-0.17, 1.39], [0.88, -0.5], [-0.13, 0.95], [-0.12, -0.13], [-0.01, 0.3], [-0.51, -0.31], [0.27, -0.26], [-0.84, -0.08], [1.8, 2.12], [-2.27, -3.54], [-1.33, -1.93], [-1.42, -1.82], [1.47, 0.97], [-0.26, -0.49], [-1.25, -0.16], [-0.9, 0.06], [-0.8, -0.4], [-0.46, -0.52], [0.96, 2.54], [0.79, 0.54], [0.29, 0.9], [-0.53, -0.83], [0.9, 0.4], [0.73, 1.14], [1.3, 0.92], [-0.42, -0.24], [0.86, 0.84], [0.24, 0.9], [-1.56, -2.07], [-0.56, -1.24], [1.8, 2.91], [1.42, 1.24], [-1.03, -1.43], [-0.74, -0.05], [2.07, 3.14], [-0.92, -1.09], [-0.63, -0.12], [-0.83, -1.03], [0.2, -0.23], [-0.81, -1.2], [0.25, -0.58], [-0.46, 0.2], [0.35, 0.12], [0.9, 1.12], [0.59, 0.98], [0.49, 0.81], [-1.58, -2.32], [-0.39, -1.18], [1.04, 1.56], [1.08, 1.09], [0.09, -0.28], [-1.59, -2.33], [0.24, 1.28], [0.11, -1.31], [0.7, 0.03], [1.61, 2.17], [-0.21, 1.51], [-1.59, -2.08], [-0.3, -0.77], [-0.68, 1.17], [0.74, 0.22], [-0.84, -0.5], [0.48, 0.78], [-0.58, 1.31], [-0.88, -1.61], [-1.82, -1.11], [0.2, -0.44], [0.66, 1.36], [1.1, 3.6], [1.27, 1.23], [0.29, 0.06], [0.83, 1.64], [0.63, 1.12], [2.15, 2.45], [0.92, 0.93], [0.25, 0.32], [1.31, 1.73], [0.11, 0.53], [-1.72, -2.4], [0.19, 1.34], [0.37, 0.66], [0.3, 0.53], [-1.47, -1.26], [1.32, 1.66], [-0.48, 0.11], [-0.62, -0.64], [-0.97, -0.75], [0.25, -0.55], [-0.12, 1.02], [1.12, 1.59], [-1.52, -1.44], [-1.81, -2.89], [1.0, 1.39]], "symbolSize": 10, "_column": "stk_return_pct"}, {"type": "line", "name": "Trend", "data": [[-2.27, -2.600437110298677], [2.81, 3.4209926863788946]], "showSymbol": false, "smooth": false, "lineStyle": {"type": "dashed", "width": 1.5}, "emphasis": {"focus": "none"}, "tooltip": {"show": false}, "silent": true, "_column": "trend"}]}, "hist_chart": {"title": {"text": "Daily return distribution (2Y)", "subtext": "", "left": "left"}, "tooltip": {"show": true, "trigger": "axis", "axisPointer": {"type": "shadow"}}, "legend": {"show": true, "top": 42, "right": 10, "orient": "horizontal", "type": "scroll", "data": ["Return (%)"]}, "grid": {"top": 80, "right": 20, "bottom": 130, "left": 100, "containLabel": true}, "toolbox": {"show": true, "top": 8, "right": 10, "itemSize": 14, "itemGap": 8, "feature": {"saveAsImage": {"show": true, "title": "Save"}, "dataZoom": {"show": true, "title": {"zoom": "Zoom", "back": "Reset zoom"}}, "restore": {"show": true, "title": "Restore"}}}, "animation": true, "animationDuration": 600, "color": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "xAxis": {"type": "category", "data": ["-4.2", "-3.9", "-3.5", "-3.2", "-2.9", "-2.6", "-2.2", "-1.9", "-1.6", "-1.2", "-0.9", "-0.6", "-0.2", "0.1", "0.4", "0.7", "1.1", "1.4", "1.7", "2.1", "2.4", "2.7", "3.1", "3.4", "3.7", "4.0", "4.4", "4.7", "5.0", "5.4"], "axisLabel": {"interval": 2, "rotate": 0}, "name": "Daily return (%)", "nameLocation": "middle", "nameGap": 40}, "yAxis": {"type": "value", "name": "Frequency", "nameLocation": "middle", "nameGap": 56}, "series": [{"type": "bar", "name": "Return (%)", "data": [1, 2, 4, 8, 12, 8, 14, 20, 28, 32, 36, 39, 50, 44, 37, 43, 25, 39, 20, 13, 6, 3, 8, 4, 2, 0, 1, 0, 0, 1], "barCategoryGap": "2%", "_column": "return_pct"}]}, "val_bullet": {"title": {"text": "Valuation vs 5Y range (z-score colored)", "subtext": "", "left": "left"}, "tooltip": {"show": true, "trigger": "item", "formatter": "function(p){ return p.name + ': ' + p.value[2] + ' (range ' + p.value[0] + ', ' + p.value[1] + ')'; }"}, "legend": {"show": false, "top": 42, "right": 10, "orient": "horizontal", "type": "scroll"}, "grid": {"top": 80, "right": 80, "bottom": 84, "left": 76, "containLabel": true}, "toolbox": {"show": true, "top": 8, "right": 10, "itemSize": 14, "itemGap": 8, "feature": {"saveAsImage": {"show": true, "title": "Save"}, "dataZoom": {"show": true, "title": {"zoom": "Zoom", "back": "Reset zoom"}}, "restore": {"show": true, "title": "Restore"}}}, "animation": true, "animationDuration": 600, "color": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "xAxis": {"type": "value", "min": -1.314, "max": 36.834, "splitLine": {"show": true}}, "yAxis": {"type": "category", "data": ["P/E NTM", "EV/EBITDA", "P/S NTM", "FCF yield (%)", "Dividend yld", "PEG"], "axisLine": {"show": false}, "axisTick": {"show": false}}, "series": [{"type": "custom", "name": "Bullet", "renderItem": "function(params, api) {\n  var catIdx = params.dataIndex;\n  var yCenter = api.coord([0, catIdx])[1];\n  var xLo = api.coord([api.value(0), catIdx])[0];\n  var xHi = api.coord([api.value(1), catIdx])[0];\n  var xCur = api.coord([api.value(2), catIdx])[0];\n  var dotColor = api.value(3) || '#002F6C';\n  var label = api.value(4) || '';\n  return {\n    type: 'group',\n    children: [\n      { type: 'rect',\n        shape: { x: Math.min(xLo, xHi), y: yCenter - 8,\n                 width: Math.abs(xHi - xLo), height: 16, r: 4 },\n        style: { fill: '#e2e8f0', opacity: 0.85 } },\n      { type: 'line',\n        shape: { x1: xLo, y1: yCenter - 4, x2: xLo, y2: yCenter + 4 },\n        style: { stroke: '#a0aec0', lineWidth: 2 } },\n      { type: 'line',\n        shape: { x1: xHi, y1: yCenter - 4, x2: xHi, y2: yCenter + 4 },\n        style: { stroke: '#a0aec0', lineWidth: 2 } },\n      { type: 'circle',\n        shape: { cx: xCur, cy: yCenter, r: 7 },\n        style: { fill: dotColor, stroke: '#fff', lineWidth: 1.5 } },\n      label ? { type: 'text',\n        style: { text: label, fill: '#2d3748', fontSize: 11,\n                   textAlign: 'left', textVerticalAlign: 'middle',\n                   x: xHi + 8, y: yCenter } } : null,\n    ].filter(function(c){ return c != null; })\n  };\n}", "encode": {"x": [0, 1, 2], "y": null, "tooltip": [0, 1, 2]}, "data": [[16.2, 35.1, 29.4, "#dd6b20", ""], [12.5, 26.4, 22.1, "#dd6b20", ""], [3.9, 9.2, 7.8, "#dd6b20", ""], [2.4, 6.8, 3.1, "#3182ce", ""], [0.42, 0.95, 0.48, "#3182ce", ""], [1.1, 2.8, 2.4, "#c53030", ""]], "_column": "bullet"}]}}, "datasets": {"ohlc": {"source": [["date", "open", "close", "low", "high", "volume_m"], ["2025-05-06", 185.0, 183.1, 182.3, 186.09, 57.4], ["2025-05-07", 183.1, 177.52, 177.4, 183.72, 62.0], ["2025-05-08", 177.52, 178.69, 176.46, 179.82, 80.6], ["2025-05-09", 178.69, 180.31, 178.1, 180.82, 66.2], ["2025-05-12", 180.31, 183.63, 180.28, 184.35, 64.0], ["2025-05-13", 183.63, 185.45, 183.45, 185.49, 67.8], ["2025-05-14", 185.45, 184.2, 183.92, 186.64, 90.9], ["2025-05-15", 184.2, 188.4, 184.13, 188.9, 56.5], ["2025-05-16", 188.4, 190.77, 187.58, 191.57, 79.0], ["2025-05-19", 190.77, 191.63, 190.45, 191.94, 73.3], ["2025-05-20", 191.63, 190.57, 190.01, 192.23, 46.0], ["2025-05-21", 190.57, 189.05, 188.78, 190.74, 48.1], ["2025-05-22", 189.05, 188.7, 187.68, 190.5, 50.7], ["2025-05-23", 188.7, 189.37, 187.59, 190.28, 88.4], ["2025-05-26", 189.37, 188.7, 188.05, 191.04, 61.3], ["2025-05-27", 188.7, 189.71, 188.26, 189.76, 58.1], ["2025-05-28", 189.71, 193.9, 188.03, 195.0, 59.1], ["2025-05-29", 193.9, 189.53, 189.03, 194.19, 69.2], ["2025-05-30", 189.53, 187.89, 186.96, 189.8, 53.6], ["2025-06-02", 187.89, 189.77, 187.6, 191.17, 97.0], ["2025-06-03", 189.77, 191.08, 188.55, 191.22, 64.5], ["2025-06-04", 191.08, 195.79, 191.0, 196.22, 61.5], ["2025-06-05", 195.79, 195.18, 195.11, 197.24, 63.7], ["2025-06-06", 195.18, 191.1, 190.78, 196.05, 52.4], ["2025-06-09", 191.1, 198.87, 190.97, 199.51, 62.4], ["2025-06-10", 198.87, 199.71, 198.74, 200.41, 64.7], ["2025-06-11", 199.71, 195.81, 194.96, 200.13, 57.1], ["2025-06-12", 195.81, 194.11, 193.26, 196.1, 71.7], ["2025-06-13", 194.11, 193.52, 192.6, 194.6, 27.7], ["2025-06-16", 193.52, 186.85, 186.29, 194.68, 57.6], ["2025-06-17", 186.85, 188.21, 185.34, 188.5, 87.7], ["2025-06-18", 188.21, 189.71, 187.94, 190.24, 54.6], ["2025-06-19", 189.71, 194.52, 189.18, 195.24, 61.8], ["2025-06-20", 194.52, 194.49, 194.27, 195.77, 81.7], ["2025-06-23", 194.49, 198.05, 193.48, 198.98, 70.5], ["2025-06-24", 198.05, 197.24, 196.81, 198.83, 40.5], ["2025-06-25", 197.24, 194.47, 193.86, 198.23, 73.4], ["2025-06-26", 194.47, 202.11, 193.04, 202.19, 70.0], ["2025-06-27", 202.11, 206.14, 200.94, 207.21, 62.9], ["2025-06-30", 206.14, 216.06, 205.89, 217.04, 64.0], ["2025-07-01", 216.06, 205.49, 204.84, 217.09, 82.1], ["2025-07-02", 205.49, 204.35, 203.09, 206.53, 64.1], ["2025-07-03", 204.35, 199.87, 198.95, 204.62, 58.5], ["2025-07-04", 199.87, 205.27, 199.77, 206.12, 48.0], ["2025-07-07", 205.27, 206.77, 205.01, 207.38, 53.5], ["2025-07-08", 206.77, 201.56, 200.96, 208.68, 53.9], ["2025-07-09", 201.56, 204.28, 200.62, 204.76, 80.8], ["2025-07-10", 204.28, 202.84, 202.76, 204.82, 67.9], ["2025-07-11", 202.84, 205.71, 202.3, 206.59, 55.4], ["2025-07-14", 205.71, 206.33, 205.08, 206.6, 68.1], ["2025-07-15", 206.33, 207.28, 204.45, 207.72, 39.1], ["2025-07-16", 207.28, 206.22, 205.05, 207.4, 67.2], ["2025-07-17", 206.22, 199.95, 199.74, 206.76, 56.2], ["2025-07-18", 199.95, 206.06, 199.9, 206.52, 87.3], ["2025-07-21", 206.06, 214.75, 205.87, 215.04, 81.4], ["2025-07-22", 214.75, 216.85, 213.77, 218.05, 69.7], ["2025-07-23", 216.85, 219.19, 216.17, 219.82, 41.3], ["2025-07-24", 219.19, 214.79, 214.28, 219.36, 37.7], ["2025-07-25", 214.79, 216.24, 214.48, 216.61, 48.3], ["2025-07-28", 216.24, 219.99, 215.19, 220.62, 57.4], ["2025-07-29", 219.99, 212.76, 212.63, 220.55, 40.6], ["2025-07-30", 212.76, 212.31, 211.99, 213.16, 68.7], ["2025-07-31", 212.31, 214.0, 210.89, 214.07, 54.3], ["2025-08-01", 214.0, 207.28, 207.04, 214.43, 56.0], ["2025-08-04", 207.28, 209.45, 206.81, 209.73, 59.0], ["2025-08-05", 209.45, 204.59, 204.32, 209.85, 39.0], ["2025-08-06", 204.59, 202.29, 201.2, 206.41, 62.0], ["2025-08-07", 202.29, 197.6, 197.1, 202.64, 54.8], ["2025-08-08", 197.6, 199.12, 197.08, 199.82, 74.4], ["2025-08-11", 199.12, 204.17, 198.76, 206.4, 63.1], ["2025-08-12", 204.17, 201.89, 201.62, 204.94, 45.2], ["2025-08-13", 201.89, 194.8, 194.23, 202.56, 70.6], ["2025-08-14", 194.8, 194.65, 194.09, 195.14, 62.1], ["2025-08-15", 194.65, 199.87, 193.65, 200.17, 69.6], ["2025-08-18", 199.87, 200.48, 199.53, 200.66, 72.0], ["2025-08-19", 200.48, 195.2, 194.85, 200.95, 50.1], ["2025-08-20", 195.2, 199.05, 194.12, 199.54, 56.1], ["2025-08-21", 199.05, 199.24, 197.73, 200.35, 52.3], ["2025-08-22", 199.24, 196.79, 196.35, 199.56, 64.8], ["2025-08-25", 196.79, 203.41, 195.53, 203.86, 69.1], ["2025-08-26", 203.41, 200.3, 199.59, 204.48, 49.0], ["2025-08-27", 200.3, 201.09, 199.47, 201.76, 58.5], ["2025-08-28", 201.09, 205.41, 200.79, 205.78, 72.8], ["2025-08-29", 205.41, 211.13, 205.3, 211.6, 50.9], ["2025-09-01", 211.13, 213.32, 209.83, 213.44, 56.0], ["2025-09-02", 213.32, 212.89, 212.52, 214.5, 80.2], ["2025-09-03", 212.89, 200.5, 199.98, 213.06, 83.2], ["2025-09-04", 200.5, 203.18, 200.3, 205.97, 62.4], ["2025-09-05", 203.18, 201.95, 201.52, 203.36, 83.2], ["2025-09-08", 201.95, 197.51, 197.09, 202.08, 51.4], ["2025-09-09", 197.51, 198.35, 196.48, 198.43, 61.9], ["2025-09-10", 198.35, 201.17, 197.25, 201.72, 64.2], ["2025-09-11", 201.17, 196.06, 195.95, 201.71, 54.7], ["2025-09-12", 196.06, 203.05, 193.97, 203.57, 65.8], ["2025-09-15", 203.05, 197.05, 196.9, 203.82, 67.3], ["2025-09-16", 197.05, 196.78, 196.19, 197.8, 49.3], ["2025-09-17", 196.78, 198.68, 196.46, 199.52, 73.3], ["2025-09-18", 198.68, 198.41, 198.11, 200.05, 72.7], ["2025-09-19", 198.41, 197.95, 197.93, 198.91, 50.0], ["2025-09-22", 197.95, 201.47, 197.68, 202.8, 56.9], ["2025-09-23", 201.47, 205.86, 201.1, 206.25, 59.9], ["2025-09-24", 205.86, 197.11, 196.7, 206.57, 53.1], ["2025-09-25", 197.11, 199.03, 197.1, 200.03, 61.2], ["2025-09-26", 199.03, 201.21, 198.49, 202.09, 53.5], ["2025-09-29", 201.21, 203.17, 201.08, 203.82, 40.5], ["2025-09-30", 203.17, 206.1, 202.81, 207.06, 54.6], ["2025-10-01", 206.1, 204.18, 203.79, 206.22, 56.6], ["2025-10-02", 204.18, 203.64, 202.64, 206.7, 47.5], ["2025-10-03", 203.64, 209.41, 202.68, 209.47, 60.5], ["2025-10-06", 209.41, 208.37, 207.42, 210.32, 50.2], ["2025-10-07", 208.37, 210.65, 206.81, 211.28, 77.7], ["2025-10-08", 210.65, 211.83, 210.04, 213.32, 74.7], ["2025-10-09", 211.83, 217.87, 210.77, 217.94, 30.9], ["2025-10-10", 217.87, 216.3, 216.15, 218.96, 73.4], ["2025-10-13", 216.3, 226.19, 214.57, 226.64, 75.8], ["2025-10-14", 226.19, 222.81, 221.39, 227.64, 65.7], ["2025-10-15", 222.81, 220.96, 219.98, 223.72, 77.9], ["2025-10-16", 220.96, 217.83, 217.77, 221.87, 65.3], ["2025-10-17", 217.83, 222.15, 216.86, 223.78, 41.2], ["2025-10-20", 222.15, 225.86, 221.68, 226.2, 54.6], ["2025-10-21", 225.86, 223.6, 222.76, 227.14, 45.3], ["2025-10-22", 223.6, 218.67, 218.58, 224.46, 35.5], ["2025-10-23", 218.67, 223.88, 217.86, 224.15, 63.4], ["2025-10-24", 223.88, 224.19, 223.38, 224.73, 49.3], ["2025-10-27", 224.19, 226.26, 223.51, 227.13, 40.4], ["2025-10-28", 226.26, 224.44, 224.32, 226.81, 45.1], ["2025-10-29", 224.44, 225.67, 224.41, 225.71, 75.5], ["2025-10-30", 225.67, 225.63, 225.39, 226.52, 68.8], ["2025-10-31", 225.63, 234.01, 225.23, 234.15, 76.1], ["2025-11-03", 234.01, 232.32, 230.97, 234.74, 81.8], ["2025-11-04", 232.32, 230.71, 229.97, 233.11, 35.7], ["2025-11-05", 230.71, 234.65, 230.57, 234.71, 59.1], ["2025-11-06", 234.65, 244.68, 234.28, 246.19, 65.7], ["2025-11-07", 244.68, 240.86, 240.27, 244.93, 60.8], ["2025-11-10", 240.86, 246.15, 240.4, 246.63, 53.8], ["2025-11-11", 246.15, 243.08, 242.32, 246.34, 60.8], ["2025-11-12", 243.08, 239.64, 239.59, 243.29, 57.2], ["2025-11-13", 239.64, 248.99, 238.68, 249.52, 55.9], ["2025-11-14", 248.99, 251.7, 247.95, 251.85, 65.1], ["2025-11-17", 251.7, 250.75, 250.13, 251.82, 41.8], ["2025-11-18", 250.75, 251.28, 249.5, 252.49, 69.9], ["2025-11-19", 251.28, 246.48, 246.11, 251.49, 24.2], ["2025-11-20", 246.48, 247.62, 246.3, 247.73, 64.3], ["2025-11-21", 247.62, 243.5, 242.87, 248.7, 84.7], ["2025-11-24", 243.5, 244.78, 243.29, 245.67, 70.8], ["2025-11-25", 244.78, 242.99, 242.37, 245.14, 45.3], ["2025-11-26", 242.99, 249.48, 241.5, 250.32, 48.2], ["2025-11-27", 249.48, 255.32, 248.77, 256.32, 69.1], ["2025-11-28", 255.32, 269.76, 255.21, 270.1, 89.4], ["2025-12-01", 269.76, 266.34, 264.21, 270.28, 63.7], ["2025-12-02", 266.34, 265.1, 263.3, 267.1, 55.7], ["2025-12-03", 265.1, 258.5, 257.15, 266.03, 69.2], ["2025-12-04", 258.5, 257.13, 255.95, 258.96, 95.8], ["2025-12-05", 257.13, 255.41, 255.32, 257.54, 79.4], ["2025-12-08", 255.41, 261.66, 254.88, 262.03, 65.2], ["2025-12-09", 261.66, 267.3, 261.64, 267.31, 58.0], ["2025-12-10", 267.3, 268.89, 266.67, 269.5, 71.3], ["2025-12-11", 268.89, 268.06, 267.83, 269.06, 71.6], ["2025-12-12", 268.06, 266.47, 266.25, 268.89, 78.8], ["2025-12-15", 266.47, 264.33, 263.75, 266.92, 80.6], ["2025-12-16", 264.33, 261.57, 260.17, 264.59, 77.8], ["2025-12-17", 261.57, 252.48, 251.68, 261.68, 77.2], ["2025-12-18", 252.48, 264.11, 251.52, 264.36, 52.1], ["2025-12-19", 264.11, 257.08, 256.97, 264.8, 72.6], ["2025-12-22", 257.08, 251.77, 251.38, 258.23, 67.9], ["2025-12-23", 251.77, 252.21, 251.22, 252.29, 52.0], ["2025-12-24", 252.21, 249.99, 249.86, 253.02, 69.4], ["2025-12-25", 249.99, 241.22, 241.05, 250.27, 71.1], ["2025-12-26", 241.22, 237.76, 237.12, 242.08, 62.5], ["2025-12-29", 237.76, 237.39, 237.17, 237.85, 54.7], ["2025-12-30", 237.39, 230.9, 230.63, 238.95, 53.2], ["2025-12-31", 230.9, 232.06, 230.53, 232.23, 63.7], ["2026-01-01", 232.06, 235.61, 231.08, 235.77, 56.0], ["2026-01-02", 235.61, 236.62, 235.5, 237.37, 40.2], ["2026-01-05", 236.62, 236.71, 235.82, 238.3, 42.4], ["2026-01-06", 236.71, 232.33, 231.71, 238.53, 74.3], ["2026-01-07", 232.33, 235.86, 231.71, 236.07, 67.2], ["2026-01-08", 235.86, 234.5, 234.45, 236.33, 53.3], ["2026-01-09", 234.5, 242.27, 233.77, 242.87, 52.4], ["2026-01-12", 242.27, 241.34, 241.01, 242.29, 40.6], ["2026-01-13", 241.34, 244.9, 241.33, 245.62, 63.6], ["2026-01-14", 244.9, 250.91, 244.67, 252.1, 85.1], ["2026-01-15", 250.91, 254.3, 250.61, 255.34, 67.1], ["2026-01-16", 254.3, 255.31, 253.84, 256.07, 64.2], ["2026-01-19", 255.31, 250.97, 249.73, 256.1, 73.2], ["2026-01-20", 250.97, 257.4, 248.46, 258.94, 60.5], ["2026-01-21", 257.4, 255.97, 254.71, 257.68, 35.3], ["2026-01-22", 255.97, 263.77, 255.38, 264.41, 64.3], ["2026-01-23", 263.77, 267.4, 263.34, 268.37, 54.8], ["2026-01-26", 267.4, 272.31, 266.91, 273.07, 69.1], ["2026-01-27", 272.31, 276.59, 271.13, 276.74, 69.2], ["2026-01-28", 276.59, 274.92, 274.72, 277.1, 49.2], ["2026-01-29", 274.92, 270.99, 270.81, 275.43, 73.3], ["2026-01-30", 270.99, 272.48, 270.95, 272.53, 85.0], ["2026-02-02", 272.48, 285.29, 271.37, 285.45, 29.4], ["2026-02-03", 285.29, 285.7, 285.15, 286.11, 35.7], ["2026-02-04", 285.7, 287.53, 285.54, 288.02, 56.5], ["2026-02-05", 287.53, 281.22, 281.15, 288.25, 61.1], ["2026-02-06", 281.22, 276.07, 275.24, 281.38, 68.1], ["2026-02-09", 276.07, 270.38, 270.17, 276.13, 77.0], ["2026-02-10", 270.38, 270.56, 269.93, 271.35, 48.8], ["2026-02-11", 270.56, 273.35, 269.06, 273.73, 77.6], ["2026-02-12", 273.35, 267.2, 265.91, 274.47, 74.9], ["2026-02-13", 267.2, 271.87, 266.39, 272.32, 56.5], ["2026-02-16", 271.87, 270.84, 270.17, 273.87, 52.3], ["2026-02-17", 270.84, 273.28, 270.1, 273.42, 61.4], ["2026-02-18", 273.28, 271.78, 271.58, 273.41, 68.1], ["2026-02-19", 271.78, 283.31, 271.49, 284.04, 75.6], ["2026-02-20", 283.31, 279.44, 279.32, 283.83, 47.6], ["2026-02-23", 279.44, 282.96, 278.81, 284.34, 53.4], ["2026-02-24", 282.96, 282.89, 282.85, 282.99, 61.3], ["2026-02-25", 282.89, 292.85, 282.09, 293.21, 62.9], ["2026-02-26", 292.85, 289.9, 289.85, 292.91, 77.1], ["2026-02-27", 289.9, 288.36, 288.19, 290.61, 65.9], ["2026-03-02", 288.36, 286.15, 285.55, 289.79, 83.3], ["2026-03-03", 286.15, 292.44, 285.94, 293.5, 67.6], ["2026-03-04", 292.44, 292.99, 291.7, 293.05, 79.7], ["2026-03-05", 292.99, 287.33, 286.45, 293.45, 61.7], ["2026-03-06", 287.33, 283.45, 283.38, 289.24, 71.3], ["2026-03-09", 283.45, 283.47, 282.95, 283.78, 67.4], ["2026-03-10", 283.47, 287.25, 283.33, 287.7, 46.7], ["2026-03-11", 287.25, 288.53, 286.47, 289.13, 68.5], ["2026-03-12", 288.53, 285.21, 284.23, 288.69, 54.9], ["2026-03-13", 285.21, 290.28, 283.58, 291.55, 56.7], ["2026-03-16", 290.28, 283.41, 283.3, 290.83, 68.3], ["2026-03-17", 283.41, 287.49, 283.32, 287.91, 51.2], ["2026-03-18", 287.49, 286.45, 285.65, 288.57, 82.0], ["2026-03-19", 286.45, 286.81, 285.53, 287.61, 43.6], ["2026-03-20", 286.81, 282.39, 281.72, 287.92, 62.6], ["2026-03-23", 282.39, 275.66, 275.57, 282.84, 93.9], ["2026-03-24", 275.66, 271.02, 270.92, 277.11, 83.1], ["2026-03-25", 271.02, 270.36, 270.1, 272.01, 63.1], ["2026-03-26", 270.36, 271.12, 270.24, 271.66, 55.0], ["2026-03-27", 271.12, 268.35, 268.0, 271.76, 61.2], ["2026-03-30", 268.35, 265.05, 265.01, 268.88, 75.6], ["2026-03-31", 265.05, 254.35, 254.16, 266.81, 45.0], ["2026-04-01", 254.35, 250.96, 250.44, 254.69, 65.8], ["2026-04-02", 250.96, 247.32, 245.08, 252.05, 36.0], ["2026-04-03", 247.32, 251.16, 247.04, 251.34, 61.1], ["2026-04-06", 251.16, 251.98, 250.79, 252.09, 84.8], ["2026-04-07", 251.98, 254.57, 250.59, 255.21, 74.1], ["2026-04-08", 254.57, 247.76, 246.53, 255.79, 77.6], ["2026-04-09", 247.76, 247.56, 246.92, 248.08, 41.9], ["2026-04-10", 247.56, 240.42, 240.02, 247.85, 54.0], ["2026-04-13", 240.42, 237.54, 236.82, 240.44, 63.9], ["2026-04-14", 237.54, 235.5, 235.48, 238.97, 43.3], ["2026-04-15", 235.5, 239.08, 234.54, 240.39, 63.1], ["2026-04-16", 239.08, 239.15, 239.03, 239.24, 52.8], ["2026-04-17", 239.15, 239.15, 238.63, 239.27, 69.9], ["2026-04-20", 239.15, 237.34, 237.12, 239.57, 67.7], ["2026-04-21", 237.34, 237.85, 236.82, 239.57, 71.5], ["2026-04-22", 237.85, 246.53, 237.33, 247.23, 62.1]]}, "earn": {"source": [["quarter", "eps", "type"], ["Q1-24", 1.68, "Actual"], ["Q1-24", 1.6, "Consensus"], ["Q2-24", 1.52, "Actual"], ["Q2-24", 1.55, "Consensus"], ["Q3-24", 1.72, "Actual"], ["Q3-24", 1.7, "Consensus"], ["Q4-24", 2.18, "Actual"], ["Q4-24", 2.12, "Consensus"], ["Q1-25", 1.88, "Actual"], ["Q1-25", 1.82, "Consensus"], ["Q2-25", 1.62, "Actual"], ["Q2-25", 1.66, "Consensus"], ["Q3-25", 1.95, "Actual"], ["Q3-25", 1.88, "Consensus"], ["Q4-25", 2.35, "Actual"], ["Q4-25", 2.28, "Consensus"], ["Q1-26", 2.05, "Actual"], ["Q1-26", 2.02, "Consensus"]]}, "rat": {"source": [["rating", "count"], ["Strong Sell", 1], ["Sell", 3], ["Hold", 11], ["Buy", 22], ["Strong Buy", 18]]}, "beta": {"source": [["mkt_return_pct", "stk_return_pct"], [1.18, 1.37], [-0.89, -0.69], [-0.23, 0.29], [0.94, 1.21], [-0.53, 0.37], [0.39, 1.59], [-0.16, -0.32], [0.45, 1.08], [0.52, 0.42], [-0.06, -1.12], [2.81, 5.06], [0.81, 1.87], [-1.17, -0.71], [0.67, 1.93], [0.48, 0.86], [-0.16, 0.58], [-1.05, -1.04], [0.06, 0.07], [-0.02, 0.27], [1.51, 2.39], [-1.06, -1.34], [1.48, 2.19], [1.84, 1.6], [0.74, -0.79], [-0.28, -0.84], [-0.29, -0.86], [-0.2, 0.43], [0.86, 0.66], [1.25, 2.19], [0.38, 0.99], [-0.31, -1.41], [-0.05, -0.44], [1.23, 2.26], [0.92, 2.16], [0.36, -0.17], [-0.14, -0.62], [-0.77, 0.25], [0.79, 1.32], [0.9, 1.31], [2.17, 3.16], [-0.84, -0.54], [-0.25, 1.0], [0.36, -0.66], [0.82, 1.27], [-0.59, -2.05], [-1.48, -1.45], [-0.49, 0.24], [-1.38, -2.26], [1.72, 1.72], [-1.53, -2.17], [0.67, 0.62], [-0.86, -0.9], [0.68, 0.44], [-0.87, -1.35], [-0.29, -0.87], [-0.92, -0.36], [-0.24, 0.5], [-0.53, -1.27], [2.08, 2.69], [-0.79, -1.1], [-0.35, -0.16], [1.38, 1.89], [0.2, -0.11], [0.32, 0.2], [-1.14, -3.21], [-0.02, -0.79], [0.05, 2.15], [1.35, 0.86], [1.0, 0.17], [-0.68, -0.56], [0.7, 1.67], [0.03, -0.66], [-0.19, 0.4], [-0.49, -0.4], [-0.47, -0.72], [0.33, 0.83], [-0.59, -0.51], [-1.5, -2.17], [-0.68, -1.53], [0.83, 0.18], [-0.17, -0.33], [-1.95, -1.89], [0.22, 1.06], [0.03, 0.33], [0.13, 0.76], [-1.21, -0.45], [1.2, 1.2], [0.16, 1.08], [0.07, 1.27], [0.12, -1.41], [-1.4, -2.09], [1.02, 0.75], [0.47, -0.01], [-0.8, -0.06], [-0.08, 0.94], [-1.03, -1.75], [0.14, 1.17], [-1.1, -0.86], [0.08, 0.23], [0.01, 0.09], [0.67, 0.72], [0.0, 1.0], [-1.47, -1.09], [-0.13, -0.14], [-0.14, 0.02], [0.48, -0.68], [0.21, 0.54], [1.18, 0.62], [0.5, 0.14], [-0.89, -0.06], [-0.24, 0.04], [-1.69, -1.59], [0.8, 1.45], [0.58, 0.76], [-0.39, -0.62], [0.39, -0.11], [-0.63, -0.25], [0.9, 0.94], [0.75, 0.59], [1.71, 1.41], [0.52, 0.08], [1.7, 1.84], [-0.36, -1.16], [0.24, 1.77], [0.48, 0.67], [0.08, -0.64], [1.4, 1.41], [0.93, 1.08], [1.87, 1.36], [-0.68, -1.1], [-0.77, -0.65], [0.25, -0.35], [0.41, 0.33], [-0.65, -0.22], [1.13, 1.2], [-0.96, -0.87], [-1.63, -2.26], [0.17, 0.9], [0.79, 1.22], [-1.05, -2.09], [-0.99, -0.83], [-0.64, -0.26], [0.42, 2.2], [-0.42, -1.87], [0.13, -0.52], [-0.54, -0.94], [-2.02, -1.72], [0.29, -0.27], [0.36, 1.32], [1.58, 2.89], [0.33, 0.57], [-0.17, -1.07], [-0.5, -1.39], [-1.42, -2.02], [-0.32, -1.86], [-0.11, -0.44], [0.63, 0.98], [-1.51, -1.42], [1.7, 2.48], [-0.17, 1.39], [0.88, -0.5], [-0.13, 0.95], [-0.12, -0.13], [-0.01, 0.3], [-0.51, -0.31], [0.27, -0.26], [-0.84, -0.08], [1.8, 2.12], [-2.27, -3.54], [-1.33, -1.93], [-1.42, -1.82], [1.47, 0.97], [-0.26, -0.49], [-1.25, -0.16], [-0.9, 0.06], [-0.8, -0.4], [-0.46, -0.52], [0.96, 2.54], [0.79, 0.54], [0.29, 0.9], [-0.53, -0.83], [0.9, 0.4], [0.73, 1.14], [1.3, 0.92], [-0.42, -0.24], [0.86, 0.84], [0.24, 0.9], [-1.56, -2.07], [-0.56, -1.24], [1.8, 2.91], [1.42, 1.24], [-1.03, -1.43], [-0.74, -0.05], [2.07, 3.14], [-0.92, -1.09], [-0.63, -0.12], [-0.83, -1.03], [0.2, -0.23], [-0.81, -1.2], [0.25, -0.58], [-0.46, 0.2], [0.35, 0.12], [0.9, 1.12], [0.59, 0.98], [0.49, 0.81], [-1.58, -2.32], [-0.39, -1.18], [1.04, 1.56], [1.08, 1.09], [0.09, -0.28], [-1.59, -2.33], [0.24, 1.28], [0.11, -1.31], [0.7, 0.03], [1.61, 2.17], [-0.21, 1.51], [-1.59, -2.08], [-0.3, -0.77], [-0.68, 1.17], [0.74, 0.22], [-0.84, -0.5], [0.48, 0.78], [-0.58, 1.31], [-0.88, -1.61], [-1.82, -1.11], [0.2, -0.44], [0.66, 1.36], [1.1, 3.6], [1.27, 1.23], [0.29, 0.06], [0.83, 1.64], [0.63, 1.12], [2.15, 2.45], [0.92, 0.93], [0.25, 0.32], [1.31, 1.73], [0.11, 0.53], [-1.72, -2.4], [0.19, 1.34], [0.37, 0.66], [0.3, 0.53], [-1.47, -1.26], [1.32, 1.66], [-0.48, 0.11], [-0.62, -0.64], [-0.97, -0.75], [0.25, -0.55], [-0.12, 1.02], [1.12, 1.59], [-1.52, -1.44], [-1.81, -2.89], [1.0, 1.39]]}, "val": {"source": [["metric", "current", "low_5y", "high_5y", "z"], ["P/E NTM", 29.4, 16.2, 35.1, 1.1], ["EV/EBITDA", 22.1, 12.5, 26.4, 1.3], ["P/S NTM", 7.8, 3.9, 9.2, 1.4], ["FCF yield (%)", 3.1, 2.4, 6.8, -1.2], ["Dividend yld", 0.48, 0.42, 0.95, -1.0], ["PEG", 2.4, 1.1, 2.8, 1.5]]}, "ret": {"source": [["return_pct"], [2.54], [-0.83], [-0.58], [-1.29], [-0.44], [-0.21], [2.0], [1.49], [0.63], [-1.0], [0.9], [-1.85], [0.78], [0.85], [-0.62], [0.37], [1.45], [0.14], [0.93], [-0.5], [-2.66], [0.74], [-2.78], [2.3], [-0.9], [-1.46], [1.83], [0.07], [0.8], [-0.79], [-3.22], [1.02], [0.46], [-0.69], [-1.0], [-2.28], [-1.47], [2.77], [1.22], [-0.84], [-0.01], [0.44], [0.55], [1.13], [0.01], [0.62], [0.87], [0.57], [0.49], [-0.41], [-1.62], [0.74], [-1.66], [0.81], [0.04], [-0.39], [1.73], [0.19], [-1.73], [-0.8], [-0.39], [-0.87], [-1.62], [2.38], [-0.32], [1.47], [1.46], [-0.31], [-0.2], [0.39], [-0.74], [-1.44], [-2.95], [1.49], [1.64], [0.39], [2.33], [2.21], [-0.18], [2.06], [3.12], [1.35], [-0.44], [0.08], [-0.97], [-0.33], [1.2], [0.13], [1.18], [3.94], [1.59], [-1.09], [1.89], [-0.44], [-3.08], [-1.81], [1.77], [-0.22], [0.35], [0.82], [-1.1], [1.74], [-2.35], [2.02], [-0.23], [-2.62], [0.92], [0.06], [0.24], [1.7], [-2.46], [0.75], [-0.47], [1.8], [-1.65], [1.42], [-0.09], [-0.17], [-3.51], [-2.61], [1.55], [0.3], [0.28], [-1.03], [0.75], [0.67], [-0.76], [-2.48], [-0.07], [-1.91], [-1.84], [1.83], [-1.98], [-0.08], [-0.02], [-0.9], [0.18], [3.52], [0.16], [-1.52], [-0.22], [-1.38], [-1.9], [0.09], [-1.11], [-0.01], [-0.65], [0.05], [1.31], [1.35], [-0.77], [0.53], [-0.17], [-1.64], [-0.1], [0.81], [-0.1], [1.72], [0.63], [-3.63], [0.23], [-0.64], [-0.97], [-1.09], [3.22], [1.13], [1.49], [2.16], [0.49], [0.87], [2.05], [-1.55], [-0.68], [0.42], [1.41], [-0.16], [-0.42], [1.62], [3.32], [1.58], [0.88], [-0.22], [0.31], [-1.11], [-1.25], [-2.85], [-0.12], [-0.51], [0.48], [-2.02], [-0.16], [0.9], [0.05], [-2.17], [0.62], [0.37], [3.08], [1.73], [-0.54], [-1.12], [0.01], [0.85], [-1.45], [2.32], [-3.03], [-2.87], [1.91], [0.89], [0.38], [0.26], [-0.55], [-1.27], [-1.11], [-1.34], [-3.22], [0.44], [0.62], [0.35], [-2.34], [0.53], [2.03], [-1.67], [0.57], [-1.09], [3.48], [-1.09], [0.85], [-0.83], [0.75], [-2.62], [-1.2], [-0.36], [-0.08], [-0.57], [-1.18], [1.52], [1.09], [-2.18], [-0.64], [1.09], [1.39], [1.47], [-1.16], [2.33], [-0.72], [0.24], [-0.44], [0.75], [-1.06], [-1.27], [0.97], [-1.99], [-2.08], [-0.1], [-0.07], [-1.62], [-2.93], [0.8], [-2.63], [1.56], [3.04], [1.01], [-2.42], [0.57], [0.36], [-1.18], [-1.39], [0.34], [-1.2], [-1.39], [-3.61], [0.18], [-0.06], [-1.66], [-0.75], [-0.56], [0.25], [1.59], [-3.16], [0.5], [-1.97], [0.98], [-1.68], [-1.81], [-1.13], [3.41], [-0.52], [0.51], [-1.53], [-0.53], [0.09], [-1.22], [0.38], [-2.29], [-1.24], [-0.59], [-1.19], [-0.49], [0.82], [2.23], [-0.9], [-0.08], [-0.29], [0.61], [5.69], [-0.02], [0.05], [3.08], [-1.26], [0.4], [1.45], [-1.5], [0.86], [-0.0], [1.72], [-0.85], [0.99], [2.09], [0.74], [0.69], [-1.15], [-0.63], [-1.54], [0.21], [1.58], [-0.99], [-1.78], [3.71], [-2.16], [-0.04], [0.48], [1.73], [-3.17], [-0.2], [-0.32], [-0.03], [-0.18], [1.46], [-1.6], [-3.18], [0.79], [2.24], [1.08], [3.96], [0.31], [1.23], [2.03], [1.47], [-1.48], [1.85], [-1.17], [-1.5], [-0.53], [2.05], [0.13], [3.26], [1.56], [0.29], [0.53], [-1.38], [-2.37], [1.23], [-2.99], [0.73], [-0.45], [1.72], [1.72], [0.13], [1.18], [1.02], [-0.46], [2.28], [-1.92], [-2.11], [-2.15], [1.28], [-1.22], [-0.1], [1.18], [-4.2], [-0.47], [-0.16], [0.84], [-0.18], [-1.58], [-1.5], [-0.89], [0.7], [0.4], [2.52], [-0.48], [0.91], [-1.0], [0.06], [3.38], [0.38], [0.29], [-0.66], [0.3], [1.34], [1.69], [-0.43], [-0.94], [0.36], [0.81], [-1.48], [-0.54], [-1.17], [-0.55], [-0.7], [0.33], [1.81], [-2.85], [-0.65], [1.72], [-0.41], [1.07], [-1.3], [0.71], [-0.28], [1.67], [1.39], [-0.64], [-1.0], [0.3], [1.38], [2.63], [-1.34], [-0.54], [0.58], [1.92], [-0.17], [-0.74], [1.52], [0.49], [2.75], [-0.9], [2.59], [-0.07], [1.58], [0.84], [-1.13], [1.84], [-0.36], [-1.89], [-0.07], [2.64], [3.13], [1.65], [0.16], [1.45], [-1.34], [-0.73], [0.43], [-0.17], [1.64], [1.27], [0.82], [-0.54], [1.16], [1.41], [-2.74], [0.82], [-0.81], [0.97], [-0.66], [0.57], [-0.28], [0.54], [-2.6], [-1.98], [-0.8], [0.9], [1.12], [-1.55], [0.7], [1.97], [2.18], [-3.4], [0.36], [2.33], [0.99], [-0.09], [-2.59], [1.26], [0.24], [0.22], [0.93], [-1.66], [4.68], [-0.17], [0.15], [0.79], [-0.85], [2.04], [0.99], [1.16], [-1.64], [-0.49], [2.7]]}, "kpi": {"source": [["date", "price", "mcap_bn", "pe", "iv_30d"], ["2026-01-29", 187.44, 2857.6, 29.19, 24.22], ["2026-01-30", 191.76, 2850.5, 29.39, 24.2], ["2026-02-02", 195.93, 2734.1, 29.45, 23.79], ["2026-02-03", 194.41, 2705.6, 29.32, 24.09], ["2026-02-04", 192.95, 2650.4, 29.12, 23.7], ["2026-02-05", 195.01, 2691.7, 29.29, 23.9], ["2026-02-06", 190.53, 2695.1, 29.14, 23.36], ["2026-02-09", 193.44, 2743.8, 29.24, 23.48], ["2026-02-10", 192.98, 2758.1, 29.03, 24.18], ["2026-02-11", 201.11, 2748.4, 28.9, 24.72], ["2026-02-12", 201.6, 2805.8, 29.04, 24.77], ["2026-02-13", 204.88, 2840.0, 29.02, 24.58], ["2026-02-16", 202.22, 2817.6, 29.01, 25.0], ["2026-02-17", 206.39, 2838.5, 29.1, 25.11], ["2026-02-18", 207.59, 2762.9, 29.14, 25.13], ["2026-02-19", 210.63, 2752.4, 29.22, 24.52], ["2026-02-20", 210.65, 2735.8, 29.27, 24.6], ["2026-02-23", 208.44, 2706.3, 29.33, 24.67], ["2026-02-24", 209.5, 2705.9, 29.37, 25.22], ["2026-02-25", 211.73, 2770.5, 29.03, 25.78], ["2026-02-26", 218.19, 2762.9, 29.13, 26.08], ["2026-02-27", 216.91, 2749.2, 29.1, 26.1], ["2026-03-02", 216.85, 2831.2, 29.21, 25.51], ["2026-03-03", 217.76, 2719.2, 29.16, 25.28], ["2026-03-04", 218.82, 2760.3, 29.3, 25.32], ["2026-03-05", 221.38, 2787.0, 29.13, 25.41], ["2026-03-06", 224.12, 2825.4, 29.11, 25.48], ["2026-03-09", 227.04, 2767.0, 28.91, 25.41], ["2026-03-10", 223.36, 2841.3, 29.08, 25.26], ["2026-03-11", 222.22, 2794.3, 29.03, 25.32], ["2026-03-12", 218.47, 2803.5, 28.99, 25.97], ["2026-03-13", 217.27, 2840.5, 29.2, 25.54], ["2026-03-16", 221.92, 2926.0, 29.3, 24.73], ["2026-03-17", 220.7, 2864.9, 29.01, 24.81], ["2026-03-18", 221.93, 2858.1, 28.98, 24.83], ["2026-03-19", 220.12, 2865.3, 28.82, 25.38], ["2026-03-20", 219.89, 2862.0, 28.74, 24.5], ["2026-03-23", 222.06, 2766.3, 28.74, 24.21], ["2026-03-24", 219.09, 2860.0, 28.87, 23.85], ["2026-03-25", 217.12, 2860.8, 28.72, 23.58], ["2026-03-26", 214.97, 2896.2, 28.87, 22.57], ["2026-03-27", 215.25, 2913.8, 28.89, 22.84], ["2026-03-30", 206.29, 2960.8, 28.68, 22.52], ["2026-03-31", 209.87, 3003.8, 28.63, 22.7], ["2026-04-01", 210.21, 3018.8, 28.53, 22.32], ["2026-04-02", 209.88, 2992.1, 28.57, 22.71], ["2026-04-03", 209.04, 2993.3, 28.61, 22.53], ["2026-04-06", 215.34, 2955.0, 28.53, 22.6], ["2026-04-07", 213.7, 2965.4, 28.65, 21.94], ["2026-04-08", 207.5, 2998.9, 28.88, 22.22], ["2026-04-09", 202.95, 3035.7, 28.68, 22.49], ["2026-04-10", 201.95, 3058.3, 28.47, 23.04], ["2026-04-13", 197.69, 3096.7, 28.45, 23.33], ["2026-04-14", 195.17, 3087.1, 28.37, 23.13], ["2026-04-15", 198.29, 3063.0, 28.5, 23.28], ["2026-04-16", 199.92, 3089.1, 28.59, 23.39], ["2026-04-17", 202.96, 3038.2, 28.35, 23.89], ["2026-04-20", 208.06, 3077.3, 28.6, 23.4], ["2026-04-21", 206.07, 3161.7, 28.57, 23.13], ["2026-04-22", 204.65, 3090.5, 28.59, 23.83]]}}, "themes": {"gs_clean": {"color": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "backgroundColor": "#FFFFFF", "textStyle": {"fontFamily": "\"Goldman Sans\", \"GS Sans\", \"Basis Grotesque\", \"Helvetica Neue\", Arial, sans-serif", "color": "#1A1A1A"}, "title": {"textStyle": {"fontFamily": "\"Goldman Sans\", \"GS Sans\", \"Basis Grotesque\", \"Helvetica Neue\", Arial, sans-serif", "fontSize": 18, "fontWeight": 600, "color": "#1A1A1A"}, "subtextStyle": {"fontFamily": "\"Goldman Sans\", \"GS Sans\", \"Basis Grotesque\", \"Helvetica Neue\", Arial, sans-serif", "fontSize": 12, "color": "#595959"}, "left": "left"}, "line": {"lineStyle": {"width": 2}, "symbolSize": 6, "symbol": "circle", "smooth": false}, "bar": {"itemStyle": {"borderRadius": 0}}, "scatter": {"symbolSize": 10, "symbol": "circle"}, "categoryAxis": {"axisLine": {"show": true, "lineStyle": {"color": "#999999"}}, "axisTick": {"show": true, "lineStyle": {"color": "#999999"}}, "axisLabel": {"show": true, "color": "#1A1A1A", "fontSize": 12}, "splitLine": {"show": true, "lineStyle": {"color": ["#D9DCE1"]}}, "splitArea": {"show": false}, "nameTextStyle": {"color": "#1A1A1A", "fontSize": 12}}, "valueAxis": {"axisLine": {"show": false, "lineStyle": {"color": "#999999"}}, "axisTick": {"show": false, "lineStyle": {"color": "#999999"}}, "axisLabel": {"show": true, "color": "#1A1A1A", "fontSize": 12}, "splitLine": {"show": true, "lineStyle": {"color": ["#D9DCE1"]}}, "splitArea": {"show": false}, "nameTextStyle": {"color": "#1A1A1A", "fontSize": 12}}, "timeAxis": {"axisLine": {"show": true, "lineStyle": {"color": "#999999"}}, "axisTick": {"show": true, "lineStyle": {"color": "#999999"}}, "axisLabel": {"show": true, "color": "#1A1A1A", "fontSize": 12}, "splitLine": {"show": true, "lineStyle": {"color": ["#D9DCE1"]}}, "splitArea": {"show": false}, "nameTextStyle": {"color": "#1A1A1A", "fontSize": 12}}, "logAxis": {"axisLine": {"show": true, "lineStyle": {"color": "#999999"}}, "axisTick": {"show": true, "lineStyle": {"color": "#999999"}}, "axisLabel": {"show": true, "color": "#1A1A1A", "fontSize": 12}, "splitLine": {"show": true, "lineStyle": {"color": ["#D9DCE1"]}}, "splitArea": {"show": false}, "nameTextStyle": {"color": "#1A1A1A", "fontSize": 12}}, "legend": {"textStyle": {"color": "#1A1A1A", "fontSize": 12, "fontFamily": "\"Goldman Sans\", \"GS Sans\", \"Basis Grotesque\", \"Helvetica Neue\", Arial, sans-serif"}, "orient": "horizontal", "top": 42, "right": 10, "type": "scroll"}, "tooltip": {"backgroundColor": "#FFFFFF", "borderColor": "#D9DCE1", "borderWidth": 1, "textStyle": {"color": "#1A1A1A", "fontFamily": "\"Goldman Sans\", \"GS Sans\", \"Basis Grotesque\", \"Helvetica Neue\", Arial, sans-serif", "fontSize": 12}, "axisPointer": {"lineStyle": {"color": "#595959", "width": 1}, "crossStyle": {"color": "#595959", "width": 1}}}, "visualMap": {"color": ["#F5F8FC", "#D0DCED", "#9BB4D4", "#6288B3", "#305890", "#001B40"]}, "toolbox": {"top": 8, "right": 10, "itemSize": 14, "itemGap": 8, "iconStyle": {"borderColor": "#595959"}, "emphasis": {"iconStyle": {"borderColor": "#002F6C"}}}}}, "palettes": {"gs_primary": {"colors": ["#002F6C", "#7399C6", "#B08D3F", "#8C1D40", "#3E7C17", "#5A7D8C", "#6E4B9E", "#D47B00", "#9B2C2C", "#4C6B8A"], "kind": "categorical"}, "gs_blues": {"colors": ["#F5F8FC", "#D0DCED", "#9BB4D4", "#6288B3", "#305890", "#001B40"], "kind": "sequential"}, "gs_diverging": {"colors": ["#8C1D40", "#D47B00", "#FFFFFF", "#7399C6", "#002F6C"], "kind": "diverging"}}};
+
+
+(function(){
+  'use strict';
+  var MANIFEST = PAYLOAD.manifest;
+  var SPECS    = PAYLOAD.specs;       // id -> ECharts option dict
+  var DATASETS = PAYLOAD.datasets;    // name -> {source: [...rows]}
+
+  // Revive string-encoded JS functions (renderItem, formatter, filter)
+  // into real functions. Python emits them as strings because JSON cannot
+  // carry code; ECharts needs real functions at setOption() time.
+  function _isFnStr(s) {
+    return typeof s === 'string' && /^\s*function\s*\(/.test(s);
+  }
+  function reviveFns(x) {
+    if (x == null) return x;
+    if (_isFnStr(x)) {
+      try { return new Function('return (' + x + ')')(); }
+      catch(e) { return x; }
+    }
+    if (Array.isArray(x)) {
+      for (var i = 0; i < x.length; i++) x[i] = reviveFns(x[i]);
+      return x;
+    }
+    if (typeof x === 'object') {
+      for (var k in x) {
+        if (Object.prototype.hasOwnProperty.call(x, k)) {
+          x[k] = reviveFns(x[k]);
+        }
+      }
+    }
+    return x;
+  }
+
+  // register themes so echarts can use them
+  try {
+    Object.keys(PAYLOAD.themes || {}).forEach(function(tn){
+      try { echarts.registerTheme(tn, PAYLOAD.themes[tn]); } catch(e){}
+    });
+  } catch(e){}
+
+  // ----- filter state + event bus -----
+  var filterState = {};
+  (MANIFEST.filters || []).forEach(function(f){
+    filterState[f.id] = f.default != null ? f.default :
+                          (f.type === 'multiSelect' ? [] : '');
+  });
+  var listeners = {}; // filterId -> [chartId, ...]
+
+  function subscribe(chartId, filterIds){
+    filterIds.forEach(function(fid){
+      listeners[fid] = listeners[fid] || [];
+      if (listeners[fid].indexOf(chartId) < 0) listeners[fid].push(chartId);
+    });
+  }
+  function broadcast(filterId){
+    (listeners[filterId] || []).forEach(rerenderChart);
+    renderKpis();
+    renderTables();
+  }
+
+  // ----- dataset management -----
+  var currentDatasets = {};
+  Object.keys(DATASETS || {}).forEach(function(name){
+    currentDatasets[name] = JSON.parse(JSON.stringify(DATASETS[name].source || DATASETS[name]));
+  });
+  function resetDataset(name){
+    var src = (DATASETS[name] && DATASETS[name].source) || DATASETS[name];
+    currentDatasets[name] = JSON.parse(JSON.stringify(src));
+  }
+
+  // ----- widget meta registry -----
+  var WIDGET_META = {};
+  function collectWidgets(){
+    function visit(rows){
+      rows.forEach(function(row){ row.forEach(function(w){
+        if (w.id) WIDGET_META[w.id] = w;
+      }); });
+    }
+    var layout = MANIFEST.layout || {};
+    if (layout.kind === 'tabs'){
+      (layout.tabs || []).forEach(function(t){ visit(t.rows || []); });
+    } else {
+      visit(layout.rows || []);
+    }
+  }
+  collectWidgets();
+
+  function targetMatch(target, id){
+    if (target === '*') return true;
+    if (target.indexOf('*') < 0) return target === id;
+    var rx = new RegExp('^' + target.replace(/\*/g,'.*') + '$');
+    return rx.test(id);
+  }
+  function filtersForChart(chartId){
+    var out = [];
+    (MANIFEST.filters || []).forEach(function(f){
+      if ((f.targets || []).some(function(t){ return targetMatch(t, chartId); })){
+        out.push(f.id);
+      }
+    });
+    return out;
+  }
+
+  // ----- apply global filters to a dataset -----
+  function resolveDateRange(val){
+    var now = Date.now();
+    if (typeof val === 'string'){
+      var m = val.match(/^(\d+)([DWMY])$/);
+      if (m){
+        var n = parseInt(m[1]);
+        var ms = {D:86400e3, W:7*86400e3, M:30*86400e3, Y:365*86400e3}[m[2]];
+        return [now - n*ms, now];
+      }
+      if (val === 'YTD'){
+        var jan1 = new Date(new Date().getFullYear(), 0, 1).getTime();
+        return [jan1, now];
+      }
+      if (val === 'All') return [0, now];
+    }
+    if (Array.isArray(val) && val.length === 2){
+      return [Date.parse(val[0]), Date.parse(val[1])];
+    }
+    return [0, now];
+  }
+
+  // Generic cell-vs-value comparator used by slider/number/text + conditional
+  // formatting rules on tables. op defaults to '==' (equality).
+  function cmpOp(op, cell, val){
+    if (cell == null) return false;
+    if (op == null) op = '==';
+    if (op === 'contains')   return String(cell).toLowerCase().indexOf(String(val).toLowerCase()) >= 0;
+    if (op === 'startsWith') return String(cell).toLowerCase().indexOf(String(val).toLowerCase()) === 0;
+    if (op === 'endsWith')   return String(cell).toLowerCase().lastIndexOf(String(val).toLowerCase()) === String(cell).length - String(val).length;
+    var a = +cell, b = +val;
+    if (isNaN(a) || isNaN(b)) {
+      if (op === '==' ) return String(cell) === String(val);
+      if (op === '!=' ) return String(cell) !== String(val);
+      return false;
+    }
+    if (op === '==') return a === b;
+    if (op === '!=') return a !== b;
+    if (op === '>' ) return a >  b;
+    if (op === '>=') return a >= b;
+    if (op === '<' ) return a <  b;
+    if (op === '<=') return a <= b;
+    return false;
+  }
+
+  function applyFilters(name, rows){
+    var header = rows[0]; var body = rows.slice(1); var out = body;
+    (MANIFEST.filters || []).forEach(function(f){
+      var val = filterState[f.id];
+      if (val === '' || val == null || (Array.isArray(val) && val.length === 0)) return;
+      // Escape-hatch: if the filter declares `all_value` and the current
+      // value matches it, treat this filter as a no-op. Lets radio/select
+      // filters have an explicit "All / Any / None" option without having
+      // to invent a null sentinel.
+      if (f.all_value != null && String(val) === String(f.all_value)) return;
+      var idx = f.field != null ? header.indexOf(f.field) : -1;
+      if (f.type === 'dateRange'){
+        if (idx < 0) idx = 0;
+        var r = resolveDateRange(val);
+        out = out.filter(function(row){
+          var c = row[idx]; if (c == null) return false;
+          var d = (typeof c === 'string') ? Date.parse(c) : +c;
+          if (isNaN(d)) return true;
+          return d >= r[0] && d <= r[1];
+        });
+      } else if ((f.type === 'select' || f.type === 'radio') && idx >= 0){
+        out = out.filter(function(row){ return String(row[idx]) === String(val); });
+      } else if (f.type === 'multiSelect' && idx >= 0){
+        out = out.filter(function(row){ return val.indexOf(String(row[idx])) >= 0; });
+      } else if (f.type === 'numberRange' && idx >= 0){
+        var lo = val[0], hi = val[1];
+        out = out.filter(function(row){ var n = +row[idx]; return !isNaN(n) && n>=lo && n<=hi; });
+      } else if (f.type === 'toggle' && idx >= 0){
+        if (val) out = out.filter(function(row){ return !!row[idx]; });
+      } else if ((f.type === 'slider' || f.type === 'number' || f.type === 'text')
+                   && idx >= 0){
+        var op = f.op || (f.type === 'text' ? 'contains' : '>=');
+        var transform = f.transform; // optional 'abs' | 'neg'
+        out = out.filter(function(row){
+          var cell = row[idx];
+          if (transform === 'abs' && cell != null) cell = Math.abs(+cell);
+          else if (transform === 'neg' && cell != null) cell = -(+cell);
+          return cmpOp(op, cell, val);
+        });
+      }
+    });
+    return [header].concat(out);
+  }
+
+  // ----- rewire a chart spec to use a shared dataset -----
+  //
+  // The widget was auto-wired by _augment_manifest ONLY when the chart
+  // type + mapping is in the known-safe rewire set (see
+  // _is_safe_for_rewire in echart_dashboard.py). That means we can
+  // assume a wide-form dataset whose columns include the x col and
+  // each series' y col (indexed by `s.name`). We match series to
+  // columns by name first, falling back to positional index, so extra
+  // trailing columns in the dataset don't shift the mapping.
+  function materializeOption(cid){
+    var w = WIDGET_META[cid]; var base = SPECS[cid];
+    var opt = JSON.parse(JSON.stringify(base));
+    if (!(w && w.dataset_ref && currentDatasets[w.dataset_ref])) return opt;
+    var filt = applyFilters(w.dataset_ref, currentDatasets[w.dataset_ref]);
+    opt.dataset = {source: filt};
+    var header = filt[0] || [];
+    (opt.series || []).forEach(function(s, i){
+      var t = s.type;
+      var isRewireable = (t === 'line' || t === 'bar'
+                          || t === 'scatter' || t === 'area');
+      if (!isRewireable) return;
+      if (s.encode) return;                // already fully specified
+      // Resolve the y dataset column. Priority:
+      //   1. `_column` hint set at build time (raw, pre-humanise col)
+      //   2. exact match of series name against header
+      //   3. positional index (x is col 0, series i -> col i+1)
+      var yIdx = -1;
+      if (s._column && header.indexOf(s._column) >= 0) {
+        yIdx = header.indexOf(s._column);
+      } else if (s.name && header.indexOf(s.name) >= 0) {
+        yIdx = header.indexOf(s.name);
+      } else {
+        yIdx = Math.min(1 + i, header.length - 1);
+      }
+      if (yIdx <= 0) yIdx = Math.min(1, header.length - 1);
+      s.encode = {x: header[0], y: header[yIdx]};
+      s.name = s.name || header[yIdx];
+      delete s.data;
+    });
+    return opt;
+  }
+
+  // ----- chart init/render -----
+  var CHARTS = {};
+
+  function chartThemeName(){
+    // Use the manifest theme regardless of dark/light dashboard surface.
+    // Dashboard chrome and chart styling are decoupled by design.
+    return MANIFEST.theme || 'gs_clean';
+  }
+
+  function initChart(cid){
+    var el = document.getElementById('chart-' + cid); if (!el) return;
+    if (CHARTS[cid]) return;
+    var theme = chartThemeName();
+    var inst = echarts.init(el, theme in PAYLOAD.themes ? theme : null);
+    CHARTS[cid] = {inst: inst, datasetRef: WIDGET_META[cid].dataset_ref};
+    inst.setOption(reviveFns(materializeOption(cid)), true);
+    subscribe(cid, filtersForChart(cid));
+    wireBrush(cid, inst);
+    wireChartClick(cid, inst);
+  }
+
+  // ----- chart click -> filter emit -----
+  //
+  // If a widget declares `click_emit_filter`, clicking any data point
+  // in the chart writes a value to the named filter and broadcasts so
+  // all downstream widgets react. The config can be either a simple
+  // filter id string, or an object:
+  //   { filter_id: "region",            (required)
+  //     value_from: "name" | "value" |  (default "name")
+  //                 "seriesName",
+  //     toggle: true }                  (default true; clicking the
+  //                                       same value again clears it)
+  // Pairs well with a `radio` or `select` filter whose `options`
+  // include an `all_value`, so the user can reset via the reset btn
+  // or by re-clicking the same point.
+  function wireChartClick(cid, inst){
+    var w = WIDGET_META[cid] || {};
+    var cfg = w.click_emit_filter;
+    if (!cfg) return;
+    if (typeof cfg === 'string') cfg = {filter_id: cfg};
+    if (!cfg.filter_id) return;
+    var src = cfg.value_from || 'name';
+    var toggle = cfg.toggle !== false;
+    inst.on('click', function(params){
+      var v = (src === 'value') ? params.value
+            : (src === 'seriesName') ? params.seriesName
+            : params.name;
+      if (v == null) return;
+      if (toggle && filterState[cfg.filter_id] === v){
+        var f = (MANIFEST.filters || []).find(function(x){
+          return x.id === cfg.filter_id;
+        });
+        filterState[cfg.filter_id] = (f && f.default != null)
+          ? f.default
+          : (f && f.type === 'multiSelect' ? [] : '');
+      } else {
+        filterState[cfg.filter_id] = v;
+      }
+      // Sync the control DOM (so the user sees it change too)
+      try {
+        var el = document.getElementById('filter-' + cfg.filter_id);
+        if (el) {
+          if (el.type === 'checkbox') el.checked = !!filterState[cfg.filter_id];
+          else el.value = filterState[cfg.filter_id] == null
+            ? '' : filterState[cfg.filter_id];
+        } else {
+          var radios = document.querySelectorAll('input[name="filter-' + cfg.filter_id + '"]');
+          Array.prototype.forEach.call(radios, function(r){
+            r.checked = (r.value === String(filterState[cfg.filter_id]));
+          });
+        }
+      } catch (e) {}
+      broadcast(cfg.filter_id);
+    });
+  }
+  function rerenderChart(cid){
+    var rec = CHARTS[cid]; if (!rec) return;
+    rec.inst.setOption(reviveFns(materializeOption(cid)), true);
+  }
+
+  // ----- brush cross-filter -----
+  function wireBrush(cid, inst){
+    var link = (MANIFEST.links || []).find(function(l){
+      return l.brush && (l.members || []).some(function(m){ return targetMatch(m, cid); });
+    });
+    if (!link) return;
+    inst.on('brushSelected', function(params){
+      var sel = (params.batch && params.batch[0]) || {};
+      applyBrush(cid, link, sel.areas || []);
+    });
+  }
+  function applyBrush(cid, link, areas){
+    var members = (link.members || []).flatMap(function(p){
+      return Object.keys(WIDGET_META).filter(function(k){
+        return targetMatch(p, k) && WIDGET_META[k].widget === 'chart';
+      });
+    });
+    if (!areas.length){
+      members.forEach(function(m){
+        if (m === cid) return;
+        var rec = CHARTS[m]; if (!rec || !rec.datasetRef) return;
+        resetDataset(rec.datasetRef); rerenderChart(m);
+      });
+      return;
+    }
+    var xMin, xMax;
+    areas.forEach(function(a){
+      if (a.coordRange && a.coordRange.length >= 2){
+        var cr = a.coordRange;
+        var xr = Array.isArray(cr[0]) ? cr[0] : cr;
+        if (xMin == null) xMin = xr[0]; else xMin = Math.min(xMin, xr[0]);
+        if (xMax == null) xMax = xr[1]; else xMax = Math.max(xMax, xr[1]);
+      }
+    });
+    members.forEach(function(m){
+      if (m === cid) return;
+      var rec = CHARTS[m]; if (!rec || !rec.datasetRef) return;
+      var ds = DATASETS[rec.datasetRef]; if (!ds) return;
+      var src = ds.source || ds;
+      var header = src[0]; var body = src.slice(1);
+      var filt = body.filter(function(r){
+        var v = r[0]; var d = (typeof v === 'string') ? Date.parse(v) : +v;
+        if (isNaN(d)) return true;
+        return d >= xMin && d <= xMax;
+      });
+      currentDatasets[rec.datasetRef] = [header].concat(filt);
+      rerenderChart(m);
+    });
+  }
+
+  function applyConnects(){
+    (MANIFEST.links || []).forEach(function(lk){
+      if (!lk.sync) return;
+      var group = lk.group;
+      var members = (lk.members || []).flatMap(function(p){
+        return Object.keys(CHARTS).filter(function(k){ return targetMatch(p, k); });
+      });
+      members.map(function(m){ return CHARTS[m] && CHARTS[m].inst; })
+              .filter(Boolean).forEach(function(i){ i.group = group; });
+      try { echarts.connect(group); } catch(e){}
+    });
+  }
+
+  // ----- tabs -----
+  function activateTab(tabId){
+    document.querySelectorAll('.tab-btn').forEach(function(b){
+      b.classList.toggle('active', b.dataset.tab === tabId);
+    });
+    document.querySelectorAll('.tab-panel').forEach(function(p){
+      p.classList.toggle('active', p.id === 'tab-panel-' + tabId);
+    });
+    // lazy-init any chart tiles in the newly active tab
+    var panel = document.getElementById('tab-panel-' + tabId);
+    if (panel){
+      panel.querySelectorAll('.chart-div').forEach(function(div){
+        var id = (div.id || '').replace(/^chart-/, '');
+        if (id && !CHARTS[id]) initChart(id);
+        else if (id && CHARTS[id]){
+          try { CHARTS[id].inst.resize(); } catch(e){}
+        }
+      });
+      applyConnects();
+    }
+    try { localStorage.setItem('echart_dashboard_tab_' + MANIFEST.id, tabId); } catch(e){}
+  }
+
+  document.querySelectorAll('.tab-btn').forEach(function(b){
+    b.addEventListener('click', function(){ activateTab(b.dataset.tab); });
+  });
+
+  // ----- filter wiring -----
+  function wireFilters(){
+    (MANIFEST.filters || []).forEach(function(f){
+      // Radio groups have no single DOM node for the filter itself --
+      // there are N radio inputs sharing a common name. Everything
+      // else is addressable by id.
+      if (f.type === 'radio'){
+        var inputs = document.querySelectorAll(
+          'input[name="filter-' + f.id + '"]');
+        if (!inputs.length) return;
+        Array.prototype.forEach.call(inputs, function(r){
+          r.addEventListener('change', function(){
+            if (r.checked){
+              filterState[f.id] = r.value;
+              broadcast(f.id);
+            }
+          });
+        });
+        return;
+      }
+      var el = document.getElementById('filter-' + f.id); if (!el) return;
+      if (f.type === 'multiSelect'){
+        el.addEventListener('change', function(){
+          filterState[f.id] = Array.from(el.selectedOptions).map(function(o){ return o.value; });
+          broadcast(f.id);
+        });
+      } else if (f.type === 'toggle'){
+        el.addEventListener('change', function(){ filterState[f.id] = el.checked; broadcast(f.id); });
+      } else if (f.type === 'numberRange'){
+        el.addEventListener('change', function(){
+          var parts = el.value.split(',').map(function(s){ return Number(s.trim()); });
+          if (parts.length === 2){ filterState[f.id] = parts; broadcast(f.id); }
+        });
+      } else if (f.type === 'slider'){
+        var display = document.getElementById('filter-' + f.id + '-val');
+        el.addEventListener('input', function(){
+          var n = Number(el.value);
+          filterState[f.id] = n;
+          if (display) display.textContent = n;
+        });
+        el.addEventListener('change', function(){ broadcast(f.id); });
+      } else if (f.type === 'number'){
+        el.addEventListener('change', function(){
+          var n = Number(el.value);
+          filterState[f.id] = isNaN(n) ? '' : n;
+          broadcast(f.id);
+        });
+      } else if (f.type === 'text'){
+        // Debounce text input so broadcasts aren't firing per keystroke.
+        var tId = null;
+        el.addEventListener('input', function(){
+          filterState[f.id] = el.value;
+          if (tId) clearTimeout(tId);
+          tId = setTimeout(function(){ broadcast(f.id); }, 180);
+        });
+      } else {
+        // dateRange / select / date / default text -- all of these
+        // use the native `change` event on the <select> or <input>.
+        el.addEventListener('change', function(){
+          filterState[f.id] = el.value; broadcast(f.id);
+        });
+      }
+    });
+    // Wire every reset button: both the global `#filter-reset` and any
+    // per-tab inline reset buttons (marked with `data-filter-reset`).
+    // An inline reset resets only the filters whose scope matches its
+    // containing tab panel. Global reset clears everything.
+    function resetFilters(targetsToReset){
+      (MANIFEST.filters || []).forEach(function(f){
+        if (targetsToReset && targetsToReset.indexOf(f.id) < 0) return;
+        filterState[f.id] = f.default != null ? f.default :
+                            (f.type === 'multiSelect' ? [] : '');
+        if (f.type === 'radio'){
+          var inputs = document.querySelectorAll('input[name="filter-' + f.id + '"]');
+          Array.prototype.forEach.call(inputs, function(r){
+            r.checked = r.value === String(filterState[f.id]);
+          });
+          return;
+        }
+        var el = document.getElementById('filter-' + f.id);
+        if (!el) return;
+        if (f.type === 'toggle') el.checked = !!filterState[f.id];
+        else if (f.type === 'multiSelect')
+          Array.from(el.options).forEach(function(o){ o.selected = (filterState[f.id] || []).indexOf(o.value) >= 0; });
+        else if (f.type === 'slider'){
+          el.value = filterState[f.id];
+          var display = document.getElementById('filter-' + f.id + '-val');
+          if (display) display.textContent = filterState[f.id];
+        }
+        else el.value = filterState[f.id] == null ? '' : filterState[f.id];
+      });
+      Object.keys(currentDatasets).forEach(resetDataset);
+      Object.keys(CHARTS).forEach(rerenderChart);
+      renderKpis(); renderTables();
+    }
+
+    document.querySelectorAll('[data-filter-reset]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var panel = btn.closest('.tab-panel');
+        var scopedIds = null;
+        if (panel && btn.classList.contains('filter-reset') &&
+            panel.classList.contains('tab-panel') && btn.closest('.tab-filter-bar')){
+          var pid = (panel.id || '').replace(/^tab-panel-/, '');
+          scopedIds = (MANIFEST.filters || [])
+            .filter(function(f){ return String(f.scope || '') === 'tab:' + pid; })
+            .map(function(f){ return f.id; });
+        }
+        resetFilters(scopedIds);
+      });
+    });
+  }
+
+  // ----- KPI widgets -----
+  //
+  // Default behavior: use comma-grouped digits for numbers < 1M
+  // (so 2820 -> "2,820" not "3K"); compact K / M / B / T suffix only
+  // kicks in at >= 1M. Callers can override via `format`:
+  //    "compact"  -> always K/M/B/T abbreviation
+  //    "comma"    -> always full digits w/ commas, no abbreviation
+  //    "percent"  -> multiply by 100 + "%" suffix
+  //    "raw"      -> Number(v).toString() no grouping
+  // `decimals` controls fractional digits (defaults vary by magnitude).
+  function _commaGroup(intStr){
+    // insert thousands separators on the integer portion
+    return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+  function formatNumber(v, opts){
+    opts = opts || {};
+    if (v == null || isNaN(+v)) return String(v);
+    var n = +v;
+    var prefix = opts.prefix || '';
+    var suffix = opts.suffix || '';
+    var mode = opts.format || 'auto';
+    var abs = Math.abs(n);
+    var d = opts.decimals;
+    function _apply(formatted){ return prefix + formatted + suffix; }
+    if (mode === 'raw'){
+      return _apply(String(n));
+    }
+    if (mode === 'percent'){
+      if (d == null) d = 2;
+      return _apply((n * 100).toFixed(d) + '%');
+    }
+    if (mode === 'comma'){
+      if (d == null) d = (abs >= 1000 ? 0 : 2);
+      var parts = n.toFixed(d).split('.');
+      parts[0] = _commaGroup(parts[0]);
+      return _apply(parts.join('.'));
+    }
+    if (mode === 'compact'){
+      if (d == null) d = 1;
+      var f;
+      if (abs >= 1e12) f = (n/1e12).toFixed(d) + 'T';
+      else if (abs >= 1e9)  f = (n/1e9).toFixed(d) + 'B';
+      else if (abs >= 1e6)  f = (n/1e6).toFixed(d) + 'M';
+      else if (abs >= 1e3)  f = (n/1e3).toFixed(d) + 'K';
+      else                   f = n.toFixed(d);
+      return _apply(f);
+    }
+    // auto: commas below 1M, compact above
+    if (abs >= 1e12) { if (d == null) d = 1;
+      return _apply((n/1e12).toFixed(d) + 'T'); }
+    if (abs >= 1e9)  { if (d == null) d = 1;
+      return _apply((n/1e9).toFixed(d) + 'B'); }
+    if (abs >= 1e6)  { if (d == null) d = 1;
+      return _apply((n/1e6).toFixed(d) + 'M'); }
+    if (d == null) d = (abs >= 1000 ? 0 : 2);
+    var parts2 = n.toFixed(d).split('.');
+    parts2[0] = _commaGroup(parts2[0]);
+    return _apply(parts2.join('.'));
+  }
+
+  function resolveAgg(src, agg, col){
+    var ds = currentDatasets[src]; if (!ds) return null;
+    var header = ds[0]; var idx = header.indexOf(col);
+    if (idx < 0) return null;
+    var vals = ds.slice(1).map(function(r){ return r[idx]; })
+                .filter(function(v){ return typeof v === 'number'; });
+    if (!vals.length) return null;
+    if (agg === 'latest') return vals[vals.length - 1];
+    if (agg === 'first')  return vals[0];
+    if (agg === 'sum')    return vals.reduce(function(a,b){ return a+b; }, 0);
+    if (agg === 'mean')   return vals.reduce(function(a,b){ return a+b; }, 0) / vals.length;
+    if (agg === 'min')    return Math.min.apply(null, vals);
+    if (agg === 'max')    return Math.max.apply(null, vals);
+    if (agg === 'count')  return vals.length;
+    if (agg === 'prev'){
+      return vals.length >= 2 ? vals[vals.length - 2] : vals[vals.length - 1];
+    }
+    return null;
+  }
+  function resolveSource(src){
+    if (!src) return null;
+    var parts = String(src).split('.');
+    if (parts.length < 3) return null;
+    return resolveAgg(parts[0], parts[1], parts.slice(2).join('.'));
+  }
+
+  function renderKpis(){
+    Object.keys(WIDGET_META).forEach(function(id){
+      var w = WIDGET_META[id]; if (w.widget !== 'kpi') return;
+      var el = document.getElementById('kpi-' + id); if (!el) return;
+      var value = w.value != null ? w.value : resolveSource(w.source);
+      var formatted;
+      if (typeof value === 'number'){
+        formatted = formatNumber(value, {
+          decimals: w.decimals, format: w.format,
+          prefix: w.prefix || '', suffix: w.suffix || ''
+        });
+      } else {
+        formatted = value == null ? '--' : String(value);
+      }
+      var vNode = el.querySelector('.kpi-value');
+      if (vNode) vNode.textContent = formatted;
+
+      // delta: {delta: 1.2, delta_pct: 4.5, delta_label: 'vs prev'}
+      // or automatic if delta_source points to prev aggregator
+      var dNode = el.querySelector('.kpi-delta');
+      if (dNode){
+        var deltaVal = w.delta;
+        var deltaSrc = w.delta_source;
+        var pct = w.delta_pct;
+        if (deltaVal == null && deltaSrc){
+          var cur = (typeof value === 'number') ? value : resolveSource(w.source);
+          var prev = resolveSource(deltaSrc);
+          if (typeof cur === 'number' && typeof prev === 'number'){
+            deltaVal = cur - prev;
+            pct = prev !== 0 ? (deltaVal / Math.abs(prev)) * 100 : null;
+          }
+        }
+        if (deltaVal != null){
+          dNode.classList.remove('pos','neg','flat');
+          var sign = deltaVal > 0 ? 'pos' : (deltaVal < 0 ? 'neg' : 'flat');
+          dNode.classList.add(sign);
+          var arrow = deltaVal > 0 ? '\u25B2' : (deltaVal < 0 ? '\u25BC' : '\u25B6');
+          var txt = arrow + ' ' + formatNumber(Math.abs(deltaVal), {decimals: w.delta_decimals || 2});
+          if (pct != null && !isNaN(pct)) txt += ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)';
+          if (w.delta_label) txt += ' ' + w.delta_label;
+          dNode.textContent = txt;
+          dNode.style.display = 'inline-flex';
+        } else {
+          dNode.style.display = 'none';
+        }
+      }
+
+      // sparkline
+      var sNode = el.querySelector('.kpi-sparkline');
+      if (sNode && w.sparkline_source){
+        var sp = String(w.sparkline_source).split('.');
+        if (sp.length >= 2){
+          var dsName = sp[0], col = sp.slice(1).join('.');
+          var ds = currentDatasets[dsName];
+          if (ds){
+            var header = ds[0]; var idx = header.indexOf(col);
+            var rows = ds.slice(1);
+            if (idx >= 0){
+              var data = rows.map(function(r){ return r[idx]; });
+              if (!sNode._inst){
+                sNode._inst = echarts.init(sNode);
+              }
+              sNode._inst.setOption({
+                grid:{top:2,bottom:2,left:2,right:2,containLabel:false},
+                xAxis:{type:'category',show:false,data:data.map(function(_,i){return i;})},
+                yAxis:{type:'value',show:false,scale:true},
+                tooltip:{show:false},
+                animation:false,
+                series:[{type:'line',data:data,symbol:'none',
+                          smooth:true,lineStyle:{width:1.6},
+                          areaStyle:{opacity:0.18}}]
+              }, true);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ----- table widgets -----
+  // Column formatters. Token is the prefix before ':' in the format string;
+  // the suffix (if any) is decimals / precision.
+  function formatValue(v, fmt){
+    if (v == null || v === '') return '';
+    if (fmt == null || fmt === 'text') return String(v);
+    var parts = String(fmt).split(':');
+    var kind = parts[0];
+    var prec = parts.length > 1 ? Number(parts[1]) : 2;
+    var n = Number(v);
+    if (kind === 'integer') {
+      if (isNaN(n)) return String(v);
+      return Math.round(n).toLocaleString();
+    }
+    if (kind === 'number')  {
+      if (isNaN(n)) return String(v);
+      return n.toLocaleString(undefined, {minimumFractionDigits: prec,
+                                             maximumFractionDigits: prec});
+    }
+    if (kind === 'percent') {
+      if (isNaN(n)) return String(v);
+      // Accept both fractional (0.12) and percent (12) forms
+      var pct = Math.abs(n) <= 1 ? n * 100 : n;
+      return pct.toFixed(isNaN(prec) ? 1 : prec) + '%';
+    }
+    if (kind === 'currency') {
+      if (isNaN(n)) return String(v);
+      return '$' + n.toLocaleString(undefined, {minimumFractionDigits: prec,
+                                                     maximumFractionDigits: prec});
+    }
+    if (kind === 'bps') {
+      if (isNaN(n)) return String(v);
+      return n.toFixed(isNaN(prec) ? 0 : prec) + 'bp';
+    }
+    if (kind === 'signed') {
+      if (isNaN(n)) return String(v);
+      var sign = n > 0 ? '+' : '';
+      return sign + n.toFixed(isNaN(prec) ? 2 : prec);
+    }
+    if (kind === 'delta') {
+      if (isNaN(n)) return String(v);
+      var arrow = n > 0 ? '\u25B2' : n < 0 ? '\u25BC' : '\u25AC';
+      return arrow + ' ' + Math.abs(n).toFixed(isNaN(prec) ? 2 : prec);
+    }
+    if (kind === 'date') {
+      var d = new Date(v);
+      if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      return String(v);
+    }
+    if (kind === 'datetime') {
+      var dt = new Date(v);
+      if (!isNaN(dt.getTime())) return dt.toISOString().replace('T', ' ').slice(0, 19);
+      return String(v);
+    }
+    if (kind === 'link') {
+      var safe = String(v).replace(/"/g, '&quot;');
+      return '<a href="' + safe + '" target="_blank">open</a>';
+    }
+    return String(v);
+  }
+
+  function _lerp(a, b, t){ return a + (b - a) * t; }
+  function _hex2rgb(hex){
+    hex = hex.replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map(function(c){ return c+c; }).join('');
+    return [parseInt(hex.substr(0,2),16), parseInt(hex.substr(2,2),16), parseInt(hex.substr(4,2),16)];
+  }
+  function _rgb2hex(r, g, b){
+    function hx(x){ return ('0' + Math.round(x).toString(16)).slice(-2); }
+    return '#' + hx(r) + hx(g) + hx(b);
+  }
+  function interpolatePalette(stops, t){
+    if (!stops || !stops.length) return null;
+    if (stops.length === 1) return stops[0];
+    var n = stops.length - 1;
+    var pos = Math.max(0, Math.min(1, t)) * n;
+    var lo = Math.floor(pos), hi = Math.min(n, lo + 1);
+    var frac = pos - lo;
+    var a = _hex2rgb(stops[lo]), b = _hex2rgb(stops[hi]);
+    return _rgb2hex(_lerp(a[0], b[0], frac), _lerp(a[1], b[1], frac), _lerp(a[2], b[2], frac));
+  }
+  function colorForScale(v, scale){
+    var n = Number(v);
+    if (isNaN(n) || !scale) return null;
+    var pal = PAYLOAD.palettes[scale.palette];
+    if (!pal) return null;
+    var lo = scale.min != null ? scale.min : 0;
+    var hi = scale.max != null ? scale.max : 1;
+    var span = hi - lo || 1;
+    var t = (n - lo) / span;
+    return interpolatePalette(pal.colors, t);
+  }
+  function conditionalStyle(v, rules){
+    if (!rules) return null;
+    for (var i = 0; i < rules.length; i++){
+      var r = rules[i];
+      if (cmpOp(r.op || '==', v, r.value)){
+        return r;
+      }
+    }
+    return null;
+  }
+  // Table per-widget state: sort column index (null = original order),
+  // sort direction (1 = asc, -1 = desc), search string.
+  var TABLE_STATE = {};
+  function tableState(id){
+    if (!TABLE_STATE[id]){
+      TABLE_STATE[id] = {sortCol: null, sortDir: 1, search: ''};
+    }
+    return TABLE_STATE[id];
+  }
+
+  function _rowMatchesSearch(row, needle){
+    if (!needle) return true;
+    var n = String(needle).toLowerCase();
+    for (var i = 0; i < row.length; i++){
+      var c = row[i]; if (c == null) continue;
+      if (String(c).toLowerCase().indexOf(n) >= 0) return true;
+    }
+    return false;
+  }
+
+  function renderTables(){
+    Object.keys(WIDGET_META).forEach(function(id){
+      var w = WIDGET_META[id]; if (w.widget !== 'table') return;
+      var el = document.getElementById('table-' + id); if (!el) return;
+      var ds = w.dataset_ref ? currentDatasets[w.dataset_ref] : null;
+      if (!ds || !ds.length) {
+        el.innerHTML = '<div class="table-empty">' +
+          (w.empty_message || 'No rows.') + '</div>';
+        return;
+      }
+      var header = ds[0];
+      var allBody = applyFilters(w.dataset_ref, ds).slice(1);
+      var ts = tableState(id);
+
+      // Search filter
+      if (ts.search){
+        allBody = allBody.filter(function(r){ return _rowMatchesSearch(r, ts.search); });
+      }
+
+      // Column config: if not supplied, auto-generate from header.
+      var cols = w.columns;
+      if (!cols || !cols.length){
+        cols = header.map(function(h){ return {field: h, label: h}; });
+      }
+      var colIndexes = cols.map(function(c){ return header.indexOf(c.field); });
+      var colCompare = function(ci, dir){
+        return function(a, b){
+          var av = a[ci], bv = b[ci];
+          if (av == null && bv == null) return 0;
+          if (av == null) return 1;
+          if (bv == null) return -1;
+          var an = Number(av), bn = Number(bv);
+          if (!isNaN(an) && !isNaN(bn)) return (an - bn) * dir;
+          return String(av).localeCompare(String(bv)) * dir;
+        };
+      };
+      if (ts.sortCol != null && colIndexes[ts.sortCol] >= 0){
+        allBody = allBody.slice().sort(colCompare(colIndexes[ts.sortCol], ts.sortDir));
+      }
+
+      var maxRows = w.max_rows || 100;
+      var visible = allBody.slice(0, maxRows);
+      var allRowsShown = allBody.length <= maxRows;
+
+      var html = '';
+      if (w.searchable){
+        html += '<div class="table-toolbar">' +
+          '<input class="table-search" data-tid="' + id +
+          '" placeholder="Search..." value="' + _he(ts.search) + '"/>' +
+          '<span class="table-count">' + allBody.length +
+          (allRowsShown ? '' : ' (showing ' + maxRows + ')') +
+          ' rows</span></div>';
+      }
+      html += '<table class="data-table' +
+              (w.row_height === 'compact' ? ' compact' : '') +
+              (w.row_click ? ' clickable' : '') +
+              '"><thead><tr>';
+
+      cols.forEach(function(c, ci){
+        var lbl = c.label != null ? c.label : c.field;
+        var align = c.align || (c.format && /^(number|integer|percent|currency|bps|signed|delta)/.test(c.format) ? 'right' : 'left');
+        var tip = c.tooltip ? ' title="' + _he(c.tooltip) + '"' : '';
+        var sortable = c.sortable !== false && w.sortable !== false;
+        var arrow = '';
+        if (sortable && ts.sortCol === ci){
+          arrow = ts.sortDir === 1 ? ' \u25B4' : ' \u25BE';
+        }
+        html += '<th style="text-align:' + align + '"' +
+                (sortable ? ' class="sortable" data-col="' + ci + '" data-tid="' + id + '"' : '') +
+                tip + '>' + _he(lbl) + arrow + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+
+      // Row highlighting: match a list of rules `{field, op, value,
+      // class}` against each row. First matching rule wins. `class`
+      // must be one of: 'pos', 'neg', 'muted', 'warn', 'info', or
+      // a dashed bucket name. The row gets a `.row-hl-<class>` CSS
+      // class (styles below).
+      function _pickRowHL(row) {
+        var rules = w.row_highlight || [];
+        for (var i = 0; i < rules.length; i++){
+          var r = rules[i];
+          var fi = header.indexOf(r.field);
+          if (fi < 0) continue;
+          if (cmpOp(r.op || '==', row[fi], r.value)){
+            return r.class || r.cls || r.className || 'info';
+          }
+        }
+        return null;
+      }
+
+      visible.forEach(function(row, ri){
+        var hlClass = _pickRowHL(row);
+        var rowCls = hlClass ? ' class="row-hl-' + hlClass + '"' : '';
+        html += '<tr' + rowCls + ' data-row-idx="' + ri + '" data-tid="' + id + '">';
+        cols.forEach(function(c, ci){
+          var hi = colIndexes[ci];
+          var v = hi >= 0 ? row[hi] : null;
+          var txt = formatValue(v, c.format);
+          var align = c.align || (c.format && /^(number|integer|percent|currency|bps|signed|delta)/.test(c.format) ? 'right' : 'left');
+          var styleParts = ['text-align:' + align];
+          // Conditional formatting
+          var cs = conditionalStyle(v, c.conditional);
+          if (cs){
+            if (cs.background) styleParts.push('background:' + cs.background);
+            if (cs.color)      styleParts.push('color:' + cs.color);
+            if (cs.bold)       styleParts.push('font-weight:600');
+          }
+          // Color scale (continuous heatmap)
+          if (c.color_scale){
+            var bg = colorForScale(v, c.color_scale);
+            if (bg){
+              styleParts.push('background:' + bg);
+              // Pick black or white text for contrast
+              var rgb = _hex2rgb(bg);
+              var lum = 0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2];
+              styleParts.push('color:' + (lum > 128 ? '#1a1a1a' : '#ffffff'));
+            }
+          }
+          var tip = c.tooltip ? ' title="' + _he(c.tooltip) + '"' : '';
+          html += '<td style="' + styleParts.join(';') + '"' + tip + '>' + txt + '</td>';
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+
+      // Wire search
+      var searchEl = el.querySelector('.table-search');
+      if (searchEl){
+        var tId = null;
+        searchEl.addEventListener('input', function(){
+          ts.search = searchEl.value;
+          if (tId) clearTimeout(tId);
+          tId = setTimeout(function(){ renderTables(); }, 160);
+        });
+      }
+      // Wire header-click sort
+      el.querySelectorAll('th.sortable').forEach(function(th){
+        th.addEventListener('click', function(){
+          var ci = Number(th.dataset.col);
+          if (ts.sortCol === ci) ts.sortDir = -ts.sortDir;
+          else { ts.sortCol = ci; ts.sortDir = 1; }
+          renderTables();
+        });
+      });
+      // Wire row click -> popup modal
+      if (w.row_click){
+        el.querySelectorAll('tbody tr').forEach(function(tr){
+          tr.addEventListener('click', function(){
+            var idx = Number(tr.dataset.rowIdx);
+            var row = visible[idx];
+            openRowModal(w, header, row, cols);
+          });
+        });
+      }
+    });
+  }
+
+  function _he(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  // ----- row click modal -----
+  //
+  // Two modes:
+  //   A) Simple key/value table. Use `row_click.popup_fields` (or
+  //      default = all columns). Same as the v1 behaviour.
+  //   B) Rich detail layout. Use `row_click.detail.sections[]` with
+  //      section `type: "stats" | "markdown" | "chart" | "table"`.
+  //      Charts can be filtered by the clicked row's key value, so
+  //      you can embed a per-entity time series, yield curve, etc.
+  function openRowModal(w, header, row, cols){
+    var rc = w.row_click || {};
+    var title = '';
+    if (rc.title_field){
+      var tIdx = header.indexOf(rc.title_field);
+      if (tIdx >= 0) title = String(row[tIdx]);
+    }
+    if (!title && cols && cols.length){
+      var firstIdx = header.indexOf(cols[0].field);
+      if (firstIdx >= 0) title = String(row[firstIdx]);
+    }
+    // subtitle support: `row_click.subtitle_field` or
+    // `row_click.subtitle_template` (string with `{field}` placeholders).
+    var subtitle = null;
+    if (rc.subtitle_field){
+      var sIdx = header.indexOf(rc.subtitle_field);
+      if (sIdx >= 0) subtitle = String(row[sIdx]);
+    } else if (rc.subtitle_template){
+      subtitle = _expandRowTemplate(rc.subtitle_template, header, row);
+    }
+
+    if (rc.detail && rc.detail.sections){
+      openRichRowModal(rc, title, subtitle, header, row, cols);
+      return;
+    }
+
+    // Legacy simple mode: key/value table.
+    var showFields = rc.popup_fields;
+    if (!showFields || showFields === '*' || (showFields.length === 1 && showFields[0] === '*')){
+      showFields = header.slice();
+    }
+
+    var body = '<table class="modal-detail-table">';
+    showFields.forEach(function(fname){
+      var hi = header.indexOf(fname);
+      if (hi < 0) return;
+      var val = row[hi];
+      var fmt = null;
+      if (cols){
+        for (var i = 0; i < cols.length; i++){
+          if (cols[i].field === fname){ fmt = cols[i].format; break; }
+        }
+      }
+      body += '<tr><th>' + _he(fname) + '</th>' +
+               '<td>' + formatValue(val, fmt) + '</td></tr>';
+    });
+    body += '</table>';
+
+    if (rc.extra_content){
+      body += '<div class="modal-extra">' + String(rc.extra_content) + '</div>';
+    }
+
+    showModal(title || 'Details', body, {subtitle: subtitle, wide: false});
+  }
+
+  // Substitute `{field}` tokens in a template using the current row
+  // values. `{field:format}` applies a value format (see formatValue).
+  function _expandRowTemplate(tpl, header, row){
+    return String(tpl).replace(/\{([^}:]+)(?::([^}]+))?\}/g, function(m, f, fmt){
+      var i = header.indexOf(f.trim());
+      if (i < 0) return m;
+      return formatValue(row[i], fmt ? fmt.trim() : null);
+    });
+  }
+
+  function openRichRowModal(rc, title, subtitle, header, row, cols){
+    var detail = rc.detail || {};
+    var sections = detail.sections || [];
+    var rowMap = {};
+    header.forEach(function(h, i){ rowMap[h] = row[i]; });
+
+    // Give each chart section a stable dom id so we can init ECharts
+    // after the modal HTML is in the DOM.
+    var chartJobs = [];
+    var parts = [];
+
+    sections.forEach(function(sec, si){
+      var sType = (sec.type || '').toLowerCase();
+      if (sType === 'stats'){
+        parts.push(_renderDetailStats(sec, rowMap, header, cols));
+      } else if (sType === 'markdown'){
+        parts.push(_renderDetailMarkdown(sec, header, row));
+      } else if (sType === 'chart'){
+        var cid = 'detail-chart-' + si + '-' + (Math.random() * 1e6 | 0);
+        var h = sec.height || sec.h_px || 260;
+        parts.push(
+          (sec.title ? '<div class="detail-section-title">'
+             + _he(sec.title) + '</div>' : '') +
+          '<div id="' + cid + '" class="detail-chart"'
+          + ' style="height:' + h + 'px"></div>'
+        );
+        chartJobs.push({id: cid, sec: sec});
+      } else if (sType === 'table'){
+        parts.push(_renderDetailTable(sec, rowMap, header, row));
+      } else if (sType === 'kv' || sType === 'kv_table'){
+        // Simple key/value inline
+        parts.push(_renderDetailKV(sec, header, row, cols));
+      }
+    });
+
+    showModal(title || 'Details', parts.join('\n'),
+                {subtitle: subtitle, wide: detail.wide !== false});
+
+    // Init embedded charts AFTER the DOM is live so ECharts can
+    // measure their containers.
+    setTimeout(function(){
+      chartJobs.forEach(function(job){ _renderDetailChart(job.id, job.sec, rowMap); });
+    }, 0);
+  }
+
+  function _renderDetailStats(sec, rowMap, header, cols){
+    var items = (sec.fields || []).map(function(f){
+      // Accept plain string ("ticker") or {field, label, format,
+      // prefix, suffix}.
+      if (typeof f === 'string') f = {field: f};
+      var v = rowMap[f.field];
+      var lbl = f.label != null ? f.label : f.field;
+      var fmt = f.format;
+      if (!fmt && cols){
+        for (var i = 0; i < cols.length; i++){
+          if (cols[i].field === f.field){ fmt = cols[i].format; break; }
+        }
+      }
+      var text = formatValue(v, fmt);
+      if (f.prefix) text = f.prefix + text;
+      if (f.suffix) text = text + f.suffix;
+      var cls = 'detail-stat';
+      if (typeof v === 'number'){
+        if (f.signed_color && v > 0) cls += ' pos';
+        else if (f.signed_color && v < 0) cls += ' neg';
+      }
+      return '<div class="' + cls + '">'
+        + '<div class="detail-stat-label">' + _he(lbl) + '</div>'
+        + '<div class="detail-stat-value">' + text + '</div>'
+        + (f.sub ? '<div class="detail-stat-sub">'
+                    + _he(_expandRowTemplate(f.sub, header,
+                        header.map(function(h){ return rowMap[h]; })))
+                    + '</div>' : '')
+        + '</div>';
+    });
+    var title = sec.title
+      ? '<div class="detail-section-title">' + _he(sec.title) + '</div>'
+      : '';
+    return title + '<div class="detail-stats">' + items.join('') + '</div>';
+  }
+
+  function _renderDetailMarkdown(sec, header, row){
+    var tpl = sec.template != null ? sec.template
+               : (sec.content != null ? sec.content : '');
+    var md = _expandRowTemplate(tpl, header, row);
+    return '<div class="detail-markdown">' + _mdInlinePopup(md) + '</div>';
+  }
+
+  function _renderDetailKV(sec, header, row, cols){
+    var fields = sec.fields || header;
+    var body = '<table class="modal-detail-table">';
+    fields.forEach(function(fname){
+      var hi = header.indexOf(fname);
+      if (hi < 0) return;
+      var fmt = null;
+      if (cols){
+        for (var i = 0; i < cols.length; i++){
+          if (cols[i].field === fname){ fmt = cols[i].format; break; }
+        }
+      }
+      body += '<tr><th>' + _he(fname) + '</th>'
+           + '<td>' + formatValue(row[hi], fmt) + '</td></tr>';
+    });
+    body += '</table>';
+    var title = sec.title
+      ? '<div class="detail-section-title">' + _he(sec.title) + '</div>'
+      : '';
+    return title + body;
+  }
+
+  function _renderDetailTable(sec, rowMap, header, row){
+    // A sub-table driven by a filtered manifest dataset.
+    // sec: {dataset, filter_field?, row_key?, columns?, max_rows?}
+    var ds = DATASETS[sec.dataset];
+    var src = ds && ds.source ? ds.source : ds;
+    if (!Array.isArray(src) || src.length < 2) return '';
+    var sHeader = src[0];
+    var body = src.slice(1);
+    if (sec.filter_field && sec.row_key){
+      var key = rowMap[sec.row_key];
+      var fi = sHeader.indexOf(sec.filter_field);
+      if (fi >= 0) body = body.filter(function(r){ return r[fi] === key; });
+    }
+    var maxRows = sec.max_rows || 12;
+    body = body.slice(0, maxRows);
+    var colsCfg = sec.columns ||
+      sHeader.map(function(h){ return {field: h, label: h}; });
+    var cIdx = colsCfg.map(function(c){ return sHeader.indexOf(c.field); });
+    var html = '<table class="modal-detail-table sub"><thead><tr>';
+    colsCfg.forEach(function(c){
+      html += '<th>' + _he(c.label || c.field) + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+    body.forEach(function(r){
+      html += '<tr>';
+      colsCfg.forEach(function(c, ci){
+        var v = cIdx[ci] >= 0 ? r[cIdx[ci]] : null;
+        html += '<td>' + formatValue(v, c.format) + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    var title = sec.title
+      ? '<div class="detail-section-title">' + _he(sec.title) + '</div>'
+      : '';
+    return title + html;
+  }
+
+  function _renderDetailChart(elId, sec, rowMap){
+    var el = document.getElementById(elId); if (!el) return;
+    var ds = DATASETS[sec.dataset];
+    var src = ds && ds.source ? ds.source : ds;
+    if (!Array.isArray(src) || src.length < 2) return;
+    var header = src[0];
+    var body = src.slice(1);
+    // Filter to the clicked row's key value if configured.
+    if (sec.filter_field && sec.row_key){
+      var key = rowMap[sec.row_key];
+      var fi = header.indexOf(sec.filter_field);
+      if (fi >= 0) body = body.filter(function(r){ return r[fi] === key; });
+    }
+    if (!body.length) {
+      el.innerHTML = '<div class="detail-chart-empty">No data for this row.</div>';
+      return;
+    }
+    var m = sec.mapping || {};
+    var chartType = (sec.chart_type || 'line').toLowerCase();
+    var xCol = m.x;
+    var yCol = m.y;
+    var xIdx = header.indexOf(xCol);
+    // Build the option. We intentionally keep this small and purpose-
+    // built (rather than calling into the main builder dispatch on
+    // the server) so detail popups render fast and don't need a full
+    // Python round-trip on each row click.
+    var series = [];
+    if (Array.isArray(yCol)){
+      // Wide-form: one line per y column.
+      yCol.forEach(function(y){
+        var yi = header.indexOf(y);
+        series.push({
+          type: chartType === 'bar' ? 'bar' : 'line',
+          name: y, showSymbol: false,
+          data: body.map(function(r){ return [r[xIdx], r[yi]]; }),
+        });
+      });
+    } else {
+      var yi = header.indexOf(yCol);
+      series.push({
+        type: chartType === 'bar' ? 'bar' : 'line',
+        name: yCol, showSymbol: false,
+        areaStyle: chartType === 'area' ? {opacity: 0.25} : undefined,
+        data: body.map(function(r){ return [r[xIdx], r[yi]]; }),
+      });
+    }
+    var opt = {
+      grid: {top: 24, right: 24, bottom: 40, left: 56, containLabel: true},
+      tooltip: {trigger: 'axis'},
+      xAxis: {type: _guessAxisTypeFromValues(body, xIdx)},
+      yAxis: {type: 'value', scale: true,
+               name: m.y_title || ''},
+      series: series,
+    };
+    // date formatting like the main charts
+    if (opt.xAxis.type === 'time'){
+      opt.xAxis.axisLabel = {formatter: function(v){
+        var d = new Date(v);
+        if (isNaN(d.getTime())) return v;
+        var mo = ['Jan','Feb','Mar','Apr','May','Jun',
+                  'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+        return mo + ' ' + d.getDate();
+      }};
+    }
+    // Palette from GS theme
+    opt.color = PAYLOAD.palettes.gs_primary ? PAYLOAD.palettes.gs_primary.colors : null;
+    if (sec.annotations){
+      _applyDetailAnnotations(opt, sec.annotations);
+    }
+    var theme = MANIFEST.theme || 'gs_clean';
+    var inst = echarts.init(el, theme in PAYLOAD.themes ? theme : null);
+    inst.setOption(opt, true);
+    // Track so we can dispose on modal close (prevents leak over many
+    // clicks).
+    _DETAIL_CHARTS.push(inst);
+  }
+
+  function _guessAxisTypeFromValues(rows, idx){
+    if (!rows.length || idx < 0) return 'value';
+    var v = rows[0][idx];
+    if (typeof v === 'number') return 'value';
+    if (typeof v === 'string') {
+      var d = Date.parse(v);
+      if (!isNaN(d)) return 'time';
+      return 'category';
+    }
+    return 'value';
+  }
+
+  function _applyDetailAnnotations(opt, ann){
+    var mlData = [], maData = [];
+    (ann || []).forEach(function(a){
+      if (!a || typeof a !== 'object') return;
+      if (a.type === 'hline' && a.y != null){
+        mlData.push({yAxis: a.y,
+                      lineStyle: {color: a.color || '#718096',
+                                    type: a.style || 'dashed'},
+                      label: {formatter: a.label || ''}});
+      } else if (a.type === 'vline' && a.x != null){
+        mlData.push({xAxis: a.x,
+                      lineStyle: {color: a.color || '#718096',
+                                    type: a.style || 'dashed'},
+                      label: {formatter: a.label || ''}});
+      } else if (a.type === 'band' && a.y1 != null && a.y2 != null){
+        maData.push([{yAxis: a.y1,
+                       itemStyle: {color: a.color || 'rgba(26,54,93,0.08)',
+                                     opacity: a.opacity || 0.2}},
+                      {yAxis: a.y2}]);
+      }
+    });
+    if (mlData.length || maData.length){
+      var s0 = (opt.series || [])[0] || {};
+      if (mlData.length) s0.markLine = {symbol: 'none', data: mlData};
+      if (maData.length) s0.markArea = {data: maData};
+    }
+  }
+
+  var _DETAIL_CHARTS = [];
+
+  function showModal(title, bodyHtml, opts){
+    opts = opts || {};
+    var back = document.getElementById('ed-modal-backdrop');
+    if (!back){
+      back = document.createElement('div');
+      back.id = 'ed-modal-backdrop';
+      back.className = 'ed-modal-backdrop';
+      back.innerHTML =
+        '<div class="ed-modal">' +
+          '<div class="ed-modal-header">' +
+            '<div class="ed-modal-title-wrap">' +
+              '<div class="ed-modal-title"></div>' +
+              '<div class="ed-modal-subtitle"></div>' +
+            '</div>' +
+            '<button class="ed-modal-close" aria-label="close">\u2715</button>' +
+          '</div>' +
+          '<div class="ed-modal-body"></div>' +
+        '</div>';
+      document.body.appendChild(back);
+      back.addEventListener('click', function(e){
+        if (e.target === back) hideModal();
+      });
+      back.querySelector('.ed-modal-close').addEventListener('click', hideModal);
+      document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape') hideModal();
+      });
+    }
+    var modal = back.querySelector('.ed-modal');
+    modal.classList.toggle('wide', !!opts.wide);
+    back.querySelector('.ed-modal-title').textContent = title;
+    var subEl = back.querySelector('.ed-modal-subtitle');
+    if (opts.subtitle){
+      subEl.textContent = opts.subtitle;
+      subEl.style.display = 'block';
+    } else {
+      subEl.textContent = '';
+      subEl.style.display = 'none';
+    }
+    back.querySelector('.ed-modal-body').innerHTML = bodyHtml;
+    back.style.display = 'flex';
+  }
+  function hideModal(){
+    var back = document.getElementById('ed-modal-backdrop');
+    if (back) back.style.display = 'none';
+    // Dispose embedded detail charts so they don't leak memory
+    // across many row clicks.
+    if (typeof _DETAIL_CHARTS !== 'undefined' && _DETAIL_CHARTS){
+      _DETAIL_CHARTS.forEach(function(inst){
+        try { inst.dispose(); } catch(e){}
+      });
+      _DETAIL_CHARTS.length = 0;
+    }
+  }
+
+  // ----- click popup wiring (info icons) -----
+  //
+  // Every \u24D8 icon in the dashboard carries `data-popup-title` and
+  // `data-popup-body` attributes (set server-side by
+  // _popup_icon_html). Clicking the icon opens the shared modal with
+  // markdown-rendered body content. ESC / overlay click / X button
+  // all close the modal via existing hideModal wiring.
+  //
+  // Also: clicking inside a <label> normally toggles the associated
+  // form control; we stopPropagation so the filter doesn't re-focus
+  // underneath the open modal.
+  function _mdInlinePopup(text){
+    // Minimal markdown subset shared with the markdown widget:
+    // **bold**, *italic*, `code`, [label](url), - / * bullets,
+    // paragraphs on blank lines. Implemented inline here so we don't
+    // have to re-export the Python markdown renderer to JS.
+    if (text == null) return '';
+    var escapeHTML = function(s){
+      return String(s == null ? '' : s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    };
+    var placeholders = [];
+    var staged = String(text).replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+      function(_, lbl, url){
+        placeholders.push(
+          '<a href="' + escapeHTML(url) + '" target="_blank"' +
+          ' rel="noopener">' + escapeHTML(lbl) + '</a>');
+        return '\x00LINK' + (placeholders.length - 1) + '\x00';
+      });
+    var esc = escapeHTML(staged);
+    esc = esc.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    esc = esc.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
+    esc = esc.replace(/`([^`]+)`/g, '<code>$1</code>');
+    for (var i = 0; i < placeholders.length; i++){
+      esc = esc.replace('\x00LINK' + i + '\x00', placeholders[i]);
+    }
+    var lines = esc.split(/\n/);
+    var out = [], para = [], list = [];
+    var flushPara = function(){
+      if (para.length){ out.push('<p>' + para.join(' ') + '</p>'); para = []; }
+    };
+    var flushList = function(){
+      if (list.length){
+        out.push('<ul>' + list.map(function(x){
+          return '<li>' + x + '</li>';
+        }).join('') + '</ul>');
+        list = [];
+      }
+    };
+    lines.forEach(function(raw){
+      var l = raw.replace(/\s+$/, '');
+      var s = l.replace(/^\s+/, '');
+      if (/^###\s/.test(s)) {
+        flushPara(); flushList();
+        out.push('<h3>' + s.slice(4) + '</h3>');
+      } else if (/^##\s/.test(s)) {
+        flushPara(); flushList();
+        out.push('<h2>' + s.slice(3) + '</h2>');
+      } else if (/^#\s/.test(s)) {
+        flushPara(); flushList();
+        out.push('<h1>' + s.slice(2) + '</h1>');
+      } else if (/^[-*]\s/.test(s)) {
+        flushPara(); list.push(s.slice(2));
+      } else if (s === '') {
+        flushPara(); flushList();
+      } else {
+        flushList(); para.push(s);
+      }
+    });
+    flushPara(); flushList();
+    return out.join('\n');
+  }
+
+  function wirePopupIcons(){
+    document.querySelectorAll(
+      '.tile-info, .filter-info, .stat-info'
+    ).forEach(function(icon){
+      if (icon._popupWired) return;
+      icon._popupWired = true;
+      icon.addEventListener('click', function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        var title = icon.getAttribute('data-popup-title') || '';
+        var body = icon.getAttribute('data-popup-body') || '';
+        if (!body) return;
+        showModal(title || 'Details', _mdInlinePopup(body));
+      });
+      icon.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' || e.key === ' '){
+          e.preventDefault(); icon.click();
+        }
+      });
+    });
+  }
+  wirePopupIcons();
+
+  // ----- per-tile fullscreen + export -----
+  function wireTileActions(){
+    document.querySelectorAll('.tile').forEach(function(tile){
+      var id = tile.dataset.tileId;
+      var fs = tile.querySelector('.tile-btn.fullscreen');
+      if (fs){
+        fs.addEventListener('click', function(){
+          tile.classList.toggle('is-fullscreen');
+          var c = CHARTS[id]; if (c) { setTimeout(function(){ c.inst.resize(); }, 120); }
+        });
+      }
+      var dl = tile.querySelector('.tile-btn.download');
+      if (dl){
+        dl.addEventListener('click', function(){
+          var c = CHARTS[id]; if (!c) return;
+          var url = c.inst.getDataURL({pixelRatio: 2, type: 'png',
+                                         backgroundColor: '#ffffff'});
+          var a = document.createElement('a'); a.href = url;
+          a.download = (id || 'chart') + '.png'; a.click();
+        });
+      }
+    });
+  }
+
+  var exportAll = document.getElementById('export-all');
+  if (exportAll){
+    exportAll.addEventListener('click', function(){
+      Object.keys(CHARTS).forEach(function(id){
+        var c = CHARTS[id]; if (!c) return;
+        var url = c.inst.getDataURL({pixelRatio: 2, type: 'png', backgroundColor:'#ffffff'});
+        var a = document.createElement('a'); a.href = url; a.download = id + '.png'; a.click();
+      });
+    });
+  }
+
+
+  // ----- chart count badge -----
+  var ccEl = document.getElementById('chart-count');
+  if (ccEl){
+    var count = Object.keys(WIDGET_META).filter(function(k){
+      return WIDGET_META[k].widget === 'chart';
+    }).length;
+    ccEl.textContent = count + (count === 1 ? ' chart' : ' charts');
+  }
+
+  // ----- data freshness badge -----
+  var MD = MANIFEST.metadata || {};
+  (function(){
+    var el = document.getElementById('data-as-of');
+    var val = document.getElementById('data-as-of-val');
+    if (!el || !val) return;
+    var stamp = MD.data_as_of || MD.generated_at;
+    if (!stamp) return;
+    var s = String(stamp);
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) s = d.toISOString().replace('T',' ').slice(0, 16) + 'Z';
+    val.textContent = s;
+    el.style.display = 'inline-flex';
+  })();
+
+  // ----- header_actions: custom buttons/links in the header -----
+  (function(){
+    var host = document.getElementById('header-actions');
+    var actions = MANIFEST.header_actions || [];
+    if (!host || !actions.length) return;
+    actions.forEach(function(a){
+      var el;
+      if (a.href){
+        el = document.createElement('a');
+        el.href = a.href;
+        el.target = a.target || '_blank';
+        if (a.target !== '_self') el.rel = 'noopener noreferrer';
+      } else {
+        el = document.createElement('button');
+        el.type = 'button';
+      }
+      el.className = 'icon-btn' + (a.primary ? ' primary' : '');
+      if (a.id) el.id = a.id;
+      if (a.title) el.title = a.title;
+      el.innerHTML = (a.icon ? (a.icon + ' ') : '') + _he(a.label || '');
+      if (a.onclick && typeof window[a.onclick] === 'function'){
+        el.addEventListener('click', function(e){
+          try { window[a.onclick](e, a); } catch(err){ console.warn(err); }
+        });
+      }
+      host.insertBefore(el, host.firstChild);
+    });
+  })();
+
+  // ----- refresh button -----
+  // Shown when metadata.kerberos + metadata.dashboard_id are set AND
+  // metadata.refresh_enabled !== false. POSTs to metadata.api_url (default
+  // /api/dashboard/refresh/) and polls metadata.status_url for completion.
+  (function(){
+    var btn = document.getElementById('refresh-btn');
+    var label = document.getElementById('refresh-btn-label');
+    if (!btn || !label) return;
+    var kerberos = MD.kerberos;
+    var dashboardId = MD.dashboard_id || MANIFEST.id;
+    var enabled = MD.refresh_enabled !== false;
+    if (!kerberos || !dashboardId || !enabled) return;
+    var apiUrl = MD.api_url || '/api/dashboard/refresh/';
+    var statusUrl = MD.status_url || '/api/dashboard/refresh/status/';
+    btn.style.display = 'inline-flex';
+
+    function setLabel(cls, txt){
+      btn.classList.remove('refreshing','refresh-success','refresh-error');
+      if (cls) btn.classList.add(cls);
+      label.textContent = txt;
+    }
+    function resetLabel(){ setLabel('', 'Refresh'); btn.disabled = false; }
+    function pollStatus(){
+      var polls = 0, maxPolls = 60; // 3s x 60 = 3 min
+      var timer = setInterval(function(){
+        polls++;
+        if (polls > maxPolls){
+          clearInterval(timer); setLabel('refresh-error', 'Timeout');
+          setTimeout(resetLabel, 3000); return;
+        }
+        fetch(statusUrl + '?dashboard_id=' + encodeURIComponent(dashboardId))
+          .then(function(r){ return r.json(); })
+          .then(function(st){
+            if (st.status === 'success'){
+              clearInterval(timer);
+              setLabel('refresh-success', 'Done -- reloading...');
+              setTimeout(function(){ location.reload(); }, 900);
+            } else if (st.status === 'error'){
+              clearInterval(timer);
+              setLabel('refresh-error', 'Error');
+              var msg = (st.errors && st.errors.length) ? st.errors[0] : 'Unknown error';
+              console.warn('[refresh] error:', msg);
+              setTimeout(resetLabel, 3500);
+            } else if (st.status === 'partial'){
+              clearInterval(timer);
+              setLabel('refresh-error', 'Partial');
+              setTimeout(function(){ location.reload(); }, 2000);
+            }
+            // still running -> keep polling
+          })
+          .catch(function(e){ console.warn('[refresh] poll network error:', e); });
+      }, 3000);
+    }
+    btn.addEventListener('click', function(){
+      if (window.location.protocol === 'file:'){
+        alert('Refresh is not available when viewing the dashboard offline. ' +
+              'Open the dashboard from the PRISM portal to refresh.');
+        return;
+      }
+      btn.disabled = true; setLabel('refreshing', 'Refreshing...');
+      fetch(apiUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kerberos: kerberos, dashboard_id: dashboardId})
+      })
+        .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
+        .then(function(pair){
+          var code = pair[0], result = pair[1] || {};
+          if (code === 409){ pollStatus(); return; }
+          if (result.status === 'refreshing'){ pollStatus(); return; }
+          if (result.status === 'success' || result.status === 'partial'){
+            setLabel('refresh-success', 'Done -- reloading...');
+            setTimeout(function(){ location.reload(); }, 900);
+          } else {
+            setLabel('refresh-error', 'Error');
+            var msg = result.errors || result.error || 'Unknown error';
+            console.warn('[refresh] failed:', msg);
+            setTimeout(resetLabel, 3500);
+          }
+        })
+        .catch(function(err){
+          setLabel('refresh-error', 'Error');
+          console.warn('[refresh] network error:', err);
+          setTimeout(resetLabel, 3500);
+        });
+    });
+  })();
+
+  // ----- init -----
+  window.addEventListener('load', function(){
+    wireFilters(); wireTileActions();
+
+    // figure initial tab
+    var layout = MANIFEST.layout || {};
+    var initialTab = null;
+    if (layout.kind === 'tabs' && (layout.tabs || []).length){
+      try {
+        var saved = localStorage.getItem('echart_dashboard_tab_' + MANIFEST.id);
+        if (saved && layout.tabs.some(function(t){ return t.id === saved; })) initialTab = saved;
+      } catch(e){}
+      initialTab = initialTab || layout.tabs[0].id;
+      activateTab(initialTab);
+    } else {
+      // initialize every chart in the single default tab
+      Object.keys(WIDGET_META).forEach(function(id){
+        var w = WIDGET_META[id]; if (w.widget === 'chart') initChart(id);
+      });
+      applyConnects();
+    }
+    renderKpis(); renderTables();
+    window.addEventListener('resize', function(){
+      Object.keys(CHARTS).forEach(function(k){
+        try { CHARTS[k].inst.resize(); } catch(e){}
+      });
+    });
+  });
+
+  window.DASHBOARD = { manifest: MANIFEST, charts: CHARTS,
+                        filters: filterState, datasets: currentDatasets };
+})();
+
+</script>
+</body>
+</html>

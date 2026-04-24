@@ -180,11 +180,14 @@ def _merge_multigrid(
             "text": composite_title or "",
             "subtext": composite_subtitle or "",
             "left": "left",
-            "top": 6,
+            "top": 10,
+            "textStyle": {"fontSize": 24, "fontWeight": 700},
+            "subtextStyle": {"fontSize": 14},
+            "itemGap": 8,
         },
         "tooltip": {"show": True, "trigger": "axis",
                      "axisPointer": {"type": "cross"}},
-        "legend": {"show": True, "top": 30, "right": 10,
+        "legend": {"show": True, "top": 76, "right": 10,
                      "orient": "horizontal", "type": "scroll",
                      "data": []},
         "toolbox": {
@@ -277,7 +280,7 @@ def _merge_multigrid(
                 "top": title_top,
                 "style": {
                     "text": _spec.title,
-                    "fontSize": 12, "fontWeight": "bold",
+                    "fontSize": 16, "fontWeight": "bold",
                     "fill": "#2d3748",
                 },
                 "z": 100,
@@ -292,7 +295,7 @@ def _merge_multigrid(
 # =============================================================================
 
 def _rects_horizontal(n: int, *, gap_pct: float = 4.0,
-                        top_px: int = 60, bottom_px: int = 40) -> List[Dict[str, str]]:
+                        top_px: int = 110, bottom_px: int = 60) -> List[Dict[str, str]]:
     """N side-by-side panels spanning the full width."""
     frac = (100.0 - gap_pct * (n - 1)) / n
     rects = []
@@ -307,8 +310,8 @@ def _rects_horizontal(n: int, *, gap_pct: float = 4.0,
 
 
 def _rects_vertical(n: int, *, gap_pct: float = 6.0,
-                      top_pct: float = 12.0, bottom_pct: float = 6.0,
-                      left_px: int = 60, right_px: int = 40) -> List[Dict[str, str]]:
+                      top_pct: float = 16.0, bottom_pct: float = 8.0,
+                      left_px: int = 76, right_px: int = 40) -> List[Dict[str, str]]:
     """N stacked panels spanning the full height (minus composite title)."""
     usable = 100.0 - top_pct - bottom_pct
     frac = (usable - gap_pct * (n - 1)) / n
@@ -325,24 +328,23 @@ def _rects_vertical(n: int, *, gap_pct: float = 6.0,
 
 def _rects_triangle() -> List[Dict[str, str]]:
     """1 panel on top full-width, 2 panels side-by-side below."""
-    top_frac = 44.0
-    gap_pct = 4.0
-    bottom_frac = 100.0 - top_frac - gap_pct - 8.0
+    top_frac = 40.0
+    gap_pct = 5.0
     left_frac = (100.0 - gap_pct) / 2.0
     return [
         {"left": "4%", "right": "4%",
-          "top": "14%", "bottom": f"{100.0 - (14.0 + top_frac):.2f}%"},
+          "top": "17%", "bottom": f"{100.0 - (17.0 + top_frac):.2f}%"},
         {"left": "4%", "right": f"{100.0 - (4.0 + left_frac):.2f}%",
-          "top": f"{14.0 + top_frac + gap_pct:.2f}%", "bottom": "6%"},
+          "top": f"{17.0 + top_frac + gap_pct:.2f}%", "bottom": "8%"},
         {"left": f"{100.0 - (4.0 + left_frac):.2f}%", "right": "4%",
-          "top": f"{14.0 + top_frac + gap_pct:.2f}%", "bottom": "6%"},
+          "top": f"{17.0 + top_frac + gap_pct:.2f}%", "bottom": "8%"},
     ]
 
 
 def _rects_grid(rows: int, cols: int, *,
-                   gap_h_pct: float = 4.0, gap_v_pct: float = 6.0,
-                   top_pct: float = 12.0, bottom_pct: float = 6.0,
-                   left_pct: float = 4.0, right_pct: float = 4.0) -> List[Dict[str, str]]:
+                   gap_h_pct: float = 5.0, gap_v_pct: float = 11.0,
+                   top_pct: float = 14.0, bottom_pct: float = 12.0,
+                   left_pct: float = 5.0, right_pct: float = 4.0) -> List[Dict[str, str]]:
     """rows x cols grid of equal-size panels."""
     usable_h = 100.0 - top_pct - bottom_pct
     usable_w = 100.0 - left_pct - right_pct

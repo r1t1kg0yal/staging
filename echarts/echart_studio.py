@@ -177,7 +177,7 @@ def _base_option(ctx: BuilderContext) -> Dict[str, Any]:
         # collision with either the title or the toolbox.
         "legend": {"show": True, "top": 42, "right": 10,
                     "orient": "horizontal", "type": "scroll"},
-        "grid": {"top": 80, "right": 20, "bottom": 60, "left": 60,
+        "grid": {"top": 80, "right": 20, "bottom": 84, "left": 76,
                   "containLabel": True},
         "toolbox": {
             "show": True,
@@ -236,41 +236,64 @@ def _apply_axis_titles(opt: Dict[str, Any],
     and x_title applies to the category axis (yAxis on screen).
 
     y_title_right (if present) sets the right-axis name for dual-axis charts.
+
+    Defaults chosen to avoid the rotated axis title colliding with wide
+    tick labels (e.g. "50,000" or "2.38%"). For Y-axis the default gap
+    is 52 px (was 35) and for X-axis 36 (was 30). Override per-spec
+    with ``mapping.y_title_gap`` / ``mapping.x_title_gap`` or via the
+    ``grid`` knob.
     """
     y_title = mapping.get("y_title")
     x_title = mapping.get("x_title")
     y_title_right = mapping.get("y_title_right")
+    y_gap = mapping.get("y_title_gap", 56)
+    x_gap = mapping.get("x_title_gap", 40)
+    y_gap_right = mapping.get("y_title_right_gap", 52)
 
-    def _set(axis_key: str, name: str) -> None:
+    def _set(axis_key: str, name: str, gap: int,
+              idx: int = 0) -> None:
         ax = opt.get(axis_key)
         if isinstance(ax, list):
-            if ax:
-                ax[0]["name"] = name
-                ax[0]["nameLocation"] = "middle"
-                ax[0]["nameGap"] = 35 if axis_key.startswith("y") else 30
+            if idx < len(ax):
+                ax[idx]["name"] = name
+                ax[idx]["nameLocation"] = "middle"
+                ax[idx]["nameGap"] = gap
         elif isinstance(ax, dict):
             ax["name"] = name
             ax["nameLocation"] = "middle"
-            ax["nameGap"] = 35 if axis_key.startswith("y") else 30
+            ax["nameGap"] = gap
 
     if horizontal:
         # value axis is xAxis, category axis is yAxis
         if y_title:
-            _set("xAxis", y_title)
+            _set("xAxis", y_title, x_gap)
         if x_title:
-            _set("yAxis", x_title)
+            _set("yAxis", x_title, y_gap)
     else:
         if y_title:
-            _set("yAxis", y_title)
+            _set("yAxis", y_title, y_gap)
         if x_title:
-            _set("xAxis", x_title)
+            _set("xAxis", x_title, x_gap)
 
     if y_title_right:
-        ax = opt.get("yAxis")
-        if isinstance(ax, list) and len(ax) >= 2:
-            ax[1]["name"] = y_title_right
-            ax[1]["nameLocation"] = "middle"
-            ax[1]["nameGap"] = 35
+        _set("yAxis", y_title_right, y_gap_right, idx=1)
+
+    # When axis titles are set, the grid margins need to be bumped so the
+    # title sits clear of axis tick labels without being clipped at the
+    # canvas edge. The base grid (bottom: 84, left: 76) is sized for
+    # labels-only; titles need ~40-50 more pixels in the same direction
+    # because ECharts positions axis names FURTHER below the bounding
+    # box than `nameGap` would suggest at face value (empirically: with
+    # bottom=100 a nameGap of 40 still clips the title; bottom needs to
+    # be ~120-130 for a nameGap of 40 to render fully).
+    grid = opt.get("grid")
+    if isinstance(grid, dict):
+        if (x_title or (horizontal and y_title)):
+            grid["bottom"] = max(int(grid.get("bottom", 84)), 130)
+        if (y_title or (horizontal and x_title)):
+            grid["left"] = max(int(grid.get("left", 76)), 100)
+        if y_title_right:
+            grid["right"] = max(int(grid.get("right", 20)), 76)
 
 
 def _apply_x_sort(opt: Dict[str, Any],
@@ -1063,7 +1086,17 @@ def build_treemap(df, mapping: Dict[str, Any], ctx: BuilderContext,
     stype = "sunburst" if is_sunburst else "treemap"
     series = {"type": stype, "data": data}
     if is_sunburst:
-        series["radius"] = ["0%", "90%"]
+        series["radius"] = ["0%", "55%"]
+        series["center"] = ["50%", "55%"]
+        series["top"] = 90
+        series["bottom"] = 30
+        series["left"] = 30
+        series["right"] = 30
+    else:
+        series["top"] = 90
+        series["bottom"] = 30
+        series["left"] = 30
+        series["right"] = 30
     opt["series"] = [series]
     return opt
 
@@ -1148,6 +1181,18 @@ def build_graph(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str, A
                              _col_to_list(df, val) if val else [None] * len(df)):
             if a is None or b is None:
                 continue
+            # Skip self-loops (src == tgt). A common convention is to
+            # use a self-edge with value=0 to declare a node's category
+            # when it only appears on the target side of real edges;
+            # we don't want that ghost edge rendered.
+            if a == b:
+                continue
+            if vv is not None:
+                try:
+                    if float(vv) == 0:
+                        continue
+                except (TypeError, ValueError):
+                    pass
             e = {"source": str(a), "target": str(b)}
             if vv is not None:
                 e["value"] = vv
@@ -1163,7 +1208,36 @@ def build_graph(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str, A
         cats = _unique(_col_to_list(df, node_cat))
         categories = [{"name": str(c)} for c in cats]
         cat_idx = {c: i for i, c in enumerate(cats)}
-        lookup_cat = dict(zip(_col_to_list(df, node_id or src), _col_to_list(df, node_cat)))
+        # Build the node -> category lookup by scanning every edge
+        # endpoint for which the row's category applies. The edge's
+        # category field is interpreted as the source node's category,
+        # so we fill sources first and then propagate from tgt only
+        # when a node was never seen on the src side. Users can also
+        # encode explicit per-node categories via self-edges (src==tgt).
+        lookup_cat: Dict[Any, Any] = {}
+        src_list = _col_to_list(df, node_id or src)
+        tgt_list = _col_to_list(df, tgt)
+        cat_list = _col_to_list(df, node_cat)
+        for s_val, t_val, c_val in zip(src_list, tgt_list, cat_list):
+            if c_val is None:
+                continue
+            if s_val is not None and s_val == t_val:
+                # self-edge: assigns the node's own category
+                lookup_cat[s_val] = c_val
+                continue
+            if s_val is not None and s_val not in lookup_cat:
+                lookup_cat[s_val] = c_val
+        # Second pass for nodes that only show up as targets -- they
+        # inherit the category of their first incoming edge.
+        tgt_fallback: Dict[Any, Any] = {}
+        for s_val, t_val, c_val in zip(src_list, tgt_list, cat_list):
+            if t_val is None or t_val in lookup_cat:
+                continue
+            if c_val is None:
+                continue
+            tgt_fallback.setdefault(t_val, c_val)
+        for k, v in tgt_fallback.items():
+            lookup_cat.setdefault(k, v)
         for n in node_list:
             key = n.get("id") or n.get("name")
             if key in lookup_cat:
@@ -1173,9 +1247,15 @@ def build_graph(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str, A
         "type": "graph", "layout": "force",
         "data": node_list, "edges": edge_list,
         "roam": True, "draggable": True,
-        "label": {"show": True},
-        "force": {"repulsion": 200, "edgeLength": 80},
-        "emphasis": {"focus": "adjacency"},
+        "label": {"show": True, "position": "right",
+                    "distance": 4, "fontSize": 11},
+        "symbolSize": 28,
+        "force": {"repulsion": 800, "edgeLength": 120,
+                    "gravity": 0.08, "layoutAnimation": True},
+        "lineStyle": {"opacity": 0.6, "width": 1.2,
+                       "curveness": 0.1},
+        "emphasis": {"focus": "adjacency",
+                      "lineStyle": {"width": 2.5}},
     }
     if categories:
         series["categories"] = categories
@@ -1346,8 +1426,11 @@ def build_funnel(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str, 
         "sort": "descending", "gap": 2,
         # Reserve space above for title + row-2 legend.
         "top": 80, "bottom": 20,
-        "min": min(vals) if vals else 0,
-        "max": max(vals) if vals else 100,
+        # Default `min: 0` so the smallest segment still has visible
+        # width. Setting min=min(vals) makes the bottom segment a
+        # zero-width point.
+        "min": mapping.get("min", 0),
+        "max": mapping.get("max", max(vals) if vals else 100),
         "label": {"show": True, "position": "inside"},
     }]
     opt["legend"]["data"] = [d["name"] for d in data]
@@ -1466,13 +1549,18 @@ def build_histogram(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[st
             counts = [c / (total * w) if w > 0 else 0 for c, w in zip(counts, widths)]
 
     mids = [(edges[i] + edges[i + 1]) / 2 for i in range(len(counts))]
-    labels = [f"{edges[i]:.2f}\u2013{edges[i+1]:.2f}" for i in range(len(counts))]
+    # Short labels -- just the lower edge of each bin, rounded. The
+    # verbose "a\u2013b" form was legible at 5 bins but unreadable at 30+.
+    labels = [f"{edges[i]:.1f}" for i in range(len(counts))]
 
     opt = _base_option(ctx)
     opt["tooltip"]["axisPointer"] = {"type": "shadow"}
+    # Auto-thin labels: show at most ~8 so the axis stays readable.
+    # interval=0 means show every, N means skip N.
+    interval = max(0, (len(labels) // 8) - 1)
     opt["xAxis"] = {"type": "category", "data": labels,
-                      "axisLabel": {"interval": max(1, len(labels) // 12) - 1,
-                                      "rotate": 30 if len(labels) > 12 else 0}}
+                      "axisLabel": {"interval": interval,
+                                      "rotate": 0}}
     opt["yAxis"] = {"type": "value",
                       "name": "Density" if mapping.get("density") else "Count"}
     opt["series"] = [{

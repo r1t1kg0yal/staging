@@ -71,6 +71,46 @@ def _html_escape(s: Any) -> str:
              .replace('"', "&quot;"))
 
 
+def _json_default(o: Any) -> Any:
+    """json.dumps default handler that keeps numpy / pandas scalars as
+    numbers instead of strings.
+
+    The prior behaviour (``default=str``) turned ``numpy.int64(68)``
+    into the string ``"68"``, which then fell through the KPI value
+    format branch (``typeof v === 'number'``) and rendered without the
+    configured prefix / suffix / decimals. We cast known scalar types
+    to their plain Python counterparts here.
+    """
+    for attr in ("item",):
+        f = getattr(o, attr, None)
+        if callable(f):
+            try:
+                v = f()
+            except Exception:  # noqa: BLE001
+                v = None
+            if isinstance(v, (bool, int, float)):
+                return v
+    try:
+        import numpy as _np
+        if isinstance(o, _np.integer):
+            return int(o)
+        if isinstance(o, _np.floating):
+            return float(o)
+        if isinstance(o, _np.bool_):
+            return bool(o)
+        if isinstance(o, _np.ndarray):
+            return o.tolist()
+    except ImportError:
+        pass
+    try:
+        import pandas as _pd
+        if isinstance(o, _pd.Timestamp):
+            return o.isoformat()
+    except ImportError:
+        pass
+    return str(o)
+
+
 
 # =============================================================================
 # PART 1 -- SINGLE-CHART EDITOR HTML
@@ -1053,7 +1093,7 @@ def render_editor_html(
         "version": VERSION,
     }
     payload_js = (
-        "var PAYLOAD = " + json.dumps(payload, default=str) + ";\n"
+        "var PAYLOAD = " + json.dumps(payload, default=_json_default) + ";\n"
         "var ESSENTIAL_NAMES = " + json.dumps(essential_map) + ";\n"
     )
     html = (HTML_SHELL
@@ -1281,14 +1321,31 @@ nav.tab-bar {
 .filter-item label {
   font-weight: 600; color: var(--text);
   letter-spacing: 0.04em; text-transform: uppercase; font-size: 11px;
+  display: inline-flex; align-items: center; gap: 4px;
 }
-.filter-item select, .filter-item input[type=text], .filter-item input[type=date] {
+.filter-info {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--text-faint); cursor: pointer;
+  text-transform: none; letter-spacing: 0; font-weight: 400;
+  border-radius: 50%; user-select: none;
+}
+.filter-info:hover { color: var(--accent);
+                      background: var(--surface-hover); }
+.filter-info:focus { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.filter-item select, .filter-item input[type=text], .filter-item input[type=date],
+.filter-item input[type=number] {
   padding: 6px 10px; border: 1px solid var(--border);
   border-radius: var(--radius-sm); background: var(--surface);
   font-size: 13px; color: var(--text); font-family: inherit;
+  min-width: 120px;
   transition: border-color 0.15s var(--ease),
               box-shadow 0.15s var(--ease);
 }
+.filter-item select[multiple] {
+  min-width: 160px; min-height: 68px;
+  padding: 4px 8px;
+}
+.filter-item.slider input[type=range] { min-width: 140px; }
 .filter-item select:focus, .filter-item input:focus {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
@@ -1297,6 +1354,26 @@ nav.tab-bar {
   accent-color: var(--accent); width: 15px; height: 15px;
 }
 .filter-reset { margin-left: auto; }
+
+.tab-filter-bar {
+  display: inline-flex; gap: 14px; flex-wrap: wrap; align-items: center;
+  padding: 8px 12px; margin-bottom: 14px;
+  background: var(--gs-grey-05);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.tab-filter-bar .filter-item { font-size: 12px; }
+.tab-filter-bar .filter-item label { font-size: 10.5px; }
+.tab-filter-bar .filter-item select,
+.tab-filter-bar .filter-item input[type=text],
+.tab-filter-bar .filter-item input[type=number],
+.tab-filter-bar .filter-item input[type=date] {
+  padding: 4px 8px; font-size: 12px;
+}
+.tab-filter-bar .filter-reset {
+  margin-left: 0; padding: 4px 10px; font-size: 11px;
+}
 
 main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 
@@ -1349,27 +1426,100 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
   gap: 8px;
   background: var(--surface);
 }
+.tile-title-wrap {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
 .tile-title {
   font-family: var(--gs-font-sans);
   font-size: 12px; font-weight: 600; color: var(--gs-ink);
   letter-spacing: 0.04em; text-transform: uppercase;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+  min-width: 0;
 }
-.tile-actions { display: flex; gap: 2px; }
-.tile-btn {
+.tile-subtitle {
+  font-family: var(--gs-font-serif);
+  font-size: 11px; color: var(--text-dim);
+  font-style: italic; font-weight: 400;
+  letter-spacing: 0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tile-info {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; font-size: 13px; color: var(--text-faint);
+  cursor: pointer; border-radius: 50%; user-select: none;
+  text-transform: none; letter-spacing: 0;
+  transition: color 0.12s var(--ease),
+              background-color 0.12s var(--ease);
+}
+.tile-info:hover { color: var(--accent); background: var(--surface-hover); }
+.tile-info:focus { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.tile-info:hover { color: var(--accent); }
+.tile-info-kpi { margin-left: 6px; vertical-align: middle; }
+.tile-badge {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; border-radius: 999px;
+  font-family: var(--gs-font-sans); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  background: var(--gs-navy); color: white;
+}
+.tile-badge[data-color="gs-navy"] { background: var(--gs-navy); color: white; }
+.tile-badge[data-color="sky"]     { background: var(--gs-sky);
+                                      color: var(--gs-navy-deep); }
+.tile-badge[data-color="pos"]     { background: var(--pos-soft);
+                                      color: var(--pos); }
+.tile-badge[data-color="neg"]     { background: var(--neg-soft);
+                                      color: var(--neg); }
+.tile-badge[data-color="muted"]   { background: var(--surface-2);
+                                      color: var(--text-dim); }
+.tile-actions { display: flex; gap: 2px; flex: 0 0 auto; }
+.tile-btn, a.tile-btn {
   background: none; border: 1px solid transparent;
   border-radius: var(--radius-sm); padding: 3px 8px;
   cursor: pointer; color: var(--text-faint); font-size: 11px;
   font-family: var(--gs-font-sans); font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.04em; text-decoration: none;
   transition: color 0.12s var(--ease),
               background-color 0.12s var(--ease),
               border-color 0.12s var(--ease);
 }
-.tile-btn:hover { background: var(--surface-2);
-                   color: var(--accent);
-                   border-color: var(--accent-2); }
+.tile-btn:hover, a.tile-btn:hover { background: var(--surface-2);
+                                      color: var(--accent);
+                                      border-color: var(--accent-2); }
+.tile-btn.primary, a.tile-btn.primary {
+  background: var(--gs-navy); color: white;
+  border-color: var(--gs-navy);
+}
+.tile-btn.primary:hover, a.tile-btn.primary:hover {
+  background: var(--gs-navy-deep); color: white;
+  border-color: var(--gs-navy-deep);
+}
+.tile-btn-custom { padding: 3px 10px; }
 .tile-body { padding: 10px 14px; flex: 1 1 auto; position: relative; }
+
+.tile-footer {
+  padding: 6px 14px 8px; font-size: 11px; color: var(--text-faint);
+  font-family: var(--gs-font-sans); border-top: 1px dashed var(--border);
+  background: var(--surface);
+  line-height: 1.45;
+}
+.tile-emphasis {
+  border-color: var(--gs-navy);
+  box-shadow: 0 0 0 1px var(--gs-navy), var(--shadow-md);
+}
+.tile-emphasis::before {
+  content: ''; display: block; height: 3px; background: var(--gs-navy);
+  margin: -1px -1px 0 -1px;
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
+}
+.tile-emphasis.kpi-tile { border-top-width: 3px;
+                            border-top-color: var(--gs-sky); }
+.tile-emphasis.kpi-tile::before { display: none; }
+.tile-pinned {
+  position: sticky; top: 12px; z-index: 5;
+}
 
 /* chart tile */
 .chart-tile .tile-body { padding: 6px 8px 8px; }
@@ -1473,6 +1623,30 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 .data-table th.sortable { cursor: pointer; user-select: none; }
 .data-table th.sortable:hover { background: var(--gs-grey-10); }
 
+/* Row highlight buckets (see row_highlight on table widgets).
+   Subtle left-border accent + tinted background so the row pops
+   without stomping the per-cell conditional colors. */
+.data-table tr.row-hl-pos td   { background: color-mix(in srgb,
+                                    var(--pos-soft) 80%, transparent); }
+.data-table tr.row-hl-pos td:first-child {
+  box-shadow: inset 3px 0 0 var(--pos);
+}
+.data-table tr.row-hl-neg td   { background: color-mix(in srgb,
+                                    var(--neg-soft) 80%, transparent); }
+.data-table tr.row-hl-neg td:first-child {
+  box-shadow: inset 3px 0 0 var(--neg);
+}
+.data-table tr.row-hl-warn td  { background: rgba(221, 107, 32, 0.08); }
+.data-table tr.row-hl-warn td:first-child {
+  box-shadow: inset 3px 0 0 #dd6b20;
+}
+.data-table tr.row-hl-info td  { background: rgba(49, 130, 206, 0.07); }
+.data-table tr.row-hl-info td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.data-table tr.row-hl-muted td { background: var(--gs-grey-05);
+                                   color: var(--text-dim); }
+
 .table-toolbar {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 14px; background: var(--gs-grey-05);
@@ -1504,20 +1678,57 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
   background: var(--surface); border-radius: 8px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
   max-width: 640px; min-width: 360px;
-  max-height: 80vh; overflow: auto;
+  max-height: 86vh; overflow: auto;
   border-top: 4px solid var(--gs-navy);
+}
+.ed-modal.wide {
+  max-width: 880px; min-width: 560px;
 }
 .ed-modal-header {
   padding: 14px 18px; border-bottom: 1px solid var(--border);
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 14px;
 }
-.ed-modal-title { font-weight: 600; font-size: 15px; color: var(--gs-navy); }
+.ed-modal-title-wrap { flex: 1 1 auto; min-width: 0; }
+.ed-modal-title { font-weight: 600; font-size: 16px; color: var(--gs-navy);
+                    font-family: var(--gs-font-serif); }
+.ed-modal-subtitle {
+  font-size: 12px; color: var(--text-dim); font-style: italic;
+  margin-top: 2px; display: none;
+}
 .ed-modal-close {
   background: transparent; border: none; cursor: pointer;
   font-size: 16px; color: var(--text-faint); padding: 4px 8px;
 }
 .ed-modal-close:hover { color: var(--text); }
-.ed-modal-body { padding: 16px 18px; font-size: 12px; }
+.ed-modal-body {
+  padding: 16px 18px; font-size: 13px; line-height: 1.55;
+  color: var(--text);
+}
+.ed-modal-body p { margin: 0 0 10px; }
+.ed-modal-body p:last-child { margin-bottom: 0; }
+.ed-modal-body h1, .ed-modal-body h2, .ed-modal-body h3 {
+  font-family: var(--gs-font-sans); color: var(--gs-navy);
+  margin: 0 0 10px; font-weight: 600;
+}
+.ed-modal-body h1 { font-size: 16px; }
+.ed-modal-body h2 { font-size: 14px; }
+.ed-modal-body h3 { font-size: 13px; text-transform: uppercase;
+                     letter-spacing: 0.04em; color: var(--text-faint); }
+.ed-modal-body ul { margin: 6px 0 12px 18px; padding: 0; }
+.ed-modal-body li { margin-bottom: 4px; }
+.ed-modal-body strong { color: var(--gs-navy); font-weight: 600; }
+.ed-modal-body em { color: var(--text); }
+.ed-modal-body code {
+  background: var(--gs-grey-05); padding: 1px 6px;
+  border-radius: 3px; font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.ed-modal-body a {
+  color: var(--accent); text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ed-modal-body a:hover { color: var(--gs-navy); }
 .modal-detail-table {
   width: 100%; border-collapse: collapse; font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -1536,6 +1747,69 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
   margin-top: 14px; padding-top: 14px;
   border-top: 1px solid var(--border); font-size: 12px;
   color: var(--text-faint);
+}
+
+/* Rich row-click detail layout (row_click.detail.sections) */
+.detail-section-title {
+  font-family: var(--gs-font-sans); font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); font-weight: 600;
+  margin: 18px 0 8px;
+}
+.detail-section-title:first-child { margin-top: 4px; }
+.detail-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1px; background: var(--border);
+  border-radius: 4px; overflow: hidden;
+  margin-bottom: 6px;
+}
+.detail-stat {
+  background: var(--surface); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.detail-stat-label {
+  font-size: 10px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600;
+}
+.detail-stat-value {
+  font-family: var(--gs-font-serif); font-size: 18px;
+  color: var(--gs-navy); font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.detail-stat.pos .detail-stat-value { color: var(--pos); }
+.detail-stat.neg .detail-stat-value { color: var(--neg); }
+.detail-stat-sub { font-size: 10px; color: var(--text-dim); }
+.detail-chart {
+  width: 100%; margin: 4px 0 12px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface);
+}
+.detail-chart-empty {
+  padding: 24px; text-align: center; color: var(--text-faint);
+  font-size: 12px; font-style: italic;
+}
+.detail-markdown {
+  font-size: 13px; color: var(--text); line-height: 1.55;
+  margin: 4px 0 12px;
+}
+.detail-markdown p { margin: 0 0 8px; }
+.detail-markdown ul { margin: 4px 0 8px 16px; }
+.detail-markdown strong { color: var(--gs-navy); }
+.detail-markdown code {
+  background: var(--gs-grey-05); padding: 1px 5px;
+  border-radius: 3px; font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.detail-markdown a {
+  color: var(--accent); text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.modal-detail-table.sub th {
+  font-size: 10px; padding-top: 4px;
+}
+.modal-detail-table.sub td {
+  font-size: 12px; padding: 4px 8px 4px 0;
 }
 
 /* filter widgets extensions */
@@ -1579,15 +1853,32 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 .stat-grid-tile .stat-cell {
   background: var(--surface); padding: 12px 14px;
   display: flex; flex-direction: column; gap: 4px;
+  cursor: default;
 }
 .stat-grid-tile .stat-label {
   font-size: 10px; color: var(--text-faint);
   text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 4px;
 }
+.stat-grid-tile .stat-info {
+  font-size: 11px; color: var(--text-faint); cursor: pointer;
+  text-transform: none; border-radius: 50%;
+}
+.stat-grid-tile .stat-info:hover { color: var(--accent);
+                                     background: var(--surface-hover); }
+.stat-grid-tile .stat-info:focus { outline: 2px solid var(--accent-ring);
+                                     outline-offset: 2px; }
 .stat-grid-tile .stat-value {
   font-size: 18px; color: var(--gs-navy); font-weight: 700;
   font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: baseline; gap: 6px;
 }
+.stat-grid-tile .stat-trend {
+  font-size: 12px;
+}
+.stat-grid-tile .stat-trend.pos  { color: var(--pos); }
+.stat-grid-tile .stat-trend.neg  { color: var(--neg); }
+.stat-grid-tile .stat-trend.flat { color: var(--text-faint); }
 .stat-grid-tile .stat-sub {
   font-size: 10px; color: var(--text-faint);
 }
@@ -1645,7 +1936,6 @@ footer.app-footer .gs-mark .gs-wordmark { font-size: 12px; }
       <div class="subtitle">__DESCRIPTION__</div>
     </div>
     <div class="header-meta">
-      <span class="badge" id="theme-badge">__THEME__</span>
       <span class="meta-dot" id="data-as-of" style="display:none">
         Data as of <span id="data-as-of-val"></span>
       </span>
@@ -1879,24 +2169,44 @@ DASHBOARD_APP_JS = r"""
   }
 
   // ----- rewire a chart spec to use a shared dataset -----
+  //
+  // The widget was auto-wired by _augment_manifest ONLY when the chart
+  // type + mapping is in the known-safe rewire set (see
+  // _is_safe_for_rewire in echart_dashboard.py). That means we can
+  // assume a wide-form dataset whose columns include the x col and
+  // each series' y col (indexed by `s.name`). We match series to
+  // columns by name first, falling back to positional index, so extra
+  // trailing columns in the dataset don't shift the mapping.
   function materializeOption(cid){
     var w = WIDGET_META[cid]; var base = SPECS[cid];
     var opt = JSON.parse(JSON.stringify(base));
-    if (w && w.dataset_ref && currentDatasets[w.dataset_ref]){
-      var filt = applyFilters(w.dataset_ref, currentDatasets[w.dataset_ref]);
-      opt.dataset = {source: filt};
-      var header = filt[0];
-      (opt.series || []).forEach(function(s, i){
-        if (s.type === 'line' || s.type === 'bar' || s.type === 'scatter' || s.type === 'area'){
-          if (!s.encode){
-            var yIdx = Math.min(1 + i, header.length - 1);
-            s.encode = {x: header[0], y: header[yIdx]};
-            s.name = s.name || header[yIdx];
-          }
-          delete s.data;
-        }
-      });
-    }
+    if (!(w && w.dataset_ref && currentDatasets[w.dataset_ref])) return opt;
+    var filt = applyFilters(w.dataset_ref, currentDatasets[w.dataset_ref]);
+    opt.dataset = {source: filt};
+    var header = filt[0] || [];
+    (opt.series || []).forEach(function(s, i){
+      var t = s.type;
+      var isRewireable = (t === 'line' || t === 'bar'
+                          || t === 'scatter' || t === 'area');
+      if (!isRewireable) return;
+      if (s.encode) return;                // already fully specified
+      // Resolve the y dataset column. Priority:
+      //   1. `_column` hint set at build time (raw, pre-humanise col)
+      //   2. exact match of series name against header
+      //   3. positional index (x is col 0, series i -> col i+1)
+      var yIdx = -1;
+      if (s._column && header.indexOf(s._column) >= 0) {
+        yIdx = header.indexOf(s._column);
+      } else if (s.name && header.indexOf(s.name) >= 0) {
+        yIdx = header.indexOf(s.name);
+      } else {
+        yIdx = Math.min(1 + i, header.length - 1);
+      }
+      if (yIdx <= 0) yIdx = Math.min(1, header.length - 1);
+      s.encode = {x: header[0], y: header[yIdx]};
+      s.name = s.name || header[yIdx];
+      delete s.data;
+    });
     return opt;
   }
 
@@ -1918,6 +2228,62 @@ DASHBOARD_APP_JS = r"""
     inst.setOption(reviveFns(materializeOption(cid)), true);
     subscribe(cid, filtersForChart(cid));
     wireBrush(cid, inst);
+    wireChartClick(cid, inst);
+  }
+
+  // ----- chart click -> filter emit -----
+  //
+  // If a widget declares `click_emit_filter`, clicking any data point
+  // in the chart writes a value to the named filter and broadcasts so
+  // all downstream widgets react. The config can be either a simple
+  // filter id string, or an object:
+  //   { filter_id: "region",            (required)
+  //     value_from: "name" | "value" |  (default "name")
+  //                 "seriesName",
+  //     toggle: true }                  (default true; clicking the
+  //                                       same value again clears it)
+  // Pairs well with a `radio` or `select` filter whose `options`
+  // include an `all_value`, so the user can reset via the reset btn
+  // or by re-clicking the same point.
+  function wireChartClick(cid, inst){
+    var w = WIDGET_META[cid] || {};
+    var cfg = w.click_emit_filter;
+    if (!cfg) return;
+    if (typeof cfg === 'string') cfg = {filter_id: cfg};
+    if (!cfg.filter_id) return;
+    var src = cfg.value_from || 'name';
+    var toggle = cfg.toggle !== false;
+    inst.on('click', function(params){
+      var v = (src === 'value') ? params.value
+            : (src === 'seriesName') ? params.seriesName
+            : params.name;
+      if (v == null) return;
+      if (toggle && filterState[cfg.filter_id] === v){
+        var f = (MANIFEST.filters || []).find(function(x){
+          return x.id === cfg.filter_id;
+        });
+        filterState[cfg.filter_id] = (f && f.default != null)
+          ? f.default
+          : (f && f.type === 'multiSelect' ? [] : '');
+      } else {
+        filterState[cfg.filter_id] = v;
+      }
+      // Sync the control DOM (so the user sees it change too)
+      try {
+        var el = document.getElementById('filter-' + cfg.filter_id);
+        if (el) {
+          if (el.type === 'checkbox') el.checked = !!filterState[cfg.filter_id];
+          else el.value = filterState[cfg.filter_id] == null
+            ? '' : filterState[cfg.filter_id];
+        } else {
+          var radios = document.querySelectorAll('input[name="filter-' + cfg.filter_id + '"]');
+          Array.prototype.forEach.call(radios, function(r){
+            r.checked = (r.value === String(filterState[cfg.filter_id]));
+          });
+        }
+      } catch (e) {}
+      broadcast(cfg.filter_id);
+    });
   }
   function rerenderChart(cid){
     var rec = CHARTS[cid]; if (!rec) return;
@@ -2017,6 +2383,23 @@ DASHBOARD_APP_JS = r"""
   // ----- filter wiring -----
   function wireFilters(){
     (MANIFEST.filters || []).forEach(function(f){
+      // Radio groups have no single DOM node for the filter itself --
+      // there are N radio inputs sharing a common name. Everything
+      // else is addressable by id.
+      if (f.type === 'radio'){
+        var inputs = document.querySelectorAll(
+          'input[name="filter-' + f.id + '"]');
+        if (!inputs.length) return;
+        Array.prototype.forEach.call(inputs, function(r){
+          r.addEventListener('change', function(){
+            if (r.checked){
+              filterState[f.id] = r.value;
+              broadcast(f.id);
+            }
+          });
+        });
+        return;
+      }
       var el = document.getElementById('filter-' + f.id); if (!el) return;
       if (f.type === 'multiSelect'){
         el.addEventListener('change', function(){
@@ -2052,70 +2435,121 @@ DASHBOARD_APP_JS = r"""
           if (tId) clearTimeout(tId);
           tId = setTimeout(function(){ broadcast(f.id); }, 180);
         });
-      } else if (f.type === 'radio'){
-        // Radio groups are a set of inputs with the same name
-        var inputs = document.querySelectorAll('input[name="filter-' + f.id + '"]');
-        Array.prototype.forEach.call(inputs, function(r){
-          r.addEventListener('change', function(){
-            if (r.checked){
-              filterState[f.id] = r.value;
-              broadcast(f.id);
-            }
-          });
-        });
       } else {
-        el.addEventListener('change', function(){ filterState[f.id] = el.value; broadcast(f.id); });
+        // dateRange / select / date / default text -- all of these
+        // use the native `change` event on the <select> or <input>.
+        el.addEventListener('change', function(){
+          filterState[f.id] = el.value; broadcast(f.id);
+        });
       }
     });
-    var reset = document.getElementById('filter-reset');
-    if (reset){
-      reset.addEventListener('click', function(){
-        (MANIFEST.filters || []).forEach(function(f){
-          filterState[f.id] = f.default != null ? f.default :
-                              (f.type === 'multiSelect' ? [] : '');
-          if (f.type === 'radio'){
-            var inputs = document.querySelectorAll('input[name="filter-' + f.id + '"]');
-            Array.prototype.forEach.call(inputs, function(r){
-              r.checked = r.value === String(filterState[f.id]);
-            });
-            return;
-          }
-          var el = document.getElementById('filter-' + f.id);
-          if (!el) return;
-          if (f.type === 'toggle') el.checked = !!filterState[f.id];
-          else if (f.type === 'multiSelect')
-            Array.from(el.options).forEach(function(o){ o.selected = filterState[f.id].indexOf(o.value) >= 0; });
-          else if (f.type === 'slider'){
-            el.value = filterState[f.id];
-            var display = document.getElementById('filter-' + f.id + '-val');
-            if (display) display.textContent = filterState[f.id];
-          }
-          else el.value = filterState[f.id] == null ? '' : filterState[f.id];
-        });
-        Object.keys(currentDatasets).forEach(resetDataset);
-        Object.keys(CHARTS).forEach(rerenderChart);
-        renderKpis(); renderTables();
+    // Wire every reset button: both the global `#filter-reset` and any
+    // per-tab inline reset buttons (marked with `data-filter-reset`).
+    // An inline reset resets only the filters whose scope matches its
+    // containing tab panel. Global reset clears everything.
+    function resetFilters(targetsToReset){
+      (MANIFEST.filters || []).forEach(function(f){
+        if (targetsToReset && targetsToReset.indexOf(f.id) < 0) return;
+        filterState[f.id] = f.default != null ? f.default :
+                            (f.type === 'multiSelect' ? [] : '');
+        if (f.type === 'radio'){
+          var inputs = document.querySelectorAll('input[name="filter-' + f.id + '"]');
+          Array.prototype.forEach.call(inputs, function(r){
+            r.checked = r.value === String(filterState[f.id]);
+          });
+          return;
+        }
+        var el = document.getElementById('filter-' + f.id);
+        if (!el) return;
+        if (f.type === 'toggle') el.checked = !!filterState[f.id];
+        else if (f.type === 'multiSelect')
+          Array.from(el.options).forEach(function(o){ o.selected = (filterState[f.id] || []).indexOf(o.value) >= 0; });
+        else if (f.type === 'slider'){
+          el.value = filterState[f.id];
+          var display = document.getElementById('filter-' + f.id + '-val');
+          if (display) display.textContent = filterState[f.id];
+        }
+        else el.value = filterState[f.id] == null ? '' : filterState[f.id];
       });
+      Object.keys(currentDatasets).forEach(resetDataset);
+      Object.keys(CHARTS).forEach(rerenderChart);
+      renderKpis(); renderTables();
     }
+
+    document.querySelectorAll('[data-filter-reset]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var panel = btn.closest('.tab-panel');
+        var scopedIds = null;
+        if (panel && btn.classList.contains('filter-reset') &&
+            panel.classList.contains('tab-panel') && btn.closest('.tab-filter-bar')){
+          var pid = (panel.id || '').replace(/^tab-panel-/, '');
+          scopedIds = (MANIFEST.filters || [])
+            .filter(function(f){ return String(f.scope || '') === 'tab:' + pid; })
+            .map(function(f){ return f.id; });
+        }
+        resetFilters(scopedIds);
+      });
+    });
   }
 
   // ----- KPI widgets -----
+  //
+  // Default behavior: use comma-grouped digits for numbers < 1M
+  // (so 2820 -> "2,820" not "3K"); compact K / M / B / T suffix only
+  // kicks in at >= 1M. Callers can override via `format`:
+  //    "compact"  -> always K/M/B/T abbreviation
+  //    "comma"    -> always full digits w/ commas, no abbreviation
+  //    "percent"  -> multiply by 100 + "%" suffix
+  //    "raw"      -> Number(v).toString() no grouping
+  // `decimals` controls fractional digits (defaults vary by magnitude).
+  function _commaGroup(intStr){
+    // insert thousands separators on the integer portion
+    return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
   function formatNumber(v, opts){
     opts = opts || {};
     if (v == null || isNaN(+v)) return String(v);
     var n = +v;
-    var d = opts.decimals != null ? opts.decimals :
-              (Math.abs(n) >= 1000 ? 0 : 2);
     var prefix = opts.prefix || '';
     var suffix = opts.suffix || '';
+    var mode = opts.format || 'auto';
     var abs = Math.abs(n);
-    var formatted;
-    if (abs >= 1e12) formatted = (n/1e12).toFixed(d) + 'T';
-    else if (abs >= 1e9)  formatted = (n/1e9).toFixed(d) + 'B';
-    else if (abs >= 1e6)  formatted = (n/1e6).toFixed(d) + 'M';
-    else if (abs >= 1e3)  formatted = (n/1e3).toFixed(d) + 'K';
-    else formatted = n.toFixed(d);
-    return prefix + formatted + suffix;
+    var d = opts.decimals;
+    function _apply(formatted){ return prefix + formatted + suffix; }
+    if (mode === 'raw'){
+      return _apply(String(n));
+    }
+    if (mode === 'percent'){
+      if (d == null) d = 2;
+      return _apply((n * 100).toFixed(d) + '%');
+    }
+    if (mode === 'comma'){
+      if (d == null) d = (abs >= 1000 ? 0 : 2);
+      var parts = n.toFixed(d).split('.');
+      parts[0] = _commaGroup(parts[0]);
+      return _apply(parts.join('.'));
+    }
+    if (mode === 'compact'){
+      if (d == null) d = 1;
+      var f;
+      if (abs >= 1e12) f = (n/1e12).toFixed(d) + 'T';
+      else if (abs >= 1e9)  f = (n/1e9).toFixed(d) + 'B';
+      else if (abs >= 1e6)  f = (n/1e6).toFixed(d) + 'M';
+      else if (abs >= 1e3)  f = (n/1e3).toFixed(d) + 'K';
+      else                   f = n.toFixed(d);
+      return _apply(f);
+    }
+    // auto: commas below 1M, compact above
+    if (abs >= 1e12) { if (d == null) d = 1;
+      return _apply((n/1e12).toFixed(d) + 'T'); }
+    if (abs >= 1e9)  { if (d == null) d = 1;
+      return _apply((n/1e9).toFixed(d) + 'B'); }
+    if (abs >= 1e6)  { if (d == null) d = 1;
+      return _apply((n/1e6).toFixed(d) + 'M'); }
+    if (d == null) d = (abs >= 1000 ? 0 : 2);
+    var parts2 = n.toFixed(d).split('.');
+    parts2[0] = _commaGroup(parts2[0]);
+    return _apply(parts2.join('.'));
   }
 
   function resolveAgg(src, agg, col){
@@ -2152,7 +2586,7 @@ DASHBOARD_APP_JS = r"""
       var formatted;
       if (typeof value === 'number'){
         formatted = formatNumber(value, {
-          decimals: w.decimals,
+          decimals: w.decimals, format: w.format,
           prefix: w.prefix || '', suffix: w.suffix || ''
         });
       } else {
@@ -2418,8 +2852,28 @@ DASHBOARD_APP_JS = r"""
       });
       html += '</tr></thead><tbody>';
 
+      // Row highlighting: match a list of rules `{field, op, value,
+      // class}` against each row. First matching rule wins. `class`
+      // must be one of: 'pos', 'neg', 'muted', 'warn', 'info', or
+      // a dashed bucket name. The row gets a `.row-hl-<class>` CSS
+      // class (styles below).
+      function _pickRowHL(row) {
+        var rules = w.row_highlight || [];
+        for (var i = 0; i < rules.length; i++){
+          var r = rules[i];
+          var fi = header.indexOf(r.field);
+          if (fi < 0) continue;
+          if (cmpOp(r.op || '==', row[fi], r.value)){
+            return r.class || r.cls || r.className || 'info';
+          }
+        }
+        return null;
+      }
+
       visible.forEach(function(row, ri){
-        html += '<tr data-row-idx="' + ri + '" data-tid="' + id + '">';
+        var hlClass = _pickRowHL(row);
+        var rowCls = hlClass ? ' class="row-hl-' + hlClass + '"' : '';
+        html += '<tr' + rowCls + ' data-row-idx="' + ri + '" data-tid="' + id + '">';
         cols.forEach(function(c, ci){
           var hi = colIndexes[ci];
           var v = hi >= 0 ? row[hi] : null;
@@ -2491,6 +2945,14 @@ DASHBOARD_APP_JS = r"""
   }
 
   // ----- row click modal -----
+  //
+  // Two modes:
+  //   A) Simple key/value table. Use `row_click.popup_fields` (or
+  //      default = all columns). Same as the v1 behaviour.
+  //   B) Rich detail layout. Use `row_click.detail.sections[]` with
+  //      section `type: "stats" | "markdown" | "chart" | "table"`.
+  //      Charts can be filtered by the clicked row's key value, so
+  //      you can embed a per-entity time series, yield curve, etc.
   function openRowModal(w, header, row, cols){
     var rc = w.row_click || {};
     var title = '';
@@ -2502,8 +2964,22 @@ DASHBOARD_APP_JS = r"""
       var firstIdx = header.indexOf(cols[0].field);
       if (firstIdx >= 0) title = String(row[firstIdx]);
     }
+    // subtitle support: `row_click.subtitle_field` or
+    // `row_click.subtitle_template` (string with `{field}` placeholders).
+    var subtitle = null;
+    if (rc.subtitle_field){
+      var sIdx = header.indexOf(rc.subtitle_field);
+      if (sIdx >= 0) subtitle = String(row[sIdx]);
+    } else if (rc.subtitle_template){
+      subtitle = _expandRowTemplate(rc.subtitle_template, header, row);
+    }
 
-    // Which fields to show in the body? Default = all columns.
+    if (rc.detail && rc.detail.sections){
+      openRichRowModal(rc, title, subtitle, header, row, cols);
+      return;
+    }
+
+    // Legacy simple mode: key/value table.
     var showFields = rc.popup_fields;
     if (!showFields || showFields === '*' || (showFields.length === 1 && showFields[0] === '*')){
       showFields = header.slice();
@@ -2514,7 +2990,6 @@ DASHBOARD_APP_JS = r"""
       var hi = header.indexOf(fname);
       if (hi < 0) return;
       var val = row[hi];
-      // Try to re-use column format if we have it
       var fmt = null;
       if (cols){
         for (var i = 0; i < cols.length; i++){
@@ -2530,10 +3005,288 @@ DASHBOARD_APP_JS = r"""
       body += '<div class="modal-extra">' + String(rc.extra_content) + '</div>';
     }
 
-    showModal(title || 'Details', body);
+    showModal(title || 'Details', body, {subtitle: subtitle, wide: false});
   }
 
-  function showModal(title, bodyHtml){
+  // Substitute `{field}` tokens in a template using the current row
+  // values. `{field:format}` applies a value format (see formatValue).
+  function _expandRowTemplate(tpl, header, row){
+    return String(tpl).replace(/\{([^}:]+)(?::([^}]+))?\}/g, function(m, f, fmt){
+      var i = header.indexOf(f.trim());
+      if (i < 0) return m;
+      return formatValue(row[i], fmt ? fmt.trim() : null);
+    });
+  }
+
+  function openRichRowModal(rc, title, subtitle, header, row, cols){
+    var detail = rc.detail || {};
+    var sections = detail.sections || [];
+    var rowMap = {};
+    header.forEach(function(h, i){ rowMap[h] = row[i]; });
+
+    // Give each chart section a stable dom id so we can init ECharts
+    // after the modal HTML is in the DOM.
+    var chartJobs = [];
+    var parts = [];
+
+    sections.forEach(function(sec, si){
+      var sType = (sec.type || '').toLowerCase();
+      if (sType === 'stats'){
+        parts.push(_renderDetailStats(sec, rowMap, header, cols));
+      } else if (sType === 'markdown'){
+        parts.push(_renderDetailMarkdown(sec, header, row));
+      } else if (sType === 'chart'){
+        var cid = 'detail-chart-' + si + '-' + (Math.random() * 1e6 | 0);
+        var h = sec.height || sec.h_px || 260;
+        parts.push(
+          (sec.title ? '<div class="detail-section-title">'
+             + _he(sec.title) + '</div>' : '') +
+          '<div id="' + cid + '" class="detail-chart"'
+          + ' style="height:' + h + 'px"></div>'
+        );
+        chartJobs.push({id: cid, sec: sec});
+      } else if (sType === 'table'){
+        parts.push(_renderDetailTable(sec, rowMap, header, row));
+      } else if (sType === 'kv' || sType === 'kv_table'){
+        // Simple key/value inline
+        parts.push(_renderDetailKV(sec, header, row, cols));
+      }
+    });
+
+    showModal(title || 'Details', parts.join('\n'),
+                {subtitle: subtitle, wide: detail.wide !== false});
+
+    // Init embedded charts AFTER the DOM is live so ECharts can
+    // measure their containers.
+    setTimeout(function(){
+      chartJobs.forEach(function(job){ _renderDetailChart(job.id, job.sec, rowMap); });
+    }, 0);
+  }
+
+  function _renderDetailStats(sec, rowMap, header, cols){
+    var items = (sec.fields || []).map(function(f){
+      // Accept plain string ("ticker") or {field, label, format,
+      // prefix, suffix}.
+      if (typeof f === 'string') f = {field: f};
+      var v = rowMap[f.field];
+      var lbl = f.label != null ? f.label : f.field;
+      var fmt = f.format;
+      if (!fmt && cols){
+        for (var i = 0; i < cols.length; i++){
+          if (cols[i].field === f.field){ fmt = cols[i].format; break; }
+        }
+      }
+      var text = formatValue(v, fmt);
+      if (f.prefix) text = f.prefix + text;
+      if (f.suffix) text = text + f.suffix;
+      var cls = 'detail-stat';
+      if (typeof v === 'number'){
+        if (f.signed_color && v > 0) cls += ' pos';
+        else if (f.signed_color && v < 0) cls += ' neg';
+      }
+      return '<div class="' + cls + '">'
+        + '<div class="detail-stat-label">' + _he(lbl) + '</div>'
+        + '<div class="detail-stat-value">' + text + '</div>'
+        + (f.sub ? '<div class="detail-stat-sub">'
+                    + _he(_expandRowTemplate(f.sub, header,
+                        header.map(function(h){ return rowMap[h]; })))
+                    + '</div>' : '')
+        + '</div>';
+    });
+    var title = sec.title
+      ? '<div class="detail-section-title">' + _he(sec.title) + '</div>'
+      : '';
+    return title + '<div class="detail-stats">' + items.join('') + '</div>';
+  }
+
+  function _renderDetailMarkdown(sec, header, row){
+    var tpl = sec.template != null ? sec.template
+               : (sec.content != null ? sec.content : '');
+    var md = _expandRowTemplate(tpl, header, row);
+    return '<div class="detail-markdown">' + _mdInlinePopup(md) + '</div>';
+  }
+
+  function _renderDetailKV(sec, header, row, cols){
+    var fields = sec.fields || header;
+    var body = '<table class="modal-detail-table">';
+    fields.forEach(function(fname){
+      var hi = header.indexOf(fname);
+      if (hi < 0) return;
+      var fmt = null;
+      if (cols){
+        for (var i = 0; i < cols.length; i++){
+          if (cols[i].field === fname){ fmt = cols[i].format; break; }
+        }
+      }
+      body += '<tr><th>' + _he(fname) + '</th>'
+           + '<td>' + formatValue(row[hi], fmt) + '</td></tr>';
+    });
+    body += '</table>';
+    var title = sec.title
+      ? '<div class="detail-section-title">' + _he(sec.title) + '</div>'
+      : '';
+    return title + body;
+  }
+
+  function _renderDetailTable(sec, rowMap, header, row){
+    // A sub-table driven by a filtered manifest dataset.
+    // sec: {dataset, filter_field?, row_key?, columns?, max_rows?}
+    var ds = DATASETS[sec.dataset];
+    var src = ds && ds.source ? ds.source : ds;
+    if (!Array.isArray(src) || src.length < 2) return '';
+    var sHeader = src[0];
+    var body = src.slice(1);
+    if (sec.filter_field && sec.row_key){
+      var key = rowMap[sec.row_key];
+      var fi = sHeader.indexOf(sec.filter_field);
+      if (fi >= 0) body = body.filter(function(r){ return r[fi] === key; });
+    }
+    var maxRows = sec.max_rows || 12;
+    body = body.slice(0, maxRows);
+    var colsCfg = sec.columns ||
+      sHeader.map(function(h){ return {field: h, label: h}; });
+    var cIdx = colsCfg.map(function(c){ return sHeader.indexOf(c.field); });
+    var html = '<table class="modal-detail-table sub"><thead><tr>';
+    colsCfg.forEach(function(c){
+      html += '<th>' + _he(c.label || c.field) + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+    body.forEach(function(r){
+      html += '<tr>';
+      colsCfg.forEach(function(c, ci){
+        var v = cIdx[ci] >= 0 ? r[cIdx[ci]] : null;
+        html += '<td>' + formatValue(v, c.format) + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    var title = sec.title
+      ? '<div class="detail-section-title">' + _he(sec.title) + '</div>'
+      : '';
+    return title + html;
+  }
+
+  function _renderDetailChart(elId, sec, rowMap){
+    var el = document.getElementById(elId); if (!el) return;
+    var ds = DATASETS[sec.dataset];
+    var src = ds && ds.source ? ds.source : ds;
+    if (!Array.isArray(src) || src.length < 2) return;
+    var header = src[0];
+    var body = src.slice(1);
+    // Filter to the clicked row's key value if configured.
+    if (sec.filter_field && sec.row_key){
+      var key = rowMap[sec.row_key];
+      var fi = header.indexOf(sec.filter_field);
+      if (fi >= 0) body = body.filter(function(r){ return r[fi] === key; });
+    }
+    if (!body.length) {
+      el.innerHTML = '<div class="detail-chart-empty">No data for this row.</div>';
+      return;
+    }
+    var m = sec.mapping || {};
+    var chartType = (sec.chart_type || 'line').toLowerCase();
+    var xCol = m.x;
+    var yCol = m.y;
+    var xIdx = header.indexOf(xCol);
+    // Build the option. We intentionally keep this small and purpose-
+    // built (rather than calling into the main builder dispatch on
+    // the server) so detail popups render fast and don't need a full
+    // Python round-trip on each row click.
+    var series = [];
+    if (Array.isArray(yCol)){
+      // Wide-form: one line per y column.
+      yCol.forEach(function(y){
+        var yi = header.indexOf(y);
+        series.push({
+          type: chartType === 'bar' ? 'bar' : 'line',
+          name: y, showSymbol: false,
+          data: body.map(function(r){ return [r[xIdx], r[yi]]; }),
+        });
+      });
+    } else {
+      var yi = header.indexOf(yCol);
+      series.push({
+        type: chartType === 'bar' ? 'bar' : 'line',
+        name: yCol, showSymbol: false,
+        areaStyle: chartType === 'area' ? {opacity: 0.25} : undefined,
+        data: body.map(function(r){ return [r[xIdx], r[yi]]; }),
+      });
+    }
+    var opt = {
+      grid: {top: 24, right: 24, bottom: 40, left: 56, containLabel: true},
+      tooltip: {trigger: 'axis'},
+      xAxis: {type: _guessAxisTypeFromValues(body, xIdx)},
+      yAxis: {type: 'value', scale: true,
+               name: m.y_title || ''},
+      series: series,
+    };
+    // date formatting like the main charts
+    if (opt.xAxis.type === 'time'){
+      opt.xAxis.axisLabel = {formatter: function(v){
+        var d = new Date(v);
+        if (isNaN(d.getTime())) return v;
+        var mo = ['Jan','Feb','Mar','Apr','May','Jun',
+                  'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+        return mo + ' ' + d.getDate();
+      }};
+    }
+    // Palette from GS theme
+    opt.color = PAYLOAD.palettes.gs_primary ? PAYLOAD.palettes.gs_primary.colors : null;
+    if (sec.annotations){
+      _applyDetailAnnotations(opt, sec.annotations);
+    }
+    var theme = MANIFEST.theme || 'gs_clean';
+    var inst = echarts.init(el, theme in PAYLOAD.themes ? theme : null);
+    inst.setOption(opt, true);
+    // Track so we can dispose on modal close (prevents leak over many
+    // clicks).
+    _DETAIL_CHARTS.push(inst);
+  }
+
+  function _guessAxisTypeFromValues(rows, idx){
+    if (!rows.length || idx < 0) return 'value';
+    var v = rows[0][idx];
+    if (typeof v === 'number') return 'value';
+    if (typeof v === 'string') {
+      var d = Date.parse(v);
+      if (!isNaN(d)) return 'time';
+      return 'category';
+    }
+    return 'value';
+  }
+
+  function _applyDetailAnnotations(opt, ann){
+    var mlData = [], maData = [];
+    (ann || []).forEach(function(a){
+      if (!a || typeof a !== 'object') return;
+      if (a.type === 'hline' && a.y != null){
+        mlData.push({yAxis: a.y,
+                      lineStyle: {color: a.color || '#718096',
+                                    type: a.style || 'dashed'},
+                      label: {formatter: a.label || ''}});
+      } else if (a.type === 'vline' && a.x != null){
+        mlData.push({xAxis: a.x,
+                      lineStyle: {color: a.color || '#718096',
+                                    type: a.style || 'dashed'},
+                      label: {formatter: a.label || ''}});
+      } else if (a.type === 'band' && a.y1 != null && a.y2 != null){
+        maData.push([{yAxis: a.y1,
+                       itemStyle: {color: a.color || 'rgba(26,54,93,0.08)',
+                                     opacity: a.opacity || 0.2}},
+                      {yAxis: a.y2}]);
+      }
+    });
+    if (mlData.length || maData.length){
+      var s0 = (opt.series || [])[0] || {};
+      if (mlData.length) s0.markLine = {symbol: 'none', data: mlData};
+      if (maData.length) s0.markArea = {data: maData};
+    }
+  }
+
+  var _DETAIL_CHARTS = [];
+
+  function showModal(title, bodyHtml, opts){
+    opts = opts || {};
     var back = document.getElementById('ed-modal-backdrop');
     if (!back){
       back = document.createElement('div');
@@ -2542,7 +3295,10 @@ DASHBOARD_APP_JS = r"""
       back.innerHTML =
         '<div class="ed-modal">' +
           '<div class="ed-modal-header">' +
-            '<div class="ed-modal-title"></div>' +
+            '<div class="ed-modal-title-wrap">' +
+              '<div class="ed-modal-title"></div>' +
+              '<div class="ed-modal-subtitle"></div>' +
+            '</div>' +
             '<button class="ed-modal-close" aria-label="close">\u2715</button>' +
           '</div>' +
           '<div class="ed-modal-body"></div>' +
@@ -2556,14 +3312,129 @@ DASHBOARD_APP_JS = r"""
         if (e.key === 'Escape') hideModal();
       });
     }
+    var modal = back.querySelector('.ed-modal');
+    modal.classList.toggle('wide', !!opts.wide);
     back.querySelector('.ed-modal-title').textContent = title;
+    var subEl = back.querySelector('.ed-modal-subtitle');
+    if (opts.subtitle){
+      subEl.textContent = opts.subtitle;
+      subEl.style.display = 'block';
+    } else {
+      subEl.textContent = '';
+      subEl.style.display = 'none';
+    }
     back.querySelector('.ed-modal-body').innerHTML = bodyHtml;
     back.style.display = 'flex';
   }
   function hideModal(){
     var back = document.getElementById('ed-modal-backdrop');
     if (back) back.style.display = 'none';
+    // Dispose embedded detail charts so they don't leak memory
+    // across many row clicks.
+    if (typeof _DETAIL_CHARTS !== 'undefined' && _DETAIL_CHARTS){
+      _DETAIL_CHARTS.forEach(function(inst){
+        try { inst.dispose(); } catch(e){}
+      });
+      _DETAIL_CHARTS.length = 0;
+    }
   }
+
+  // ----- click popup wiring (info icons) -----
+  //
+  // Every \u24D8 icon in the dashboard carries `data-popup-title` and
+  // `data-popup-body` attributes (set server-side by
+  // _popup_icon_html). Clicking the icon opens the shared modal with
+  // markdown-rendered body content. ESC / overlay click / X button
+  // all close the modal via existing hideModal wiring.
+  //
+  // Also: clicking inside a <label> normally toggles the associated
+  // form control; we stopPropagation so the filter doesn't re-focus
+  // underneath the open modal.
+  function _mdInlinePopup(text){
+    // Minimal markdown subset shared with the markdown widget:
+    // **bold**, *italic*, `code`, [label](url), - / * bullets,
+    // paragraphs on blank lines. Implemented inline here so we don't
+    // have to re-export the Python markdown renderer to JS.
+    if (text == null) return '';
+    var escapeHTML = function(s){
+      return String(s == null ? '' : s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    };
+    var placeholders = [];
+    var staged = String(text).replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+      function(_, lbl, url){
+        placeholders.push(
+          '<a href="' + escapeHTML(url) + '" target="_blank"' +
+          ' rel="noopener">' + escapeHTML(lbl) + '</a>');
+        return '\x00LINK' + (placeholders.length - 1) + '\x00';
+      });
+    var esc = escapeHTML(staged);
+    esc = esc.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    esc = esc.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
+    esc = esc.replace(/`([^`]+)`/g, '<code>$1</code>');
+    for (var i = 0; i < placeholders.length; i++){
+      esc = esc.replace('\x00LINK' + i + '\x00', placeholders[i]);
+    }
+    var lines = esc.split(/\n/);
+    var out = [], para = [], list = [];
+    var flushPara = function(){
+      if (para.length){ out.push('<p>' + para.join(' ') + '</p>'); para = []; }
+    };
+    var flushList = function(){
+      if (list.length){
+        out.push('<ul>' + list.map(function(x){
+          return '<li>' + x + '</li>';
+        }).join('') + '</ul>');
+        list = [];
+      }
+    };
+    lines.forEach(function(raw){
+      var l = raw.replace(/\s+$/, '');
+      var s = l.replace(/^\s+/, '');
+      if (/^###\s/.test(s)) {
+        flushPara(); flushList();
+        out.push('<h3>' + s.slice(4) + '</h3>');
+      } else if (/^##\s/.test(s)) {
+        flushPara(); flushList();
+        out.push('<h2>' + s.slice(3) + '</h2>');
+      } else if (/^#\s/.test(s)) {
+        flushPara(); flushList();
+        out.push('<h1>' + s.slice(2) + '</h1>');
+      } else if (/^[-*]\s/.test(s)) {
+        flushPara(); list.push(s.slice(2));
+      } else if (s === '') {
+        flushPara(); flushList();
+      } else {
+        flushList(); para.push(s);
+      }
+    });
+    flushPara(); flushList();
+    return out.join('\n');
+  }
+
+  function wirePopupIcons(){
+    document.querySelectorAll(
+      '.tile-info, .filter-info, .stat-info'
+    ).forEach(function(icon){
+      if (icon._popupWired) return;
+      icon._popupWired = true;
+      icon.addEventListener('click', function(e){
+        e.preventDefault();
+        e.stopPropagation();
+        var title = icon.getAttribute('data-popup-title') || '';
+        var body = icon.getAttribute('data-popup-body') || '';
+        if (!body) return;
+        showModal(title || 'Details', _mdInlinePopup(body));
+      });
+      icon.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' || e.key === ' '){
+          e.preventDefault(); icon.click();
+        }
+      });
+    });
+  }
+  wirePopupIcons();
 
   // ----- per-tile fullscreen + export -----
   function wireTileActions(){
@@ -2599,6 +3470,7 @@ DASHBOARD_APP_JS = r"""
       });
     });
   }
+
 
   // ----- chart count badge -----
   var ccEl = document.getElementById('chart-count');
@@ -2787,15 +3659,44 @@ def _span_style(w: int, cols: int) -> str:
     return f"grid-column: span {max(1, min(w, cols))};"
 
 
-def _render_filter_controls(filters: List[Dict[str, Any]]) -> str:
+def _render_filter_controls(filters: List[Dict[str, Any]],
+                              *, inline: bool = False,
+                              show_reset: bool = True) -> str:
+    """Render a list of filter controls as HTML.
+
+    When ``inline=True`` the bar is emitted with the ``tab-filter-bar``
+    class (flush with tab content, no full-width border) instead of the
+    global ``filter-bar`` chrome. When no filters are supplied an empty
+    string is returned so the container can be hidden entirely.
+    """
     if not filters:
         return ""
-    out = ["<div class=\"filter-bar\">"]
+    cls = "tab-filter-bar" if inline else "filter-bar"
+    out = [f"<div class=\"{cls}\">"]
+
+    def _label_html(label_text: str, description: Optional[str],
+                      popup: Optional[Dict[str, Any]] = None) -> str:
+        """Filter label with optional info icon. Hovering shows the
+        description as a native tooltip; clicking opens a modal with
+        the same text (or the richer ``popup`` body if provided)."""
+        if description or popup:
+            info = _popup_icon_html(
+                info_text=description,
+                popup=popup,
+                fallback_title=label_text,
+                cls="filter-info tile-info",
+            )
+        else:
+            info = ""
+        return f'<label>{_html_escape(label_text)}{info}</label>'
+
     for f in filters:
         fid = f["id"]
         label = f.get("label", fid)
         ftype = f.get("type")
         default = f.get("default", "")
+        desc = f.get("description") or f.get("help") or f.get("info")
+        lbl = _label_html(label, desc, f.get("popup"))
         if ftype == "dateRange":
             options = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "5Y", "All"]
             opts_html = "".join(
@@ -2803,7 +3704,7 @@ def _render_filter_controls(filters: List[Dict[str, Any]]) -> str:
                 for o in options
             )
             out.append(
-                f"<div class=\"filter-item\"><label>{_html_escape(label)}</label>"
+                f"<div class=\"filter-item\">{lbl}"
                 f"<select id=\"filter-{fid}\">{opts_html}</select></div>"
             )
         elif ftype in ("select", "multiSelect"):
@@ -2821,12 +3722,12 @@ def _render_filter_controls(filters: List[Dict[str, Any]]) -> str:
                 for o in options
             )
             out.append(
-                f"<div class=\"filter-item\"><label>{_html_escape(label)}</label>"
+                f"<div class=\"filter-item\">{lbl}"
                 f"<select id=\"filter-{fid}\"{multi}>{opts_html}</select></div>"
             )
         elif ftype == "numberRange":
             out.append(
-                f"<div class=\"filter-item\"><label>{_html_escape(label)}</label>"
+                f"<div class=\"filter-item\">{lbl}"
                 f"<input id=\"filter-{fid}\" type=\"text\" "
                 f"value=\"{_html_escape(str(default))}\" "
                 f"placeholder=\"min,max\"/>"
@@ -2835,7 +3736,7 @@ def _render_filter_controls(filters: List[Dict[str, Any]]) -> str:
         elif ftype == "toggle":
             checked = " checked" if default else ""
             out.append(
-                f"<div class=\"filter-item\"><label>{_html_escape(label)}</label>"
+                f"<div class=\"filter-item\">{lbl}"
                 f"<input id=\"filter-{fid}\" type=\"checkbox\"{checked}/></div>"
             )
         elif ftype == "slider":
@@ -2844,7 +3745,7 @@ def _render_filter_controls(filters: List[Dict[str, Any]]) -> str:
             step = f.get("step", 1)
             val = default if default != "" else mn
             out.append(
-                f"<div class=\"filter-item slider\"><label>{_html_escape(label)}</label>"
+                f"<div class=\"filter-item slider\">{lbl}"
                 f"<div class=\"slider-row\">"
                 f"<input id=\"filter-{fid}\" type=\"range\" "
                 f"min=\"{mn}\" max=\"{mx}\" step=\"{step}\" value=\"{val}\"/>"
@@ -2863,14 +3764,13 @@ def _render_filter_controls(filters: List[Dict[str, Any]]) -> str:
                     f"{_html_escape(o)}</label>"
                 )
             out.append(
-                f"<div class=\"filter-item radio-group\">"
-                f"<label>{_html_escape(label)}</label>"
+                f"<div class=\"filter-item radio-group\">{lbl}"
                 f"<div class=\"radio-row\">{''.join(radios)}</div></div>"
             )
         elif ftype == "text":
             placeholder = f.get("placeholder", "Type to search...")
             out.append(
-                f"<div class=\"filter-item text\"><label>{_html_escape(label)}</label>"
+                f"<div class=\"filter-item text\">{lbl}"
                 f"<input id=\"filter-{fid}\" type=\"text\" "
                 f"value=\"{_html_escape(str(default))}\" "
                 f"placeholder=\"{_html_escape(placeholder)}\"/></div>"
@@ -2886,22 +3786,164 @@ def _render_filter_controls(filters: List[Dict[str, Any]]) -> str:
                 extra += f" max=\"{mx}\""
             extra += f" step=\"{step}\""
             out.append(
-                f"<div class=\"filter-item number\"><label>{_html_escape(label)}</label>"
+                f"<div class=\"filter-item number\">{lbl}"
                 f"<input id=\"filter-{fid}\" type=\"number\""
                 f"{extra} value=\"{_html_escape(str(default))}\"/></div>"
             )
-    out.append("<button class=\"icon-btn filter-reset\" id=\"filter-reset\">Reset</button>")
+    if show_reset:
+        reset_id = "filter-reset" if not inline else ""
+        reset_attr = f" id=\"{reset_id}\"" if reset_id else ""
+        out.append(
+            f"<button class=\"icon-btn filter-reset\"{reset_attr}"
+            f" data-filter-reset>Reset</button>"
+        )
     out.append("</div>")
     return "\n".join(out)
 
 
-def _chart_toolbar_buttons() -> str:
+def _chart_toolbar_buttons(w: Dict[str, Any]) -> str:
+    """Toolbar buttons for a chart tile.
+
+    Includes built-in PNG / fullscreen buttons and any custom
+    ``action_buttons`` the widget defines. Each custom button is a
+    dict ``{label, onclick?, href?, icon?, title?}``. `onclick` names
+    a global JS function (wired via ``window.<name>``); `href` opens a
+    new tab. Unknown entries are skipped.
+    """
+    extra: List[str] = []
+    for btn in w.get("action_buttons") or []:
+        if not isinstance(btn, dict):
+            continue
+        label = _html_escape(btn.get("label", ""))
+        if not label and btn.get("icon"):
+            label = _html_escape(btn["icon"])
+        title = _html_escape(btn.get("title", btn.get("label", "")))
+        cls = "tile-btn tile-btn-custom"
+        if btn.get("primary"):
+            cls += " primary"
+        onclick = btn.get("onclick")
+        href = btn.get("href")
+        if href:
+            target = ' target="_blank" rel="noopener"'
+            extra.append(
+                f'<a class="{cls}" href="{_html_escape(href)}"'
+                f' title="{title}"{target}>{label}</a>'
+            )
+        elif onclick:
+            js = (f'(window.{onclick} && window.{onclick}'
+                   f'("{_html_escape(w.get("id", ""))}"))')
+            extra.append(
+                f'<button class="{cls}" title="{title}" '
+                f'onclick=\'{js}\'>{label}</button>'
+            )
+        else:
+            extra.append(
+                f'<button class="{cls}" title="{title}" disabled>'
+                f'{label}</button>'
+            )
     return (
         "<div class=\"tile-actions\">"
-        "<button class=\"tile-btn download\" title=\"PNG 2x\">PNG</button>"
-        "<button class=\"tile-btn fullscreen\" title=\"Fullscreen\">&#x26F6;</button>"
+        + "".join(extra)
+        + "<button class=\"tile-btn download\" title=\"PNG 2x\">PNG</button>"
+        "<button class=\"tile-btn fullscreen\" title=\"Fullscreen\">"
+        "&#x26F6;</button>"
         "</div>"
     )
+
+
+def _tile_title_html(w: Dict[str, Any]) -> str:
+    """Compose the inner title text for a tile header, including an
+    optional info icon, compact badge, and subtitle.
+
+      * ``info``     -- short hover tooltip. Clicking the \u24D8 icon
+                         also opens a modal with the same text (so long
+                         blurbs are readable and dismissable).
+      * ``popup``    -- {title, body} (body is markdown). Takes priority
+                         over `info` as the modal content; `info` is
+                         still used as the native hover tooltip.
+      * ``badge``    -- short pill (e.g. "LIVE", "BETA"); pair with
+                         ``badge_color`` to pick the hue.
+      * ``subtitle`` -- secondary text rendered on the line below the
+                         title, italic, small.
+    """
+    title = _html_escape(w.get("title", ""))
+    info = w.get("info")
+    popup = w.get("popup")
+    badge = w.get("badge")
+    subtitle = w.get("subtitle")
+    parts = ['<div class="tile-title-wrap">']
+    parts.append(f'<div class="tile-title">{title}')
+    if info or popup:
+        icon_html = _popup_icon_html(
+            info_text=info,
+            popup=popup,
+            fallback_title=w.get("title"),
+        )
+        parts.append(icon_html)
+    if badge:
+        color = w.get("badge_color") or "gs-navy"
+        parts.append(
+            f'<span class="tile-badge" data-color="{_html_escape(color)}">'
+            f'{_html_escape(str(badge))}</span>'
+        )
+    parts.append("</div>")
+    if subtitle:
+        parts.append(
+            f'<div class="tile-subtitle">{_html_escape(str(subtitle))}</div>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _popup_icon_html(info_text: Optional[str] = None,
+                      popup: Optional[Dict[str, Any]] = None,
+                      fallback_title: Optional[str] = None,
+                      cls: str = "tile-info") -> str:
+    """Render a clickable \u24D8 icon that opens a modal popup.
+
+    Click behaviour takes priority:
+      1. ``popup = {title, body}`` -- modal with that content
+      2. otherwise ``info`` -- modal with just that text
+    Hover shows the ``info`` text natively via the ``title=`` attr.
+    """
+    hover_title = ""
+    modal_title = ""
+    modal_body = ""
+    if isinstance(popup, dict):
+        modal_title = str(popup.get("title", fallback_title or ""))
+        modal_body = str(popup.get("body", info_text or ""))
+        hover_title = modal_title or info_text or ""
+    elif info_text:
+        hover_title = str(info_text)
+        modal_title = fallback_title or ""
+        modal_body = str(info_text)
+    title_attr = (f' title="{_html_escape(hover_title)}"'
+                   if hover_title else "")
+    return (
+        f'<span class="{cls}" tabindex="0" role="button"'
+        f' aria-label="More info"'
+        f'{title_attr}'
+        f' data-popup-title="{_html_escape(modal_title)}"'
+        f' data-popup-body="{_html_escape(modal_body)}"'
+        f'>\u24D8</span>'
+    )
+
+
+def _tile_class(w: Dict[str, Any], base: str) -> str:
+    """Base CSS classes for any tile, honoring widget-level flags."""
+    cls = base
+    if w.get("emphasis") or w.get("emphasized"):
+        cls += " tile-emphasis"
+    if w.get("pinned"):
+        cls += " tile-pinned"
+    return cls
+
+
+def _tile_footer_html(w: Dict[str, Any]) -> str:
+    foot = w.get("footer") or w.get("footnote")
+    if not foot:
+        return ""
+    return f'<div class="tile-footer">{_html_escape(str(foot))}</div>'
 
 
 def _render_widget(w: Dict[str, Any], cols: int) -> str:
@@ -2909,21 +3951,21 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
     width = w.get("w", cols)
     wid = w.get("id") or f"w_{id(w)}"
     style = _span_style(width, cols)
-    title = w.get("title", "")
-
     if wt == "chart":
         height = int(w.get("h_px", 280))
+        cls = _tile_class(w, "tile chart-tile")
         return (
-            f"<div class=\"tile chart-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
             f"style=\"{style}\">"
             f"  <div class=\"tile-header\">"
-            f"    <div class=\"tile-title\">{_html_escape(title)}</div>"
-            f"    {_chart_toolbar_buttons()}"
+            f"    {_tile_title_html(w)}"
+            f"    {_chart_toolbar_buttons(w)}"
             f"  </div>"
             f"  <div class=\"tile-body\">"
             f"    <div id=\"chart-{_html_escape(wid)}\" class=\"chart-div\" "
             f"style=\"height:{height}px\"></div>"
             f"  </div>"
+            f"  {_tile_footer_html(w)}"
             f"</div>"
         )
 
@@ -2932,35 +3974,51 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
         val = w.get("value", "--")
         sub = w.get("sub", "")
         has_sparkline = bool(w.get("sparkline_source"))
-        sub_html = f'<div class="kpi-sub">{_html_escape(sub)}</div>' if sub else ""
-        sparkline_html = '<div class="kpi-sparkline"></div>' if has_sparkline else ""
+        sub_html = (f'<div class="kpi-sub">{_html_escape(sub)}</div>'
+                     if sub else "")
+        sparkline_html = ('<div class="kpi-sparkline"></div>'
+                           if has_sparkline else "")
+        info_html = ""
+        if w.get("info") or w.get("popup"):
+            info_html = _popup_icon_html(
+                info_text=w.get("info"),
+                popup=w.get("popup"),
+                fallback_title=w.get("label", w.get("title", "")),
+                cls="tile-info tile-info-kpi",
+            )
+        cls = _tile_class(w, "tile kpi-tile")
         return (
-            f"<div class=\"tile kpi-tile\" id=\"kpi-{_html_escape(wid)}\" "
+            f"<div class=\"{cls}\" id=\"kpi-{_html_escape(wid)}\" "
             f"data-tile-id=\"{_html_escape(wid)}\" style=\"{style}\">"
-            f"<div class=\"kpi-label\">{_html_escape(label)}</div>"
+            f"<div class=\"kpi-label\">{_html_escape(label)}{info_html}</div>"
             f"<div class=\"kpi-value\">{_html_escape(val)}</div>"
             f"<div class=\"kpi-delta\" style=\"display:none\"></div>"
             f"{sub_html}"
             f"{sparkline_html}"
+            f"{_tile_footer_html(w)}"
             f"</div>"
         )
 
     if wt == "table":
+        cls = _tile_class(w, "tile table-tile")
         return (
-            f"<div class=\"tile table-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
             f"style=\"{style}\">"
             f"  <div class=\"tile-header\">"
-            f"    <div class=\"tile-title\">{_html_escape(title)}</div>"
+            f"    {_tile_title_html(w)}"
             f"  </div>"
             f"  <div class=\"tile-body\" id=\"table-{_html_escape(wid)}\"></div>"
+            f"  {_tile_footer_html(w)}"
             f"</div>"
         )
 
     if wt == "markdown":
+        cls = _tile_class(w, "tile markdown-tile")
         return (
-            f"<div class=\"tile markdown-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
             f"style=\"{style}\">"
             f"  <div class=\"tile-body\">{_render_md(w.get('content', ''))}</div>"
+            f"  {_tile_footer_html(w)}"
             f"</div>"
         )
 
@@ -2978,27 +4036,59 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
             lbl = _html_escape(st.get("label", ""))
             val = _html_escape(st.get("value", "--"))
             sub = st.get("sub", "")
-            sub_html = f'<div class="stat-sub">{_html_escape(sub)}</div>' if sub else ""
+            sub_html = (f'<div class="stat-sub">{_html_escape(sub)}</div>'
+                          if sub else "")
+            info = st.get("info") or st.get("description")
+            stat_popup = st.get("popup")
+            info_html = (
+                _popup_icon_html(
+                    info_text=info,
+                    popup=stat_popup,
+                    fallback_title=st.get("label", ""),
+                    cls="tile-info stat-info",
+                )
+                if info or stat_popup else ""
+            )
+            trend = st.get("trend")
+            trend_cls = "pos" if trend and trend > 0 else (
+                "neg" if trend and trend < 0 else "flat"
+            )
+            trend_arrow = (
+                "\u25B2" if trend and trend > 0 else (
+                    "\u25BC" if trend and trend < 0 else ""
+                )
+            )
+            trend_html = (
+                f'<span class="stat-trend {trend_cls}">{trend_arrow}</span>'
+                if trend is not None and trend != 0 else ""
+            )
+            cell_tip = (f' title="{_html_escape(str(info))}"'
+                          if info else "")
             cells.append(
-                f'<div class="stat-cell" data-stat-id="{_html_escape(st.get("id", ""))}">'
-                f'<div class="stat-label">{lbl}</div>'
-                f'<div class="stat-value">{val}</div>'
+                f'<div class="stat-cell"'
+                f' data-stat-id="{_html_escape(st.get("id", ""))}"'
+                f'{cell_tip}>'
+                f'<div class="stat-label">{lbl}{info_html}</div>'
+                f'<div class="stat-value">{trend_html}{val}</div>'
                 f'{sub_html}</div>'
             )
+        cls = _tile_class(w, "tile stat-grid-tile")
         return (
-            f"<div class=\"tile stat-grid-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
             f"style=\"{style}\">"
             f"  <div class=\"tile-header\">"
-            f"    <div class=\"tile-title\">{_html_escape(title)}</div>"
+            f"    {_tile_title_html(w)}"
             f"  </div>"
             f"  <div class=\"tile-body\">"
             f"    <div class=\"stat-grid\" id=\"stat-grid-{_html_escape(wid)}\">"
             f"{''.join(cells)}</div>"
             f"  </div>"
+            f"  {_tile_footer_html(w)}"
             f"</div>"
         )
 
     if wt == "image":
+        title = w.get("title", "")
         src = w.get("src") or w.get("url") or ""
         alt = _html_escape(w.get("alt", title))
         link = w.get("link")
@@ -3012,46 +4102,106 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
                 f'rel="noopener noreferrer">{img_html}</a>'
             )
         header_html = (
-            f"<div class=\"tile-header\">"
-            f"<div class=\"tile-title\">{_html_escape(title)}</div></div>"
+            f"<div class=\"tile-header\">{_tile_title_html(w)}</div>"
             if title else ""
         )
+        cls = _tile_class(w, "tile image-tile")
         return (
-            f"<div class=\"tile image-tile\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
             f"style=\"{style}\">"
             f"{header_html}"
             f"<div class=\"tile-body\">{img_html}</div>"
+            f"{_tile_footer_html(w)}"
             f"</div>"
         )
 
     return ""
 
 
+import re as _re
+
+# Inline markdown regexes. We intentionally keep the grammar tiny (no
+# full markdown compiler): links, bold, italic, inline code. Anything
+# else is escaped as plain text.
+_RE_LINK = _re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_RE_BOLD = _re.compile(r"\*\*([^*]+)\*\*")
+_RE_ITAL = _re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")
+_RE_CODE = _re.compile(r"`([^`]+)`")
+
+
+def _md_inline(text: str) -> str:
+    """Escape the text then re-apply inline markdown for a safe
+    subset: [label](url), **bold**, *italic*, `code`. URLs are
+    passed through intact so we must be careful about escaping.
+    """
+    # Step 1: extract links to placeholders so we don't escape the URL.
+    placeholders: List[str] = []
+    def _stash_link(m):
+        label, url = m.group(1), m.group(2)
+        placeholders.append(
+            f'<a href="{_html_escape(url)}" target="_blank"'
+            f' rel="noopener noreferrer">{_html_escape(label)}</a>'
+        )
+        return f"\x00LINK{len(placeholders) - 1}\x00"
+
+    staged = _RE_LINK.sub(_stash_link, text)
+    escaped = _html_escape(staged)
+    # Step 2: bold / italic / inline code on the escaped version.
+    escaped = _RE_BOLD.sub(r"<strong>\1</strong>", escaped)
+    escaped = _RE_ITAL.sub(r"<em>\1</em>", escaped)
+    escaped = _RE_CODE.sub(r"<code>\1</code>", escaped)
+    # Step 3: restore links.
+    for i, ph in enumerate(placeholders):
+        escaped = escaped.replace(f"\x00LINK{i}\x00", ph)
+    return escaped
+
+
 def _render_md(src: str) -> str:
+    """Minimal markdown renderer for dashboard markdown tiles.
+
+    Supports: # / ## / ### headings, paragraphs separated by blank
+    lines, `-` / `*` bullet lists, inline **bold** / *italic* /
+    `code` / [label](url). Paragraphs are rendered as flowing text
+    with line breaks joined by spaces.
+    """
     lines = str(src).splitlines()
-    html = []
+    html: List[str] = []
     buf_para: List[str] = []
+    buf_list: List[str] = []
 
     def flush_para():
         if buf_para:
-            html.append(f"<p>{_html_escape(' '.join(buf_para))}</p>")
+            html.append(f"<p>{_md_inline(' '.join(buf_para))}</p>")
             buf_para.clear()
 
-    for line in lines:
-        if line.startswith("### "):
+    def flush_list():
+        if buf_list:
+            items = "".join(f"<li>{_md_inline(li)}</li>"
+                             for li in buf_list)
+            html.append(f"<ul>{items}</ul>")
+            buf_list.clear()
+
+    for raw in lines:
+        line = raw.rstrip()
+        stripped = line.lstrip()
+        if stripped.startswith("### "):
+            flush_para(); flush_list()
+            html.append(f"<h3>{_md_inline(stripped[4:])}</h3>")
+        elif stripped.startswith("## "):
+            flush_para(); flush_list()
+            html.append(f"<h2>{_md_inline(stripped[3:])}</h2>")
+        elif stripped.startswith("# "):
+            flush_para(); flush_list()
+            html.append(f"<h1>{_md_inline(stripped[2:])}</h1>")
+        elif stripped.startswith("- ") or stripped.startswith("* "):
             flush_para()
-            html.append(f"<h3>{_html_escape(line[4:])}</h3>")
-        elif line.startswith("## "):
-            flush_para()
-            html.append(f"<h2>{_html_escape(line[3:])}</h2>")
-        elif line.startswith("# "):
-            flush_para()
-            html.append(f"<h1>{_html_escape(line[2:])}</h1>")
-        elif line.strip() == "":
-            flush_para()
+            buf_list.append(stripped[2:])
+        elif stripped == "":
+            flush_para(); flush_list()
         else:
-            buf_para.append(line.strip())
-    flush_para()
+            flush_list()
+            buf_para.append(stripped)
+    flush_para(); flush_list()
     return "\n".join(html)
 
 
@@ -3104,24 +4254,50 @@ def render_dashboard_html(
     cols = int(layout.get("cols", 12))
     kind = layout.get("kind", "grid")
 
-    # Tab bar + panels
+    # Split filters by scope: globals go in the top bar, "tab:<id>" filters
+    # render inline inside their host tab panel. Filters without an
+    # explicit scope default to global (_augment_manifest sets this).
+    filters = manifest.get("filters", []) or []
+    global_filters: List[Dict[str, Any]] = []
+    per_tab_filters: Dict[str, List[Dict[str, Any]]] = {}
+    for f in filters:
+        scope = str(f.get("scope", "global"))
+        if scope.startswith("tab:"):
+            per_tab_filters.setdefault(scope[4:], []).append(f)
+        else:
+            global_filters.append(f)
+
     if kind == "tabs":
         tabs = layout.get("tabs", []) or []
-        tab_bar_html = "<nav class=\"tab-bar\">" + "".join(
-            f"<button class=\"tab-btn\" data-tab=\"{_html_escape(t['id'])}\">"
-            f"{_html_escape(t.get('label', t['id']))}</button>"
-            for t in tabs
-        ) + "</nav>"
-        panels_html = "\n".join(
-            f"<section class=\"tab-panel\" id=\"tab-panel-{_html_escape(t['id'])}\">"
-            + (
-                f"<div class=\"tab-panel-header\"><h2>{_html_escape(t.get('description', ''))}</h2></div>"
+        tab_btns: List[str] = []
+        for t in tabs:
+            tip = t.get("description", "")
+            title_attr = (f' title="{_html_escape(tip)}"' if tip else "")
+            tab_btns.append(
+                f"<button class=\"tab-btn\""
+                f" data-tab=\"{_html_escape(t['id'])}\"{title_attr}>"
+                f"{_html_escape(t.get('label', t['id']))}</button>"
+            )
+        tab_bar_html = "<nav class=\"tab-bar\">" + "".join(tab_btns) + "</nav>"
+
+        def _panel(t: Dict[str, Any]) -> str:
+            tid = t["id"]
+            header = (
+                f"<div class=\"tab-panel-header\">"
+                f"<h2>{_html_escape(t.get('description', ''))}</h2></div>"
                 if t.get("description") else ""
-              )
-            + _render_rows(t.get("rows", []) or [], cols)
-            + "</section>"
-            for t in tabs
-        )
+            )
+            inline_bar = _render_filter_controls(
+                per_tab_filters.get(tid, []), inline=True,
+                show_reset=bool(per_tab_filters.get(tid))
+            )
+            rows = _render_rows(t.get("rows", []) or [], cols)
+            return (
+                f"<section class=\"tab-panel\" "
+                f"id=\"tab-panel-{_html_escape(tid)}\">"
+                f"{header}{inline_bar}{rows}</section>"
+            )
+        panels_html = "\n".join(_panel(t) for t in tabs)
     else:
         tab_bar_html = ""
         panels_html = (
@@ -3130,8 +4306,7 @@ def render_dashboard_html(
             + "</section>"
         )
 
-    filters = manifest.get("filters", []) or []
-    filter_bar_html = _render_filter_controls(filters)
+    filter_bar_html = _render_filter_controls(global_filters, inline=False)
 
     # Payload
     # DATASETS should include full {source:..., ...} per manifest
@@ -3144,7 +4319,9 @@ def render_dashboard_html(
         "palettes": {n: {"colors": list(p["colors"]), "kind": p["kind"]}
                       for n, p in PALETTES.items()},
     }
-    payload_js = "var PAYLOAD = " + json.dumps(payload, default=str) + ";\n"
+    payload_js = ("var PAYLOAD = "
+                   + json.dumps(payload, default=_json_default)
+                   + ";\n")
 
     title = manifest.get("title", "Dashboard")
     description = manifest.get("description", "")
