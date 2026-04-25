@@ -1,17 +1,19 @@
-# Charts and Dashboards
+# Dashboards
 
-**Module:** charts_dashboards
+**Module:** dashboards
 **Audience:** PRISM (all interfaces, all workflows), developers, Observatory agents
 **Tier:** 2 (on-demand)
-**Scope:** ALL chart and dashboard construction in PRISM
-**Engine:** ECharts (`GS/viz/echarts/`)
+**Scope:** ALL **dashboard** construction in PRISM (interactive HTML manifests with charts, KPIs, tables, filters, links, refresh wiring). One-off chat / email / PNG charts use **Altair** via `make_chart()` -- not covered here.
+**Engine:** ECharts (`ai_development/dashboards/`)
 
-One system handles both one-off conversational charts and persistent, refreshable dashboards. PRISM never writes HTML. PRISM emits structured JSON; the compiler does the rest.
+`compile_dashboard(manifest)` is the only user-facing entry point. PRISM never writes HTML. PRISM emits a structured JSON manifest; the compiler validates, lowers each chart widget through internal builders, and emits the interactive dashboard.
+
+The `make_echart()` and composite (`make_2pack_*` / `make_3pack_triangle` / `make_4pack_grid` / `make_6pack_grid`) helpers in this module are **internal builders** -- the dashboard compiler calls them under the hood for chart widgets. They are NOT the path PRISM uses to ship a one-off chart to a user. For PNGs in chat / email / report, PRISM uses Altair (`make_chart()`); for interactive analysis, PRISM ships a dashboard. Sections 2, 2.7, 6 below document the builder surface for completeness, but every PRISM-facing example in this README assumes the dashboard manifest path.
 
 ## Module file map
 
 ```
-GS/viz/echarts/
+ai_development/dashboards/
   config.py             GS brand tokens + one theme + 3 palettes + dimensions
   echart_studio.py      single-chart producer: builders + knobs + CLI
   echart_dashboard.py   dashboard compiler: validator + manifest_template +
@@ -22,7 +24,7 @@ GS/viz/echarts/
   samples.py            chart + dashboard samples + PRISM roleplay demos
   demos.py              12 end-to-end demo scenarios + CLI + gallery
   inspect_dashboard.py  visual diagnostics for compiled dashboards
-  tests.py              unit + stress test suite (303 unit tests +
+  tests.py              unit + stress test suite (348 unit tests +
                           11 stress scenarios) with interactive CLI
   README.md             this file
   DATA_SHAPES.md        DataFrame organisation + tidy/wide forms +
@@ -85,28 +87,31 @@ Three accepted shapes for a dataset entry, all normalized to the same on-disk fo
 
 ---
 
-## 1. Two entry points + helpers
+## 1. Entry points + helpers
 
 ```python
-# Inside execute_analysis_script these are injected into the namespace.
-make_echart             # single chart -> option JSON + editor HTML + (optional) PNG
-compile_dashboard       # manifest -> interactive dashboard HTML + manifest JSON (+ PNGs)
+# PRISM-facing (injected into execute_analysis_script's namespace):
+compile_dashboard       # manifest -> interactive dashboard HTML + manifest JSON (+ optional PNGs)
 df_to_source            # DataFrame -> list-of-lists (rarely called directly)
 manifest_template       # strip data from a manifest -> reusable template
 populate_template       # template + fresh DataFrames -> ready-to-compile manifest
 validate_manifest       # dry-run the validator without rendering
-check_charts_quality    # PNG QC gate (unchanged from the prior system)
+chart_data_diagnostics  # second-pass lint: empty datasets, missing columns, size budget, etc.
 
-# Composite shortcuts (conversational multi-chart artifacts):
+# Internal builders (the dashboard compiler calls these for chart widgets;
+# PRISM does NOT call them directly when shipping artifacts):
+make_echart             # single-chart builder -- consumed inside compile_dashboard
 ChartSpec, make_2pack_horizontal, make_2pack_vertical,
-make_3pack_triangle, make_4pack_grid, make_6pack_grid
+make_3pack_triangle, make_4pack_grid, make_6pack_grid    # composite layouts (legacy)
 ```
 
 One theme (`gs_clean`), three palettes (`gs_primary`, `gs_blues`, `gs_diverging`), twelve dimension presets + `custom`. No theme switcher. No skin config.
 
 ---
 
-## 2. Single charts: `make_echart()`
+## 2. Single-chart builder: `make_echart()` (internal)
+
+> `make_echart()` is the per-chart builder the dashboard compiler invokes for every `widget: chart` (`spec.chart_type` + `spec.mapping` flow into this function). It exists as a public symbol so the editor HTML / passthrough mode are testable in isolation and so the composite helpers (2.7) can call it. **PRISM does not ship one-off charts via `make_echart()`** -- one-off PNGs go through Altair `make_chart()`, interactive analysis goes through `compile_dashboard()`. This section documents the builder surface so the chart-type catalogue / mapping keys / annotations work uniformly inside dashboard widget specs (section 3.5).
 
 ### 2.1 Signature + `EChartResult`
 
@@ -186,7 +191,7 @@ These cross-cutting polish knobs live on `spec` (or `mapping`) and are applied a
 **Axis titles never collide with tick labels.** Long category names (horizontal bar of strategy descriptions, bullet of yield-curve points, heatmap rows of factor exposures) used to either overlap a rotated `yAxis.name`, or get silently dropped by ECharts' default `interval: 'auto'` thinning. The compiler now does layout-aware sizing automatically:
 
 - **Truncate long category labels.** Any tick label longer than `category_label_max_px` (default `220` px) gets `axisLabel.width` + `overflow: "truncate"` + ellipsis. The full string is still in the underlying data, so tooltips / interactions are intact.
-- **Size `nameGap` from real labels.** `yAxis.nameGap` (and `xAxis.nameGap` on rotated bottom labels) is computed from the longest label width plus padding for the rotated title's bounding box, instead of a fixed 56 / 40 px.
+- **Size `nameGap` from real labels.** `yAxis.nameGap` (and `xAxis.nameGap` on rotated bottom labels) is computed from the longest label width plus padding for the rotated title's bounding box, instead of a fixed 56 / 40 px. This applies to BOTH category axes (longest text) and value axes (formatted extremes of `opt.series` data) -- so a vertical bar with 9-digit volume labels gets a `nameGap` of ~90 px instead of clipping the rotated title.
 - **Bump `grid.left` / `grid.bottom`.** With `containLabel: true`, the axis name still sits outside the grid box. The compiler bumps `grid.left` to fit the rotated `yAxis.name` and `grid.bottom` (~`nameGap + 80` px empirically) so the `xAxis.name` doesn't get clipped at the canvas edge.
 - **Auto-rotate vertical-bar / boxplot x-labels** when (a) there are <=30 categories, (b) average label length > 5 chars, and (c) the unrotated total label width would exceed the inner plot width. The compiler sets `rotate: 30` and `interval: 0` so every category renders. For dense time-series-like axes (e.g. a daily volume bar with 250+ bars), the threshold check kicks the chart back to ECharts' default thinning, which is the right call there.
 - **Heatmap visualMap clearance.** `grid.right` is bumped to `76` px so the vertical visualMap legend never crops the rightmost cell column.
@@ -194,7 +199,9 @@ These cross-cutting polish knobs live on `spec` (or `mapping`) and are applied a
 
 Per-spec overrides remain available: `y_title_gap`, `x_title_gap`, `y_title_right_gap`, `category_label_max_px`. If you've manually set `axisLabel.rotate` upstream, the auto-rotate path is a no-op (idempotent).
 
-### 2.3 Chart types (24)
+### 2.3 Chart types (25 builders + `raw` passthrough)
+
+> The 25 entries below are the registered builders -- valid values for `spec.chart_type` inside dashboard chart widgets. The 26th conceptual type, `raw`, is **not** a `chart_type` value; it's the dashboard's `option` / `ref` widget variants (3.4) and the `make_echart(option=..., chart_type='raw')` passthrough call. Use those when you need an ECharts option the builder catalogue doesn't cover.
 
 | chart_type         | Required mapping keys                                     |
 |--------------------|-----------------------------------------------------------|
@@ -204,8 +211,10 @@ Per-spec overrides remain available: `y_title_gap`, `x_title_gap`, `y_title_righ
 | `bar_horizontal`   | `x` (value), `y` (category), optional `color`, `stack`    |
 | `scatter`          | `x`, `y`, optional `color`, `size`, `trendline`           |
 | `scatter_multi`    | `x`, `y`, `color`, optional `trendlines`                  |
+| `scatter_studio`   | none required; `x_columns` / `y_columns` / `color_columns` whitelist drives runtime X/Y picker. See 6.6 |
 | `area`             | `x`, `y` (stacked area)                                   |
 | `heatmap`          | `x`, `y`, `value`                                         |
+| `correlation_matrix` | `columns` (list of >=2 numeric columns), optional `transform`, `method`, `order_by`. See 6.7 |
 | `histogram`        | `x`, optional `bins` (int or list of edges), `density`    |
 | `bullet`           | `y` (cat), `x` (cur), `x_low`, `x_high`, optional `color_by`, `label` |
 | `pie`              | `category`, `value`                                       |
@@ -239,8 +248,9 @@ Unknown `chart_type` -> `ValueError` with the full list. Datetime columns auto-r
 | `invert_y`           | Invert the y-axis (single-axis charts).                  |
 | `y_log`, `x_log`     | Use log scale on the respective axis.                    |
 | `stack` (bar)        | `True` (default) = stacked, `False` = grouped.           |
-| `dual_axis_series`   | List of series-name strings to render on the right axis. |
-| `invert_right_axis`  | Flip the right axis (rates-style "up = bullish").        |
+| `dual_axis_series`   | (legacy) List of series-name strings to render on the right axis. Use `axes` for >2 axes. |
+| `invert_right_axis`  | (legacy) Flip the right axis (rates-style "up = bullish"). Use `axes[i].invert` for >2 axes. |
+| `axes`               | List of axis spec dicts for N-axis time series (canonical, supports any number of independent y-axes). See "Multi-axis time series" below. |
 | `strokeDash`         | Column controlling per-series dash pattern (e.g. actual vs estimate). |
 | `strokeDashScale`    | `{"domain": [...], "range": [[1,0], [8,3]]}` explicit dash mapping. |
 | `strokeDashLegend`   | `True` to include cross-product names in legend.         |
@@ -262,6 +272,80 @@ Chart-specific shapes:
 | `calendar_heatmap`          | `date`, `value`, optional `year`                          |
 | `parallel_coords`           | `dims` (list of columns), optional `color`                |
 | `tree`                      | `name`, `parent`                                          |
+
+Heatmap-style charts (`heatmap`, `correlation_matrix`, `calendar_heatmap`) accept these additional mapping keys for value labels and color configuration:
+
+| Key                  | Purpose                                                  |
+|----------------------|----------------------------------------------------------|
+| `show_values`        | Print each cell's numeric value. Default `True` for `heatmap` / `correlation_matrix`, `False` for `calendar_heatmap` (cells are tiny). |
+| `value_decimals`     | Decimals on the cell label. Auto-picked from data magnitude when omitted (3 for sub-unit values, 0 for >=100). |
+| `value_formatter`    | Explicit JS formatter string (overrides the built-in). Auto-contrast is suppressed because the wrapping format is opaque to the builder. |
+| `value_label_color`  | `"auto"` (default): black on light cells, white on dark cells via WCAG sRGB luminance. Any hex / rgb string sets a fixed color. `False` leaves the ECharts default. |
+| `value_label_size`   | Cell-label font size (default 11).                       |
+| `colors`             | Explicit list of color stops, e.g. `["#fff", "#08306b"]`. Highest-priority override.       |
+| `color_palette`      | Palette name from `PALETTES` (e.g. `gs_blues`, `gs_diverging`).                            |
+| `color_scale`        | `sequential` / `diverging` / `auto`. `auto` picks a diverging palette anchored at 0 when the data crosses zero. |
+| `value_min`, `value_max` | Pin the visualMap range so colors stay interpretable across reruns with different data spreads. |
+
+Auto-contrast text is implemented through ECharts rich-text styles (`label.rich.l` for dark text on light cells, `label.rich.d` for light text on dark cells). The label formatter is a JS function that picks the right style per cell from `params.color`'s relative luminance. ECharts heatmap series do **not** evaluate `label.color` as a callback -- that path is static-only -- which is why auto-contrast routes through the rich-text formatter instead.
+
+#### Multi-axis time series (`mapping.axes`)
+
+Line / multi_line / area charts support any number of independent y-axes via `mapping.axes`. Each axis gets its own scale, side (left/right), inversion, log toggle, range bounds, and tick formatter. This generalises the legacy 2-axis API (`dual_axis_series` + `invert_right_axis`) -- both still work, and `axes` takes precedence when both are present.
+
+```python
+make_echart(df, "multi_line", mapping={
+    "x": "date",
+    "y": ["spx", "ust", "dxy", "wti"],
+    "axes": [
+        {"side": "left",  "title": "SPX",     "series": ["spx"], "format": "compact"},
+        {"side": "right", "title": "UST 10Y", "series": ["ust"], "invert": True, "format": "percent"},
+        {"side": "left",  "title": "DXY",     "series": ["dxy"]},
+        {"side": "right", "title": "WTI",     "series": ["wti"], "format": "usd"},
+    ],
+})
+```
+
+Per-axis spec keys:
+
+| Key             | Purpose                                                                                  |
+|-----------------|------------------------------------------------------------------------------------------|
+| `side`          | `"left"` or `"right"`. Required.                                                         |
+| `title`         | Axis name printed alongside.                                                             |
+| `series`        | List of series names assigned to this axis. Each series belongs to exactly one axis.     |
+| `invert`        | Flip top<->bottom (default False).                                                       |
+| `log`           | Log scale (default False).                                                               |
+| `min`, `max`    | Pin range explicitly.                                                                    |
+| `format`        | Tick formatter preset (`percent` / `bp` / `usd` / `compact`) or raw ECharts function string. |
+| `offset`        | Pixel offset from the inner edge. Auto-computed (0, 80, 160, ...) when omitted so axes on the same side stack outward without overlapping. |
+| `scale`         | Default `True`: ECharts auto-fits the range; set `False` to anchor at zero.              |
+| `color`         | Explicit hex / rgb for the axis line, ticks, label color, and rotated name color. Defaults to the assigned series' palette color when the axis carries exactly one series. Set `False` to opt this axis out of color-coding. |
+
+Mapping-level extras:
+
+| Key                      | Purpose                                                                              |
+|--------------------------|--------------------------------------------------------------------------------------|
+| `axis_offset_step`       | Floor (in px) for the spacing between successive axes on the same side. Default 80 (clears 4-5 digit tick labels comfortably). The compiler dynamically widens the step when the inner axis's tick labels are wide enough (e.g. `"470.0%"` percent labels) that 80 px would crowd the rotated inner-axis name into the outer axis's labels. Bump only when you want a more spacious layout than the auto-computed one. |
+| `axis_color_coding`      | Default `True`: single-series axes auto-tint axis line / labels / name to match the series color (Bloomberg-style). Set `False` to disable globally. |
+
+**Color-coding.** When `axis_color_coding` is on (default), every axis that carries exactly one series picks up that series' palette color across its axis line, tick labels, and rotated name. Axes carrying 2+ series leave styling neutral because there's no single color to bind to -- pin one explicitly via `axes[i].color`. The line and its scale share the hue, so a glance at the axis tells you which series it belongs to without legend lookup.
+
+Layout sizing is automatic and data-aware: after the series are built, the compiler walks each axis to estimate the longest tick-label width (using the format preset and the series' actual min/max), sets per-axis `nameGap` to clear those labels plus the rotated title's bounding box, and widens the per-side `offset_step` whenever the inner-axis name would otherwise bleed into the outer axis's labels. `grid.left` / `grid.right` are then sized to fit every axis's offset + label band + name without clipping. Only the first axis on the chart shows split lines (`splitLine`) -- additional axes hide them so the plot area doesn't drown in overlapping gridlines.
+
+Annotations target a specific axis via `axis: <index>` (0..N-1). The legacy `axis: "right"` shorthand still resolves to index 1 for backward compat:
+
+```python
+annotations=[
+    {"type": "hline", "y": 4.5, "axis": 1, "label": "UST ceiling"},
+    {"type": "hline", "y": 110, "axis": 2, "label": "DXY support"},
+]
+```
+
+When to use `mapping.axes` vs alternatives:
+
+- **2 axes, simple case**: `dual_axis_series` + `invert_right_axis` is shorter -- prefer it.
+- **3+ axes, comparing values across asset classes**: `mapping.axes` -- but consider whether normalisation (`Index = 100` via the controls drawer) or `make_4pack_grid` would read better. 4 axes can become hard to scan visually even when laid out cleanly.
+- **3+ series in the same units**: don't add axes -- one axis is right.
 
 ### 2.5 Annotations
 
@@ -294,7 +378,9 @@ Charts without axes (pie / donut / sankey / treemap / sunburst / radar / gauge /
 
 Small presets (`teams`, `thumbnail`, `compact`) auto-downscale typography. When the request originates from Teams, always use `dimensions='teams'`.
 
-### 2.7 Composites (conversational multi-chart single-artifact)
+### 2.7 Composites (legacy multi-chart single-artifact)
+
+> The composite helpers below produce a single multi-grid PNG-style ECharts canvas with N sub-charts laid out for you. They predate the dashboard compiler and are kept for backwards compatibility, but are **NOT a path PRISM uses** -- PRISM ships interactive dashboards (this module) or Altair PNGs (the other module). Documented here for completeness; `demos.py` does not include any composite scenarios in the gallery.
 
 Five functions, all returning a single `EChartResult` whose `option` is a multi-grid ECharts composite. Sub-charts are `ChartSpec` objects passed positionally.
 
@@ -528,11 +614,31 @@ manifest = {
     "datasets": {
         "rates": df_rates,            # DataFrame -> auto-converted
         "cpi":   {"source": df_cpi},  # explicit form works too
+
+        # Per-column source attribution; PRISM cleans upstream
+        # metadata into this shape and passes it explicitly. The
+        # compiler does NOT introspect df.attrs. See 3.6 for the
+        # popup integration.
+        "fx": {
+            "source": df_fx,
+            "field_provenance": {
+                "EURUSD": {"system": "market_data",
+                            "symbol": "FX_EURUSD_Spot_Rate",
+                            "source_label": "GS Market Data",
+                            "units": "rate"},
+            },
+        },
     },
 
     "filters": [                      # optional
-        {"id": "dt", "type": "dateRange", "default": "6M",
-          "targets": ["*"], "field": "date"},
+        # dateRange in view mode (default): sets the initial dataZoom
+        # window on every targeted chart. Charts always render full
+        # history -- the dropdown is a "default lookback", not a
+        # data filter. Tables and KPIs that target the same filter
+        # still get real row-level filtering.
+        {"id": "lookback", "type": "dateRange", "default": "6M",
+          "targets": ["*"], "field": "date",
+          "label": "Initial range"},
     ],
 
     "layout": {
@@ -981,6 +1087,112 @@ For grouped charts (`mapping.color` set), ECharts reports `params.seriesName` as
 
 **Modal grammar** is shared with `row_click`: same `title_field`, `subtitle_template`, `popup_fields`, `detail.sections[]` (stats / markdown / chart / table), same template substitution rules, same X / ESC / overlay-click close. See 3.6 for the section types and template substitution syntax.
 
+#### Data provenance & source attribution
+
+Every chart line / bar / point / heatmap cell and every table row/cell can carry the upstream identifier (Haver code, plottool/TSDB ticker, FRED series, Bloomberg ticker, market_data coordinate, computed-recipe formula, etc.) plus the source system that produced it. The compiler surfaces that lineage in two places automatically:
+
+1. **Auto-default click popup** -- when a chart's `click_popup` (or a table's `row_click`) is *not declared*, but the dataset carries `field_provenance`, clicking a point / row opens a minimal modal showing the row's relevant fields plus a "Sources" footer. No extra config required -- traceability is the gimme.
+2. **Sources footer on every popup** -- whenever an explicit `click_popup` / `row_click` IS declared, the same Sources footer auto-appends after the body. Suppressible per popup with `show_provenance: false`.
+
+Suppress the auto-default per widget with `click_popup: false` (chart) or `row_click: false` (table). Set `click_popup: true` to force the default even when no explicit config is given (useful when you want to be explicit about opting in).
+
+**Schema** -- attach to a dataset entry alongside `source`:
+
+```json
+"datasets": {
+  "rates": {
+    "source": [["date", "UST10Y", "UST2Y"], ["2026-04-24", 4.30, 4.15]],
+    "field_provenance": {
+      "UST10Y": {
+        "system": "market_data",
+        "symbol": "IR_USD_Treasury_10Y_Rate",
+        "tsdb_symbol": "ustsy10y",
+        "display_name": "US 10Y Treasury Rate",
+        "units": "percent",
+        "source_label": "GS Market Data"
+      },
+      "UST2Y": {
+        "system": "market_data",
+        "symbol": "IR_USD_Treasury_2Y_Rate",
+        "tsdb_symbol": "ustsy2y",
+        "source_label": "GS Market Data"
+      }
+    },
+    "row_provenance_field": "ticker",
+    "row_provenance": {
+      "GS": {"last": {"system": "bloomberg",
+                       "symbol": "GS US Equity",
+                       "source_label": "Bloomberg"}}
+    }
+  }
+}
+```
+
+**Per-column provenance dict** (`field_provenance.<column>`):
+
+| Key             | Required        | Purpose                                                                              |
+|-----------------|-----------------|--------------------------------------------------------------------------------------|
+| `system`        | strongly recommended | Source system identifier: `haver`, `market_data`, `plottool`, `fred`, `bloomberg`, `refinitiv`, `csv`, `computed`, or any free-form string PRISM wants to use. |
+| `symbol`        | strongly recommended | Canonical identifier in that system. Free-form so PRISM can pass the exact upstream string (`GDP@USECON`, `IR_USD_Treasury_10Y_Rate`, `sofrswp10y - sofrswp2y`, `DGS10`, `USGG10YR Index`, ...). |
+| `display_name`  | optional        | Human-readable label rendered in the footer (defaults to the column name).            |
+| `units`         | optional        | `percent`, `bp`, `USD billion (SAAR)`, etc. Rendered as a small italic tag.           |
+| `source_label`  | optional        | Vendor/desk attribution for the footer (e.g. `GS Market Data`, `Haver Economics`).    |
+| `recipe`        | optional        | For `system: "computed"`. Free-form formula string rendered in the footer (e.g. `UST10Y - UST2Y`). |
+| `computed_from` | optional        | List of source column names the recipe references (so transitive provenance can be resolved later if needed). |
+| `as_of`         | optional        | ISO timestamp of the latest tick for the column (mirrors `manifest.metadata.data_as_of` at the column level). |
+| `<vendor_alt>`  | optional        | System-specific alternate IDs (`haver_code`, `tsdb_symbol`, `fred_series`, `bloomberg_ticker`, `refinitiv_ric`, ...). The footer surfaces the first present in priority order: `symbol` > `coordinate` > `expression` > `haver_code` > `tsdb_symbol` > `fred_series` > `bloomberg_ticker` > `refinitiv_ric`. |
+
+The validator only enforces shape (must be a dict of dicts). The inner keys are intentionally free-form so PRISM can carry whatever the upstream system emits without us having to enumerate every vendor.
+
+**Per-row overrides** (entity tables where each row may pull from a different system):
+
+`row_provenance_field` names a column whose cell value keys into `row_provenance`. Each entry under `row_provenance` is a dict of `column_name -> provenance_dict` that *overrides* the column-level entry for that row. Use this on screener/top-movers tables where AAPL might come from market_data and TSLA from Bloomberg.
+
+```json
+"row_provenance_field": "ticker",
+"row_provenance": {
+  "AAPL": {"last": {"system": "market_data",
+                      "symbol": "EQ_US_AAPL_Last",
+                      "source_label": "GS Market Data"}},
+  "TSLA": {"last": {"system": "bloomberg",
+                      "symbol": "TSLA US Equity",
+                      "source_label": "Bloomberg"}}
+}
+```
+
+**Where the footer surfaces**:
+
+- Below the body of every `_openPopupModal` (simple `popup_fields`) -- one row per relevant column.
+- At the end of every `openRichRowModal` (rich `detail.sections[]`) -- after every section.
+- Inline subline beneath any `stats` section field that sets `show_source: true` (compact alternative to the full footer):
+
+```json
+{"type": "stats",
+  "fields": [
+    {"field": "UST10Y", "label": "10Y", "format": "number:2",
+      "suffix": "%", "show_source": true}
+  ]}
+```
+
+The footer renders only columns the popup body actually references. For default popups built from `mapping`, that's the chart's mapped axes (e.g. `x`, `y`, `color`); for explicit popups, it's whatever `popup_fields` / stats / kv sections name. Markdown sections are ignored for the footer purposes (they reference fields freely; the union with stats/kv is enough signal in practice).
+
+**Computed/derived columns** -- when a column was constructed in PRISM (e.g. `2s10s = UST10Y - UST2Y`), set `system: "computed"` and pass `recipe` + `computed_from`:
+
+```json
+"field_provenance": {
+  "us_2s10s": {
+    "system": "computed",
+    "recipe": "UST10Y - UST2Y",
+    "computed_from": ["UST10Y", "UST2Y"],
+    "display_name": "2s10s spread", "units": "bp"
+  }
+}
+```
+
+**PRISM-side contract** (skill file):
+
+PRISM is the one that cleans upstream metadata into this shape. The compiler does NOT introspect `df.attrs` or auto-derive provenance from anything -- because PRISM pulls from many systems beyond Haver/FRED/market_data and the cleaning step is system-specific. The `Dashboard.add_dataset` builder accepts `field_provenance=` / `row_provenance_field=` / `row_provenance=` as explicit kwargs; in the manifest dict form, attach them directly to each `datasets[name]` entry next to `source`.
+
 **Row-level highlighting**: `row_highlight` is a list of rules evaluated per row; first match wins. Each rule is `{field, op, value, class}` where `op` is one of `==, !=, >, >=, <, <=, contains, startsWith, endsWith` and `class` is one of `"pos"`, `"neg"`, `"warn"`, `"info"`, `"muted"`. The row gets a subtle tinted background plus a left-edge accent stripe that doesn't stomp per-cell conditional colors.
 
 ```json
@@ -1172,7 +1384,7 @@ The renderer extracts the underlying `value` for the input element and the `labe
 
 | Type          | UI                              | Applies to                                  |
 |---------------|---------------------------------|---------------------------------------------|
-| `dateRange`   | select of 1M/3M/6M/YTD/1Y/2Y/5Y/All | `rows[field]` within resolved date range |
+| `dateRange`   | select of 1M/3M/6M/YTD/1Y/2Y/5Y/All | **Charts** (view-mode, default): sets initial dataZoom window. **Tables / KPIs**: filters `rows[field]` to range. Set `mode: "filter"` to row-filter charts too. |
 | `select`      | `<select>`                      | `rows[field] == value`                      |
 | `multiSelect` | `<select multiple>`             | `rows[field] in [values]`                   |
 | `radio`       | radio button group              | same as `select`, different UI              |
@@ -1181,6 +1393,8 @@ The renderer extracts the underlying `value` for the input element and the `labe
 | `number`      | `<input type="number">`         | `rows[field] op value` (op defaults `>=`)   |
 | `text`        | `<input type="text">`           | `rows[field] op value` (op defaults `contains`) |
 | `toggle`      | checkbox                        | `rows[field]` truthy when checked           |
+
+**dateRange semantics on charts.** Time-series charts ship with their own dataZoom controls (inside scroll/pinch + slider beneath the grid + drag-to-pan), so the user can zoom and pan every chart independently across the full history. A `dateRange` filter is therefore a global "initial lookback" knob, not a data filter -- changing the dropdown moves every targeted chart's visible window via `dispatchAction({type:'dataZoom'})` and leaves the underlying dataset untouched. Tables and KPIs targeted by the same filter still see the data filtered to the chosen range (e.g. "average over the last 6M"). To force the legacy row-filter behavior on charts (e.g. when you want a histogram or aggregate to recompute over the window), set `"mode": "filter"` on the filter declaration.
 
 **Fields:**
 
@@ -1197,7 +1411,8 @@ The renderer extracts the underlying `value` for the input element and the `labe
 | `placeholder`| Placeholder text for `text` / `number`.                       |
 | `all_value`  | Sentinel that means "no filter" (e.g. `"All"` / `"Any"`). Lets radio/select have an explicit all option. |
 | `targets`    | List of widget ids to refresh when this filter changes. `"*"` matches every data-bound widget (charts, tables, kpis, stat_grids). Wildcards: `"prefix_*"`, `"*_suffix"`. |
-| `label`      | Display label.                                                |
+| `mode`       | `dateRange` only. `"view"` (default) -> sets initial dataZoom on chart targets without filtering data. `"filter"` -> filters chart rows by the selected window (legacy behavior; usually only needed for histograms / aggregates that must recompute over the window). |
+| `label`      | Display label. `dateRange` filters in view-mode default to "Initial range" when no label is supplied so PRISM-emitted ids like `dt` or `fs_dt` don't leak into the UI as cryptic two-letter labels. |
 | `description` | Short help text. Renders an `\u24D8` icon next to the filter label; hover shows it as a tooltip, **clicking opens a modal** with the same text. Aliases: `help`, `info`. |
 | `popup`       | `{title, body}` markdown popup for click, same mechanism as widget popups. Use for long-form help that doesn't fit a tooltip. |
 | `scope`      | `"global"` (default; top filter bar) or `"tab:<id>"` (render inline inside a tab panel). Auto-inferred from `targets`: when every target lives in the same tab, scope becomes `"tab:<that_tab>"`; any wildcard / cross-tab target stays global. |
@@ -1212,6 +1427,135 @@ Filters update the shared filter state and are applied client-side by the dashbo
 Explicitly set `scope: "tab:<tab_id>"` to override the auto-inferred placement, or `scope: "global"` to force the top bar even when the filter could live in a tab.
 
 **Which chart types reshape on filter change.** Auto-wire happens only when a filter targets the widget AND the chart_type + mapping is safe to re-shape client-side: `line` / `multi_line` / `bar` / `area` with simple wide-form mapping (no `color` long-form grouping, no `stack`, no `trendline`). Filtered tables, KPIs, stat_grids, and chart types with computed series data (histograms, bullets, candlesticks, heatmaps, scatter-with-trendline, radar, gauge, sankey, treemap, sunburst, funnel, parallel_coords, tree, graph, boxplot) keep rendering their baseline data -- the filter state still tracks but those charts don't visually reshape.
+
+### 3.7.1 Per-chart zoom (in-chart x-axis scrolling)
+
+Every chart whose x-axis resolves to `time` ships with two `dataZoom` controls injected at compile time:
+
+- **`type: "inside"`** -- mouse wheel / pinch zoom + click-and-drag pan directly on the plot area
+- **`type: "slider"`** -- a draggable slider beneath the grid with handles for fine-grained range control
+
+This means a user can independently zoom and pan every chart across its full history without ever touching a global filter. The dashboard always embeds the full dataset; the slider just clips the visible window.
+
+The grid's `bottom` padding is auto-bumped to make room for the slider, so existing charts don't need any layout changes.
+
+Opt-out (e.g. for very small sparkline-style chart tiles where the slider would dominate):
+
+```json
+{"widget": "chart", "id": "tiny_sparkline", "w": 3,
+  "spec": {"chart_type": "line", "dataset": "rates",
+            "mapping": {"x": "date", "y": "us_2y"},
+            "chart_zoom": false}}
+```
+
+`chart_zoom: false` on the spec (or on `mapping`) suppresses the auto-injection. Builders that already declared their own `dataZoom` (e.g. `candlestick`) are left alone.
+
+### 3.7.2 Per-tile controls drawer
+
+Every chart, table, and KPI tile ships with a `⋮` button in the tile toolbar that toggles a controls drawer between the title bar and the tile body. The drawer is populated lazily on first open and only renders the knobs the underlying widget can support.
+
+#### Chart drawer
+
+| Knob                           | Charts                            | Behavior                                                                         |
+|--------------------------------|-----------------------------------|----------------------------------------------------------------------------------|
+| Per-series transform           | line / multi_line / area          | `Raw` / `Δ` / `%Δ` / `log Δ` / `YoY Δ` / `YoY %` / `YoY log Δ` / `Annualized Δ` / `log` / `z-score` / `Rolling z (252)` / `Pct rank` / `YTD Δ` / `Index = 100`. Each series independently. Grouped under `Basic` / `Advanced` `<optgroup>` headers. |
+| Smoothing                      | line / multi_line / area          | Off / 5 / 20 / 50 / 200-period rolling mean.                                     |
+| Y-scale                        | line / multi_line / area / bar / scatter / scatter_studio | Linear / Log.                                                              |
+| Y-range                        | line / multi_line / area          | Auto / From zero.                                                                |
+| **Shape: Style**               | line / multi_line / area          | Inherit / Solid / Dotted / Dashed (mirrors Haver's chart-type strip; mutates `series.lineStyle.type`). |
+| **Shape: Step**                | line / multi_line / area          | Inherit / Off / Start / Middle / End (mutates `series.step`).                    |
+| **Shape: Width**               | line / multi_line / area          | Inherit / 1 px / 2 px / 3 px (mutates `series.lineStyle.width`).                 |
+| **Shape: Area fill**           | line / multi_line / area          | Inherit / On / Off (toggles `series.areaStyle`, opacity 0.30).                   |
+| **Shape: Stack**               | line / multi_line / area          | Inherit / Grouped / Stacked / 100% stacked (auto-rescales each x to a percent). |
+| **Shape: Markers**             | line / multi_line / area          | Inherit / Show / Hide (toggles `series.showSymbol`).                             |
+| Bar sort                       | bar / bar_horizontal              | Input order / Value desc / Value asc / Alphabetical.                             |
+| Bar stack                      | bar / bar_horizontal              | Grouped / Stacked / 100% stacked (auto-rescales values, formats axis as `%`).    |
+| Scatter trendline              | scatter / scatter_multi           | Off / Linear (OLS) — fitted client-side from `series.data`.                       |
+| X-scale                        | scatter / scatter_multi / scatter_studio | Linear / Log.                                                                    |
+| **Studio: X / Y / color / size column** | scatter_studio          | Dropdowns populated from the author's `x_columns` / `y_columns` / `color_columns` / `size_columns` whitelists. |
+| **Studio: per-axis transform** | scatter_studio                    | `Raw` / `log` / `Δ` / `%Δ` / `YoY %` / `z-score` / `Rolling z (252d)` / `pct rank`. Applied to X and Y independently. |
+| **Studio: window / outliers / regression** | scatter_studio        | `All` / `252d` / `504d` / `5y`; `Off` / `IQR×3` / `\|z\|>4`; `Off` / `OLS` / `OLS per color`. |
+| Heatmap color scale            | heatmap / correlation_matrix      | Sequential / Diverging-around-zero (uses GS palette). Override defaults via mapping `colors` / `color_palette` / `color_scale`. |
+| Heatmap labels + auto-contrast | heatmap / correlation_matrix / calendar_heatmap | Toggle cell values (default on for heatmap / correlation_matrix); auto-contrast picks black/white text per cell from background luminance via `label.rich`. |
+| Pie sort + "Other" bucket      | pie / donut                       | Input order / Largest first; group slices below 1%/3%/5% as "Other".              |
+
+**Universal action bar** (every chart):
+
+- **View data** — opens a modal with the rows that produced the chart. Truncates at 1,000 rows; full dataset is in Copy CSV.
+- **Copy CSV** — clipboard, full filtered dataset.
+- **Download PNG / CSV / XLSX** — direct downloads of the chart image and underlying data. PNG bakes the title in (same path as the dashboard-level "Download PNGs" button); XLSX uses the SheetJS bundle that's already loaded for the dashboard-level Excel export.
+- **Reset chart** — clears the per-chart state and re-renders with compile-time defaults.
+
+**Transform semantics for time series.** All transforms run entirely client-side over the dataset already embedded in the dashboard — no PRISM round-trip.
+
+| Transform                | Formula                                                                          |
+|--------------------------|----------------------------------------------------------------------------------|
+| `Δ`, `%Δ`, `log Δ`       | Period-over-period: `v[i] - v[i-1]`, `(v[i]-v[i-1])/v[i-1]*100`, `ln(v[i])-ln(v[i-1])`. |
+| `YoY Δ`, `YoY %`, `YoY log Δ` | Compare against `v[j]` where `j` is the largest index with `time[j] <= time[i] - 365 days`. |
+| `Annualized Δ`           | `Δ × f` where `f` is detected from the median gap between timestamps (≈daily → 252, weekly → 52, monthly → 12, quarterly → 4, semi → 2, annual → 1). |
+| `log`                    | `ln(v[i])` for `v[i] > 0` else `null`.                                           |
+| `z-score`                | `(v[i] - mean) / std` over the visible series.                                   |
+| `Rolling z (252)`        | `(v[i] - rolling_mean_252) / rolling_std_252` with `min_periods=2` over the 252-day window. |
+| `Pct rank`               | `0..100` percentile rank of `v[i]` within the visible series (ties get average rank). |
+| `YTD Δ`                  | `v[i] - v[anchor]` where `anchor` is the first non-null point of the same calendar year. |
+| `Index = 100`            | `v[i] / anchor * 100` where `anchor` is the first non-zero non-null point.       |
+
+The rolling mean for the smoothing knob is computed left-to-right with a fixed-window queue. When the user picks a transform, the y-axis name is auto-tagged with the transform label (`YoY %`, `Δ`, etc.) when every visible series shares the same transform, and a `· Δ` / `· YoY %` / `· z` suffix is appended to each transformed series' legend entry so the chart's units are unambiguous after the change.
+
+**Opt-out.** Set `chart_controls: false` on the spec (or the widget) to suppress the `⋮` button entirely. Useful for sparkline-style chart tiles where the drawer would dominate.
+
+```json
+{"widget": "chart", "id": "kpi_spark", "w": 3,
+  "spec": {"chart_type": "line", "dataset": "rates",
+            "mapping": {"x": "date", "y": "us_2y"},
+            "chart_zoom": false, "chart_controls": false}}
+```
+
+#### Table drawer
+
+Tables get the same `⋮` toolbar button, opening a drawer with table-specific knobs:
+
+| Knob                | Behavior                                                                                       |
+|---------------------|------------------------------------------------------------------------------------------------|
+| Search              | Free-text filter; matches any cell substring (case-insensitive). Mirrors `searchable: true` toolbar. |
+| Sort by column      | Dropdown of every column + Ascending / Descending. Equivalent to clicking the column header.    |
+| Hide columns        | One checkbox per column; unchecked columns are dropped from the rendered table without affecting sort indices or downloads-via-`searchable`-toolbar. |
+| Density             | Regular / Compact (mirrors `row_height: "compact"`).                                            |
+| Freeze first column | Off / On — pins col 1 with `position: sticky` so wide tables stay readable on horizontal scroll. |
+| Decimals            | Auto / 0 / 1 / 2 / 3 / 4 — splices the chosen precision into every numeric column's `format` string at render time, so `number:2` becomes `number:0` etc. Non-numeric formats (`text`, `date`, `link`) are untouched. |
+| **View raw**        | Modal with the underlying dataset rows (no formatting). Truncates at 1,000 rows.               |
+| **Copy / Download CSV / XLSX** | All honor the current sort + search + visible-column state (so the export matches what the user sees on screen). |
+| **Reset table**     | Clears search / hidden / decimals / density / freeze / sort and re-renders.                     |
+
+Suppress with `table_controls: false` on the table widget.
+
+#### KPI drawer
+
+KPI tiles also expose the `⋮` button. Knobs (rendered only when relevant):
+
+| Knob              | Condition                  | Behavior                                                                          |
+|-------------------|----------------------------|-----------------------------------------------------------------------------------|
+| Compare period    | `sparkline_source` set      | `Auto (delta_source)` / `Previous point` / `1d` / `5d` / `1w` / `1m` / `3m` / `6m` / `1y` / `Year-to-date`. When set to anything other than Auto, the displayed delta is recomputed against the sparkline's time series (looking up the row at the requested offset, falling back to the earliest available point when history is short). |
+| Sparkline toggle  | `sparkline_source` set      | Show / Hide. Persists for the session via `KPI_STATE`.                            |
+| Delta toggle      | always                      | Show / Hide.                                                                      |
+| Decimals override | always                      | Auto / 0 / 1 / 2 / 3 / 4. Overrides `widget.decimals` for the main value.         |
+| **View data / Copy / Download CSV / XLSX** | when sparkline-backed | Exposes the underlying time series the KPI is computed from. |
+| **Reset KPI**     | always                      | Clears the per-KPI state.                                                         |
+
+Suppress with `kpi_controls: false` on the KPI widget.
+
+#### Inspecting and scripting drawer state
+
+Drawer state is stored on `window.DASHBOARD` for inspection or programmatic manipulation:
+
+```js
+window.DASHBOARD.chartControlState['curve'].series['us_10y'].transform = 'yoy_pct';
+window.DASHBOARD.chartControlState['curve'].shape = {lineStyleType: 'dashed', step: 'middle'};
+window.DASHBOARD.tableState['screener'].hidden = {2: true, 4: true};   // hide cols 2, 4
+window.DASHBOARD.kpiState['fed_funds'].comparePeriod = '1m';
+// then trigger a redraw via the dropdowns -- the wirers call rerenderChart /
+// renderTables / renderKpis automatically on every change event.
+```
 
 ### 3.8 Links (connect + brush)
 
@@ -1295,6 +1639,7 @@ Every `\u24D8` icon in the dashboard does BOTH: hover shows the short text as a 
 | Table row                        | `row_highlight` rules          | tinted row + left-edge accent stripe                  |
 | Table row click                  | `row_click` (simple)           | modal with configurable `popup_fields` (key/value)    |
 | Table row click                  | `row_click.detail.sections[]`  | rich drill-down modal w/ stats, markdown, per-row charts, sub-tables. See the **Bond drill-down** tab in the `screener_studio` demo. |
+| Table row click (auto-default)   | dataset `field_provenance` set, `row_click` not declared | minimal popup with row data + Sources footer. Suppress with `row_click: false`. See 3.6 "Data provenance & source attribution". |
 | stat_grid cell                   | `stats[i].info`, `stats[i].popup` | `\u24D8` next to label; click opens modal          |
 | Filter control                   | `description` / `help` / `info`, `popup` | `\u24D8` icon next to the filter label      |
 | Tab button                       | `tabs[i].description`          | hover tooltip + italic sub-line under tab bar         |
@@ -1304,6 +1649,8 @@ Every `\u24D8` icon in the dashboard does BOTH: hover shows the short text as a 
 | Chart annotation label           | `annotations[i].label`         | permanent label on the annotation                     |
 | Chart data-point click           | `click_popup` (simple)         | modal with configurable `popup_fields` (key/value), powered by the row resolver in 3.6 |
 | Chart data-point click           | `click_popup.detail.sections[]`| rich drill-down modal, same grammar as table `row_click` rich mode (stats / markdown / per-row charts / sub-tables). See the **Carry & roll scatter** in the `bond_carry_roll` demo. |
+| Chart data-point click (auto-default) | dataset `field_provenance` set, `click_popup` not declared | minimal popup with mapped axes + Sources footer. Suppress with `click_popup: false`. |
+| Popup Sources footer             | dataset `field_provenance` (auto-appended on every popup) | trailing "Sources" table listing each referenced column's symbol / system / source. Suppress per popup with `show_provenance: false`. |
 
 **Modal behavior** (applies to every click-popup and every table `row_click`):
 
@@ -1331,8 +1678,9 @@ Everything below is rendered by `compile_dashboard` automatically; PRISM doesn't
 - **Filter reset** -- filter bar includes a Reset button.
 - **Brush cross-filter** -- drag-select in one chart filters all linked charts.
 - **Chart sync (connect)** -- tooltips / axes / data zoom synchronised across members of a sync group.
-- **Row-click modal** -- table rows open a detail modal when `row_click` is configured.
-- **Chart data-point click modal** -- clicking a point on a chart with `click_popup` configured opens the same modal grammar as `row_click`, with the row resolved from the click params (see the row-resolution table in 3.6). Supports both simple (`popup_fields`) and rich (`detail.sections[]`) modes.
+- **Row-click modal** -- table rows open a detail modal when `row_click` is configured. When `row_click` is not configured but the dataset carries `field_provenance`, the runtime auto-wires a default popup (row data + Sources footer). Suppress with `row_click: false`.
+- **Chart data-point click modal** -- clicking a point on a chart with `click_popup` configured opens the same modal grammar as `row_click`, with the row resolved from the click params (see the row-resolution table in 3.6). Supports both simple (`popup_fields`) and rich (`detail.sections[]`) modes. When `click_popup` is not configured but the dataset carries `field_provenance`, the runtime auto-wires a default popup (mapped axes + Sources footer). Suppress with `click_popup: false`.
+- **Sources footer** -- every click popup auto-appends a "Sources" footer rendered from the dataset's `field_provenance` (per-column lineage: symbol, system, source, units, optional recipe). Suppress per popup with `show_provenance: false`. See 3.6 "Data provenance & source attribution".
 - **Table search / sort** -- free when `searchable` / `sortable` are true.
 - **Conditional / color-scale cells** -- rendered automatically per column spec.
 - **KPI sparklines** -- inline when `sparkline_source` is set.
@@ -1351,6 +1699,7 @@ Rules:
 - `id`, `title` must be present
 - `theme`, `palette` must be registered names
 - Each dataset entry must be `{"source": [...]}` (DataFrames are normalized first)
+- Optional `field_provenance` on a dataset entry must be a dict mapping column name to a provenance dict. Inner keys are free-form. `row_provenance_field` (string) and `row_provenance` (dict-of-dicts) are validated for shape only.
 - Filter `id` must be unique; `type` must be in the valid set
 - `select` / `multiSelect` / `radio` require `options`
 - `slider` requires `min`, `max`
@@ -1365,7 +1714,7 @@ Rules:
     - `markdown` requires `content`
     - `note` requires `body`; `kind` (default `insight`) must be in `{insight, thesis, watch, risk, context, fact}`
 - Chart `spec` blocks require `chart_type` (in the 24-type set), `dataset` (must reference a declared dataset), and `mapping` dict. Per-spec `palette` / `theme` overrides must be registered names.
-- Chart `click_popup`, when present, must be a dict (mirrors the table `row_click` shape -- `title_field`, `subtitle_template`, `popup_fields`, or `detail.sections[]`)
+- Chart `click_popup`, when present, must be a dict (mirrors the table `row_click` shape -- `title_field`, `subtitle_template`, `popup_fields`, or `detail.sections[]`) OR boolean `false` to suppress the auto-default provenance popup. Same rule for table `row_click`.
 - Filter `targets` must match real chart widget ids (wildcards OK)
 - Link members must match real chart widget ids (wildcards OK)
 - `sync` values must be in `{axis, tooltip, legend, dataZoom}`
@@ -1386,17 +1735,22 @@ diags = chart_data_diagnostics(manifest)
 for d in diags:
     print(d.severity, d.code, d.widget_id, d.message)
 
-# Or read them off compile result; HTML still emits, broken charts get
-# a "(no data)" placeholder so sibling tiles still render
-r = compile_dashboard(manifest)
+# Default behavior: raise on any error-severity diagnostic. This is
+# the "production" mode; a broken headline number or missing column
+# is an error, full stop.
+r = compile_dashboard(manifest)   # raises ValueError on error diags
+
+# Iteration mode: keep going through errors so PRISM can fix them all
+# in one round-trip. Broken charts get a "(no data)" placeholder, KPI
+# tiles render '--', diagnostics carry every finding.
+r = compile_dashboard(manifest, strict=False)
 for d in r.diagnostics:
     print(d.to_dict())
-
-# Refresh pipelines / CI: hard-fail before publishing a broken dashboard.
-r = compile_dashboard(manifest, strict=True)   # ValueError on any error diag
 ```
 
-**Strict mode** (`compile_dashboard(strict=True)`) raises a `ValueError` listing every error-severity diagnostic instead of returning a `DashboardResult`. The default (`strict=False`) keeps the resilient inner-loop model so PRISM can fix all findings in one round-trip; refresh pipelines flip the flag so a budget breach or shape mistake hard-fails before the HTML gets published. Warnings + info diagnostics never trigger strict-mode failure.
+**Strict mode** (`compile_dashboard(strict=True)`, the default) raises a `ValueError` listing every error-severity diagnostic instead of returning a `DashboardResult`. The opt-in `strict=False` keeps the resilient inner-loop model so PRISM can fix all findings in one round-trip; refresh pipelines and CI rely on the strict default so a budget breach, KPI source typo, or shape mistake hard-fails before the HTML gets published. Warnings + info diagnostics never trigger strict-mode failure.
+
+The strict default flipped from `False` to `True` after production was discovered to be shipping dashboards with KPI tiles rendering `--` because the diagnostic layer was either silent or non-blocking. The new contract: a broken headline number is a broken dashboard.
 
 **Shape diagnostics require pre-normalize DataFrame snapshots**, captured automatically by `compile_dashboard` and `render_dashboard`. The standalone `chart_data_diagnostics(manifest)` and the `diagnose` CLI work on already-normalised manifests (e.g. JSON files), so they emit binding + size diagnostics but skip shape codes -- shape mistakes are caught only when DataFrames flow through the live compile path.
 
@@ -1428,11 +1782,17 @@ r = compile_dashboard(manifest, strict=True)   # ValueError on any error diag
 | `table_dataset_empty` | warning | table's `dataset_ref` has 0 rows |
 | `table_column_field_missing` | error | `columns[].field` is not in the dataset; carries `did_you_mean` |
 | `table_columns_all_missing` | error | EVERY defined column is missing from the dataset (one aggregate diagnostic instead of N near-identical ones); fired alongside the per-column diagnostics |
-| `kpi_source_malformed` | error | `source` / `delta_source` / `sparkline_source` is not in `dataset.column[.aggregator]` form |
+| `kpi_no_value_no_source` | error | KPI tile has neither `value` nor `source`; the runtime would render `--` |
+| `kpi_value_is_placeholder` | error | `value` is a literal placeholder string (`--`, `n/a`, etc.) -- ship a real value or bind a source |
+| `kpi_source_malformed` | error | `source` / `delta_source` is not in `dataset.aggregator.column` form (3 parts), or `sparkline_source` is not `dataset.column` (2 parts) |
 | `kpi_source_dataset_unknown` | error | KPI source references an undeclared dataset; carries `did_you_mean` |
+| `kpi_source_aggregator_unknown` | error | aggregator segment isn't in the runtime allow-list (`latest` / `first` / `sum` / `mean` / `min` / `max` / `count` / `prev`); carries `did_you_mean` |
 | `kpi_source_column_missing` | error | KPI source column is not in its dataset; carries `did_you_mean` |
-| `kpi_source_column_all_nan` | warning | KPI source column is all-NaN; tile will display `--` |
+| `kpi_source_no_numeric_values` | error | KPI source column has zero numeric values (all-string OR all-NaN); the JS resolver returns null and the tile shows `--` |
 | `kpi_sparkline_too_short` | warning | `sparkline_source` has <2 numeric values; sparkline can't render as a line |
+| `stat_grid_no_value_no_source` | error | stat_grid cell has neither `value` nor `source`; cell would render `--` |
+| `stat_grid_value_is_placeholder` | error | stat_grid `value` is a placeholder string |
+| `stat_grid_source_unresolvable` | error | stat_grid `source` points at a dataset/column/aggregator the compile-time resolver cannot turn into a number |
 | `filter_field_missing_in_target` | error | filter `field` is not a column in any of the target widgets' datasets; the filter would silently filter nothing |
 | `filter_default_not_in_options` | warning | `default` is not in `options` for select/multiSelect/radio filters |
 | `dataset_dti_no_date_column` | error | dataset DataFrame has a `DatetimeIndex` and no `date` column AND a chart/filter on this dataset references `date`; fires when PRISM forgets `df.reset_index()` (the compiler does NOT auto-reset). `context.fix_hint` carries the literal pandas snippet. |
@@ -1495,7 +1855,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
 
-sys.path.insert(0, '/GS/viz/echarts')
+sys.path.insert(0, '/ai_development/dashboards')
 from echart_dashboard import compile_dashboard, populate_template
 
 KERBEROS = 'goyairl'
@@ -1761,91 +2121,185 @@ Full rebuild only when scripts are missing / corrupted -- use the three-tool-cal
 
 ---
 
-## 5. Chart vs dashboard decision
+## 5. When to build a dashboard (vs an Altair chart)
 
-| Intent                                               | Build                                     |
-|------------------------------------------------------|-------------------------------------------|
-| Share a PNG in chat / email                          | `make_echart(...)`                        |
-| Share 2-6 related charts in chat as one artifact     | `make_2pack_*` / `make_3pack_*` / `make_4pack_grid` / `make_6pack_grid` |
-| Persistent, refreshable, user-owned monitor          | `compile_dashboard(manifest, session_path=)` then persist to `users/{kerberos}/dashboards/{name}/` |
-| Report / email snapshot of a dashboard               | Same as user dashboard + PNGs via `compile_dashboard(..., save_pngs=True)` |
+This module ships **dashboards only**. Reach for it when the analyst needs:
 
-Charts and dashboards use the same engine. Chart specs written for `make_echart()` work verbatim inside a dashboard widget's `spec` block.
+| Need                                                                | Build                                                                                  |
+|---------------------------------------------------------------------|----------------------------------------------------------------------------------------|
+| Multi-chart interactive HTML the user navigates                     | `compile_dashboard(manifest, session_path=...)` -- session-only artifact               |
+| Persistent, refreshable, user-owned monitor                         | `compile_dashboard(manifest, ...)` then persist to `users/{kerberos}/dashboards/{name}/` (Section 4) |
+| Report / email PNG snapshot of a compiled dashboard                 | `compile_dashboard(..., save_pngs=True)` for per-widget PNGs, or the browser-side `Download Dashboard` button |
+| One-off chart PNG (chat, email, single-chart export)                | **Not this module** -- use Altair via `make_chart()` (separate module)                 |
+| Pre-built single chart re-displayed inside a dashboard tile         | Express it as a `widget: chart` in a dashboard manifest -- the spec format is the same as `make_echart` mappings |
+
+Section 3 covers manifests + widgets + filters + links. Section 4 covers persistence + the refresh pipeline. The chart-type catalogue (Section 2.3), mapping keys (Section 2.4), annotations (Section 2.5), and cosmetic knobs (Section 2.2) all apply to dashboard chart widgets verbatim.
 
 ---
 
-## 6. Common patterns
+## 6. Common chart-spec patterns
+
+> Every snippet below is a **dashboard chart-widget `spec`** -- the same mapping keys, formatters, and annotation forms documented in Section 2 work verbatim inside a `widget: chart` block. PRISM only ships these by embedding them in a manifest passed to `compile_dashboard()`. The historical `make_echart()` calls have been replaced with the equivalent dashboard-widget shape.
 
 ### 6.1 Wide-form `multi_line` (fastest)
 
-```python
-make_echart(df=df_wide, chart_type='multi_line',
-             mapping={'x': 'date', 'y': ['us_2y', 'us_5y', 'us_10y', 'us_30y'],
-                      'y_title': 'Yield (%)'},
-             title='UST curve', session_path=SP)
+```json
+{"widget": "chart", "id": "curve", "w": 12, "h_px": 380,
+  "title": "UST curve",
+  "spec": {"chart_type": "multi_line", "dataset": "rates",
+            "mapping": {"x": "date",
+                          "y": ["us_2y", "us_5y", "us_10y", "us_30y"],
+                          "y_title": "Yield (%)"}}}
 ```
 
 ### 6.2 Long-form `multi_line` with color
 
-```python
-df_long = df.melt(id_vars=['date'], var_name='series', value_name='yield')
-make_echart(df=df_long, chart_type='multi_line',
-             mapping={'x': 'date', 'y': 'yield', 'color': 'series',
-                      'y_title': 'Yield (%)'},
-             title='UST curve', session_path=SP)
+`datasets["rates_long"] = df.melt(id_vars=['date'], var_name='series', value_name='yield')`
+
+```json
+{"widget": "chart", "id": "curve", "w": 12, "h_px": 380,
+  "title": "UST curve",
+  "spec": {"chart_type": "multi_line", "dataset": "rates_long",
+            "mapping": {"x": "date", "y": "yield", "color": "series",
+                          "y_title": "Yield (%)"}}}
 ```
 
 ### 6.3 Actuals vs estimates via `strokeDash`
 
-```python
-make_echart(df=df_long, chart_type='multi_line',
-             mapping={'x': 'date', 'y': 'capex', 'color': 'company',
-                      'strokeDash': 'type',      # 'Actual' vs 'Estimate'
-                      'y_title': 'Capex ($B)'},
-             title='Big Tech capex',
-             subtitle='solid = actual, dashed = estimate',
-             session_path=SP)
+```json
+{"widget": "chart", "id": "capex", "w": 12, "h_px": 380,
+  "title": "Big Tech capex",
+  "subtitle": "solid = actual, dashed = estimate",
+  "spec": {"chart_type": "multi_line", "dataset": "capex",
+            "mapping": {"x": "date", "y": "capex", "color": "company",
+                          "strokeDash": "type",
+                          "y_title": "Capex ($B)"}}}
 ```
 
 ### 6.4 Dual axis
 
-```python
-make_echart(df=df_long, chart_type='multi_line',
-             mapping={'x': 'date', 'y': 'value', 'color': 'series',
-                      'dual_axis_series': ['ISM Manufacturing'],
-                      'y_title': 'S&P 500', 'y_title_right': 'ISM Index',
-                      'invert_right_axis': False},
-             title='Equities vs ISM', session_path=SP)
+```json
+{"widget": "chart", "id": "spx_ism", "w": 12, "h_px": 380,
+  "title": "Equities vs ISM",
+  "spec": {"chart_type": "multi_line", "dataset": "macro",
+            "mapping": {"x": "date", "y": "value", "color": "series",
+                          "dual_axis_series": ["ISM Manufacturing"],
+                          "y_title": "S&P 500",
+                          "y_title_right": "ISM Index",
+                          "invert_right_axis": false}}}
 ```
 
 Before dual-axis, print `df_long['series'].unique()` and assert the right-axis name is present. Name mismatch is the #1 failure mode.
 
 ### 6.5 Scatter with trendline
 
-```python
-make_echart(df=df, chart_type='scatter',
-             mapping={'x': 'unemployment', 'y': 'cpi', 'color': 'decade',
-                      'trendlines': True,
-                      'x_title': 'U-rate (%)', 'y_title': 'Core CPI YoY (%)'},
-             title='Phillips curve by decade', session_path=SP)
+```json
+{"widget": "chart", "id": "phillips", "w": 6, "h_px": 380,
+  "title": "Phillips curve by decade",
+  "spec": {"chart_type": "scatter", "dataset": "phillips",
+            "mapping": {"x": "unemployment", "y": "cpi", "color": "decade",
+                          "trendlines": true,
+                          "x_title": "U-rate (%)", "y_title": "Core CPI YoY (%)"}}}
 ```
 
-### 6.6 Bullet: rates RV screen
+### 6.6 `scatter_studio`: interactive bivariate explorer
 
-```python
-df_rv = pd.DataFrame({
-    'metric': ['2s10s', '5s30s', '10Y real'],
-    'current': [38, -5, 1.85],
-    'low_5y':  [-20, -10, 0.5],
-    'high_5y': [45, 60, 2.4],
-    'z': [1.2, -1.5, 0.1],
-    'pct': ['85th', '12th', '45th'],
-})
-make_echart(df=df_rv, chart_type='bullet',
-             mapping={'y': 'metric', 'x': 'current',
-                      'x_low': 'low_5y', 'x_high': 'high_5y',
-                      'color_by': 'z', 'label': 'pct'},
-             title='Rates RV screen', dimensions='tall', session_path=SP)
+`scatter_studio` is the answer when the analyst wants to *pick* X and Y rather than have them pinned. Author whitelists the columns the viewer is allowed to plot; everything else (dropdowns, per-axis transforms, OLS line, Pearson r / R^2 / beta / p-value strip, window slicer, outlier filter) wires automatically. State lives in `chartControlState[cid].studio`; filters that target the studio's dataset_ref recompute the option from the filtered rows.
+
+```json
+{"widget": "chart", "id": "yields_vs_breakevens", "w": 12, "h_px": 480,
+  "spec": {
+    "chart_type": "scatter_studio",
+    "dataset": "macro_panel",
+    "title": "Yields vs breakevens (exploratory)",
+    "mapping": {
+      "x_columns":     ["us_2y", "us_10y", "real_10y", "ig_oas"],
+      "y_columns":     ["breakeven_5y5y", "vix", "spx_pe", "ig_oas"],
+      "color_columns": ["regime", "fed_stance"],
+      "order_by":      "date",
+      "x_default":     "us_10y",
+      "y_default":     "breakeven_5y5y",
+      "color_default": "regime",
+      "label_column":  "date"
+    },
+    "studio": {
+      "transforms": ["raw", "log", "pct_change", "yoy_pct", "zscore",
+                      "rolling_zscore_252", "rank_pct"],
+      "regression": ["off", "ols", "ols_per_group"],
+      "show_stats": true
+    }}}
+```
+
+The viewer's controls drawer (the `⋮` button on the chart tile) opens to:
+
+| Studio knob              | Reads from                                     | Behavior |
+|--------------------------|------------------------------------------------|----------|
+| X axis                   | `mapping.x_columns`                            | Numeric column dropdown. |
+| Y axis                   | `mapping.y_columns`                            | Numeric column dropdown. |
+| Color                    | `mapping.color_columns`                        | Categorical group dropdown (with "— none —" option). |
+| Size                     | `mapping.size_columns`                         | Numeric column for bubble size. |
+| Per-axis transform       | `studio.transforms`                            | `Raw` / `log` / `Δ` / `%Δ` / `YoY %` / `z-score` / `Rolling z (Nd)` / `pct rank`. Applied independently to X and Y. |
+| Window                   | `studio.windows` (only when `order_by` set)    | `All` / `252d` / `504d` / `5y` (or any `<digits>d` / `<digits>y` value). |
+| Outliers                 | `studio.outliers`                              | `Off` / `IQR × 3` / `\|z\| > 4`. Applied AFTER transform. |
+| Regression               | `studio.regression`                            | `Off` / `OLS` / `OLS per color`. |
+| X-scale / Y-scale        | universal axis toggles                         | Linear / Log. |
+
+Stats strip below the canvas reports `n`, Pearson `r` (with significance stars `***` / `**` / `*` / `·`), `R^2`, slope `β` and its standard error, intercept `α`, RMSE, and p-value. With `OLS per color` the strip also lists per-group `r` / `R^2` / `β` / `n`. Stars: `***` p<0.001, `**` p<0.01, `*` p<0.05, `·` p<0.10. p-value uses the normal-approximation tail of the t-statistic — adequate for display, not for citation.
+
+Edge cases handled by the runtime:
+- `n < 2` after window / outlier filtering → strip prints `n<2 — regression unavailable`.
+- Selected X column has zero variance after transform → strip prints `zero x-variance, regression undefined`; the OLS line is suppressed.
+- `log` transform on a column with non-positive values → those rows are dropped; the strip's `n` is the post-drop count.
+
+### 6.7 `correlation_matrix`: N x N heatmap from a column list
+
+Use when the question is "how do these N series co-move." The builder applies a per-column transform (so you can correlate `% changes` instead of levels), computes the correlation matrix, and emits a diverging heatmap pinned to `[-1, 1]`.
+
+```json
+{"widget": "chart", "id": "rates_corr", "w": 6, "h_px": 380,
+  "spec": {
+    "chart_type": "correlation_matrix",
+    "dataset": "rates_panel",
+    "title": "Rates correlation (% change)",
+    "mapping": {
+      "columns":        ["us_2y", "us_5y", "us_10y", "us_30y",
+                          "real_10y", "breakeven_5y5y"],
+      "method":         "pearson",
+      "transform":      "pct_change",
+      "order_by":       "date",
+      "min_periods":    30,
+      "show_values":    true,
+      "value_decimals": 2
+    }}}
+```
+
+Mapping keys:
+
+| Key              | Purpose                                                                 |
+|------------------|-------------------------------------------------------------------------|
+| `columns`        | List of numeric column names, `len >= 2`. Required.                     |
+| `method`         | `'pearson'` (default) or `'spearman'` (rank correlation; robust to monotonic non-linearity). |
+| `transform`      | Per-column transform applied before correlation. Default `'raw'`. Same names as `scatter_studio`. |
+| `order_by`       | Required when `transform` is order-aware (`pct_change` / `yoy_pct` / `change` / `rolling_zscore_*`). Default: first datetime-like column. |
+| `min_periods`    | Minimum number of overlapping non-null pairs to report a correlation. Default 5. Cells below render blank. |
+| `show_values`    | Bool, default `True`. Print the correlation in each cell.               |
+| `value_decimals` | Int, default 2.                                                          |
+
+When to pick `correlation_matrix` vs `heatmap`:
+- `correlation_matrix` when the data is a wide-form time-series panel and the chart's job is to summarise pairwise co-movement. The author specifies columns; the builder owns the math, the visualMap, and the `[-1, 1]` bounds.
+- `heatmap` when each cell is a distinct bivariate measurement (e.g. cross-asset returns by month-of-year, hit-rate by quintile-bucket). The author hands the builder pre-computed cell values.
+
+### 6.8 Bullet: rates RV screen
+
+`datasets["rv"] = pd.DataFrame({"metric": [...], "current": [...], "low_5y": [...], "high_5y": [...], "z": [...], "pct": [...]})`
+
+```json
+{"widget": "chart", "id": "rv_screen", "w": 6, "h_px": 480,
+  "title": "Rates RV screen",
+  "spec": {"chart_type": "bullet", "dataset": "rv",
+            "mapping": {"y": "metric", "x": "current",
+                          "x_low": "low_5y", "x_high": "high_5y",
+                          "color_by": "z", "label": "pct"}}}
 ```
 
 ---
@@ -1964,7 +2418,8 @@ For **aesthetic** tweaks (colors, fonts, sizes, legend placement): hand the user
 |-----------------------------------------------------------|--------------------------------------------|
 | Literal numbers in manifest JSON                          | Pass the DataFrame; compiler converts      |
 | PRISM hand-writing HTML, CSS, or JS                       | Emit manifest; `compile_dashboard()` does it |
-| Calling `make_chart()` (legacy) or `matplotlib` anywhere  | Only `make_echart` / `compile_dashboard` from this module |
+| `make_echart()` or composite calls in PRISM-shipped artifacts | Use `compile_dashboard()` from this module for interactive analysis; use Altair `make_chart()` for one-off chart PNGs. The `make_echart` / composite helpers are internal builders only. |
+| `matplotlib` / `plotly` / hand-rolled HTML charts        | Same -- one path: dashboards here, PNGs via Altair         |
 | Source attribution in title/subtitle                      | Keep it in `metadata.sources`              |
 | Annotating self-evident facts (zero line on a spread)     | Omit                                       |
 | `np.zeros()` fill when data is missing                    | Skip the panel or add a text note          |
@@ -2004,7 +2459,25 @@ For **aesthetic** tweaks (colors, fonts, sizes, legend placement): hand the user
 Running any script without arguments launches its interactive menu. Argparse mirrors every option for non-interactive / CI use.
 
 ```
-python echart_studio.py                        # interactive menu
+# Primary CLI -- the dashboard compiler (PRISM-facing path)
+python echart_dashboard.py                                    # interactive menu
+python echart_dashboard.py compile manifest.json -o out.html --open
+python echart_dashboard.py compile manifest.json -s SESSION_DIR
+python echart_dashboard.py compile manifest.json -o out/dash.html --pngs
+python echart_dashboard.py validate manifest.json
+python echart_dashboard.py diagnose manifest.json [--json] [--severity error]
+python echart_dashboard.py demo
+python echart_dashboard.py list widgets|filters|links|chart_types
+
+# End-to-end demo gallery (all dashboard scenarios)
+python demos.py                                   # interactive menu
+python demos.py --all                             # run every demo
+python demos.py --demo news_wrap                  # run one demo
+python demos.py --list                            # list demos and exit
+python demos.py --all --open                      # run all, auto-open gallery
+
+# Internal-builder CLI (developers / tests; not used by PRISM artifacts)
+python echart_studio.py                        # interactive menu (single-chart builder)
 python echart_studio.py wrap spec.json --open  # wrap JSON to HTML
 python echart_studio.py demo --matrix          # 23 samples x 5 themes
 python echart_studio.py list types|themes|palettes|dimensions|knobs|samples
@@ -2013,48 +2486,36 @@ python echart_studio.py test                   # run unit tests
 python echart_studio.py png option.json -o chart.png --scale 2
 ```
 
-```
-python echart_dashboard.py                                    # interactive menu
-python echart_dashboard.py compile manifest.json -o out.html --open
-python echart_dashboard.py compile manifest.json -s SESSION_DIR
-python echart_dashboard.py compile manifest.json -o out/dash.html --pngs
-python echart_dashboard.py validate manifest.json
-python echart_dashboard.py demo
-python echart_dashboard.py list widgets|filters|links|chart_types
-```
-
-```
-python demos.py                                   # interactive menu
-python demos.py --all                             # run every demo
-python demos.py --demo news_wrap                  # run one demo
-python demos.py --list                            # list demos and exit
-python demos.py --all --open                      # run all, auto-open gallery
-```
-
-`demos.py` bundles 12 end-to-end scenarios that collectively exercise every capability in the stack -- nine chart-driven dashboards plus three text-heavy ones that lean on the prose surfaces (note widgets, summary banner, full markdown grammar).
+`demos.py` bundles 14 end-to-end **dashboard** scenarios that collectively exercise every PRISM-facing capability in the stack -- 26 chart types, 8 widget kinds, 9 filter types, 4 brush types, 4 sync values, 5 annotation types, 3 chart-widget variants (`spec` / `ref` / `option`), persistence + diagnostics workflow, and the prose / markdown surfaces.
 
 **Chart-driven**
 
-| Name                  | Kind      | Highlights                                                                            |
-|-----------------------|-----------|---------------------------------------------------------------------------------------|
-| `rates_monitor`       | dashboard | 8-tab rates monitor (US curve + 5 global central banks), brush, dual-axis, gauges, summary banner + 4 note kinds |
-| `cross_asset`         | composite | 4-pack grid (SPX / DXY / WTI / Gold) with event annotations -- pure PNG artifact      |
-| `risk_regime`         | dashboard | Correlation heatmap (diverging), VIX term by regime, factor boxplots, drawdown band   |
-| `fomc_monitor`        | dashboard | Cut-prob gauge, FFR candlestick, dot-plot strokeDash, voter radar, decision calendar  |
-| `global_flows`        | dashboard | Cross-border sankey + donut, treemap + sunburst, network graph, mandate funnel        |
-| `equity_deep_dive`    | dashboard | Single-name tear sheet: candlestick, EPS strokeDash, beta scatter-trendline, bullet   |
-| `portfolio_analytics` | dashboard | Multi-asset book: VaR gauge, factor radar, allocation pie, parallel_coords, histogram |
-| `markets_wrap`        | dashboard | 17-chart cross-asset wrap, click-emit-filter, conditional-formatted top movers table  |
-| `screener_studio`     | dashboard | Three-tab toolbox: rich RV screen, all 9 filter types, bond drilldown w/ rich modal   |
-| `bond_carry_roll`     | dashboard | Carry/roll scatter where every point is clickable: chart `click_popup` rich modal (per-bond stats, issuer blurb, spread + price history filtered to that CUSIP, recent events). Plus simple-mode click popups on a top-10 bar and a sector summary chart. |
+| Name                  | Highlights                                                                                                        |
+|-----------------------|-------------------------------------------------------------------------------------------------------------------|
+| `rates_monitor`       | 8-tab rates monitor (US curve + 5 global central banks), brush, dual-axis, gauges, summary banner + 4 note kinds |
+| `risk_regime`         | `correlation_matrix` (dedicated builder), `scatter_multi`, VIX term by regime, factor boxplots, drawdown band     |
+| `fomc_monitor`        | Cut-prob gauge, FFR candlestick, dot-plot strokeDash, voter radar, decision calendar, `arrow` annotation          |
+| `global_flows`        | Cross-border sankey + donut, treemap + sunburst, network graph, mandate funnel, hierarchical `tree`               |
+| `equity_deep_dive`    | Single-name tear sheet: candlestick, EPS strokeDash, beta scatter-trendline, bullet; `y_log` toggle               |
+| `portfolio_analytics` | Multi-asset book: VaR gauge, factor radar, allocation pie, parallel_coords, histogram; `pinned` KPI ribbon, `kv` section |
+| `markets_wrap`        | 17-chart cross-asset wrap, click-emit-filter, conditional-formatted top movers; `image` widget, `divider`s, `legend` sync, filter `"*"` wildcard |
+| `screener_studio`     | Three-tab toolbox: rich RV screen, all 9 filter types, bond drilldown w/ rich modal; `dateRange mode="filter"`    |
+| `bond_carry_roll`     | Carry/roll scatter where every point is clickable: chart `click_popup` rich modal (per-bond stats, issuer blurb, spread + price history filtered to that CUSIP, recent events). Plus simple-mode click popups on a top-10 bar and a sector summary chart. |
+| `macro_studio`        | Exploratory bivariate analysis: `scatter_studio` centerpiece (interactive X/Y/color/size, transforms, regression, stats strip), correlation_matrix on % changes, `mapping.axes` 4-axis macro overlay, polygon brush |
 
 **Text-heavy** (built around the prose surface area: see 3.3.2, 3.6)
 
-| Name             | Kind      | Highlights                                                                                          |
-|------------------|-----------|-----------------------------------------------------------------------------------------------------|
-| `news_wrap`      | dashboard | Intraday news desk: summary banner + all six note kinds + sortable headlines table with full-body markdown drilldown + per-asset commentary tiles + reading list |
-| `fomc_brief`     | dashboard | Document-first FOMC dashboard: statement-diff prose, minutes excerpts (verbatim blockquotes by topic), speakers quote-board with row-click verbatim modal, dot-plot panel with desk commentary |
-| `research_feed`  | dashboard | Substack-style aggregator: featured + theme notes, full article feed with row-click drilldown surfacing each piece's full markdown body (h2/h3/ordered lists/blockquotes/tables/strikethrough) |
+| Name             | Highlights                                                                                          |
+|------------------|-----------------------------------------------------------------------------------------------------|
+| `news_wrap`      | Intraday news desk: summary banner + all six note kinds + sortable headlines table with full-body markdown drilldown + per-asset commentary tiles + reading list |
+| `fomc_brief`     | Document-first FOMC dashboard: statement-diff prose, minutes excerpts (verbatim blockquotes by topic), speakers quote-board with row-click verbatim modal, dot-plot panel with desk commentary |
+| `research_feed`  | Substack-style aggregator: featured + theme notes, full article feed with row-click drilldown surfacing each piece's full markdown body (h2/h3/ordered lists/blockquotes/tables/strikethrough) |
+
+**Workflow / diagnostics**
+
+| Name           | Highlights                                                                                                        |
+|----------------|-------------------------------------------------------------------------------------------------------------------|
+| `dev_workflow` | Lifecycle showcase: `manifest_template` + `populate_template`, `validate_manifest` output, `chart_data_diagnostics` output (rendered into markdown widgets), `compile_dashboard(strict=False)` mode, `save_pngs=True`, `raw` chart_type, `option` chart variant, `header_actions` `onclick`, KPI direct-value/`format=raw`, opt-out flags (`chart_zoom`, `chart_controls`, `table_controls`, `kpi_controls`) |
 
 ### Gallery + thumbnails
 
@@ -2070,21 +2531,16 @@ output/20260424_233640/
 │   └── thumbnail.png         <- screenshot shown on the gallery card
 ├── risk_regime/
 │   └── ... (same shape)
-├── cross_asset/              <- composite path is different
-│   ├── composite.png         <- single PNG (no headless screenshot needed)
-│   └── echarts/composite.html
 └── ... (one folder per demo in DEMO_REGISTRY)
 ```
 
 **How thumbnails are produced.** After each dashboard compiles, `_thumbnail()` in `demos.py` calls `rendering.save_dashboard_html_png(html_path, png_path, width=W, height=H, scale=1)`. That helper drives headless Chrome (`chrome --headless=new --window-size=W,H --virtual-time-budget=4500ms --screenshot=...`) against the local HTML file and writes one PNG per dashboard. Each demo passes its own `(width, height)` tuned to the layout -- `1500x1300` for `rates_monitor`, `1500x1100` for `risk_regime`, up to `1500x2400` for the 17-chart `markets_wrap`. The viewport is fixed; pick a `height` that comfortably exceeds the dashboard's full pixel height or the bottom is clipped. `scale=1` keeps the PNG light enough for an inline gallery card; bump to `2` (or use `compile_dashboard(save_pngs=True, png_scale=2)` for per-widget assets) when you need report-quality output.
 
-The `cross_asset` composite is the only exception. It produces a single composite chart via `make_4pack_grid()` rather than a dashboard, so the runner calls `r.save_png(width=1400, height=800, scale=2)` directly on the result -- no headless screenshot of an HTML page.
-
 **How `gallery.html` is composed.** `_gallery_html()` emits a self-contained, GS-branded card-grid page (header bar, summary pills for engine / theme / palettes / pass count, then a responsive grid of cards). One card per `index.json` entry:
 
 | Card region   | Content                                                                                  |
 |---------------|------------------------------------------------------------------------------------------|
-| header        | demo title (red `FAILED` prefix if the build raised) + kind badge (`dashboard` / `composite` / `error`) |
+| header        | demo title (red `FAILED` prefix if the build raised) + kind badge (`dashboard` / `error`) |
 | body          | `<img>` pointing at the relative `thumbnail.png`, or a "PNG not generated (Chrome unavailable?)" placeholder |
 | description   | the one-line scenario blurb from `DEMO_REGISTRY[name]["description"]`                    |
 | actions       | `Open interactive` (HTML), `PNG`, `JSON manifest` -- plus the demo `name` and `elapsed_s` |
@@ -2159,17 +2615,19 @@ The stress-test side is a battery of deliberately-broken-but-validating dashboar
 ## 15. File reference
 
 ```
-GS/viz/echarts/
+ai_development/dashboards/
   config.py             GS brand tokens, theme, palettes, dimensions
-  echart_studio.py      make_echart, wrap_echart, EChartResult
   echart_dashboard.py   compile_dashboard, manifest validator,
                           manifest_template / populate_template, Dashboard builder
+                          (PRISM-FACING ENTRY POINT)
+  echart_studio.py      make_echart, wrap_echart, EChartResult
+                          (INTERNAL: used by the dashboard compiler for chart widgets)
   composites.py         make_2pack_*, make_3pack_triangle, make_4pack_grid,
-                          make_6pack_grid
+                          make_6pack_grid (LEGACY: not used by PRISM)
   rendering.py          single-chart editor HTML + dashboard HTML +
                           dashboard runtime JS + PNG export
   samples.py            chart + dashboard samples + PRISM roleplay demos
-  demos.py              end-to-end demo scenarios + CLI + gallery
+  demos.py              end-to-end dashboard demo scenarios + CLI + gallery
   inspect_dashboard.py  visual diagnostics for compiled dashboards
   tests.py              unit tests + stress tests (deliberately-broken
                           dashboards stress-testing compile_dashboard
@@ -2180,10 +2638,10 @@ GS/viz/echarts/
 For programmatic exploration of every supported capability:
 
 ```
-python GS/viz/echarts/echart_dashboard.py                 # interactive CLI
-python GS/viz/echarts/echart_dashboard.py demo            # render every sample
-python GS/viz/echarts/samples.py --all                    # chart gallery
-python GS/viz/echarts/tests.py                            # interactive runner
-python GS/viz/echarts/tests.py unit                       # all unit tests
-python GS/viz/echarts/tests.py stress --all               # all stress scenarios
+python ai_development/dashboards/echart_dashboard.py                 # interactive CLI
+python ai_development/dashboards/echart_dashboard.py demo            # render every sample
+python ai_development/dashboards/samples.py --all                    # chart gallery
+python ai_development/dashboards/tests.py                            # interactive runner
+python ai_development/dashboards/tests.py unit                       # all unit tests
+python ai_development/dashboards/tests.py stress --all               # all stress scenarios
 ```

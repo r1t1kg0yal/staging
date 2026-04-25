@@ -5,7 +5,7 @@ echarts system actually run `pull_data.py` -> `build.py` end-to-end, the way
 `prism/PrismChartDashboardSkill.md` says it should?
 
 **Short answer.** Yes -- the browser-side half of the contract is fully
-implemented inside `GS/viz/echarts/`. The other half lives in the PRISM
+implemented inside `ai_development/dashboards/`. The other half lives in the PRISM
 Django backend (it has to: a static HTML file cannot run Python by itself).
 The split is correct and clean. There are also a handful of *upgrades* over
 the old skill file -- a smaller `build.py`, a single `manifest.json` instead
@@ -93,7 +93,7 @@ build conversation, with fresh DataFrames piped through `populate_template()`.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│ GS/viz/echarts/   (this repo, the dashboard compiler)                      │
+│ ai_development/dashboards/   (this repo, the dashboard compiler)           │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  - manifest schema (incl. metadata.refresh_* knobs + validator)            │
 │  - manifest_template() / populate_template() helpers                       │
@@ -300,7 +300,7 @@ render a button that has nowhere to POST.
 ## 6. What the echarts repo does NOT include (and shouldn't)
 
 ```
-PRISM-side responsibilities (NOT in GS/viz/echarts/):
+PRISM-side responsibilities (NOT in ai_development/dashboards/):
 
   ├── /api/dashboard/refresh/         (Django view, news/views.py)
   ├── /api/dashboard/refresh/status/  (Django view, news/views.py)
@@ -326,7 +326,7 @@ touching `rendering.py`.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Does GS/viz/echarts fully support the refresh model from                 │
+│ Does ai_development/dashboards fully support the refresh model from      │
 │ PrismChartDashboardSkill.md?                                             │
 │                                                                          │
 │   YES -- and it does so more cleanly than the old skill prescribed.     │

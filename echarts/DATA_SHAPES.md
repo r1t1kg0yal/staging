@@ -1,6 +1,6 @@
 ## DATA_SHAPES.md -- organizing DataFrames for echarts
 
-**Module:** `GS/viz/echarts`
+**Module:** `ai_development/dashboards`
 **Audience:** PRISM (the LLM authoring `execute_analysis_script` code), developers extending the chart system, anyone wiring real data into a manifest.
 **Scope:** the *data side* of the JSON. The README covers chart types, knobs, widgets, dashboards, refresh, etc. This doc covers the **prior question**: how do you organise the DataFrames that feed all of the above so that wiring them into the manifest is mechanical rather than puzzle-solving.
 

@@ -1,5 +1,5 @@
 """
-rendering -- HTML templates + headless-Chrome PNG export for GS/viz/echarts.
+rendering -- HTML templates + headless-Chrome PNG export for ai_development/dashboards.
 
 Three concerns merged into one module:
 
@@ -515,7 +515,91 @@ APP_JS = r"""
   APPLY.setAreaSmooth = function(v){ seriesOfType('line').forEach(function(s){ s.smooth = !!v; }); };
 
   // Heatmap
+  // ECharts heatmap doesn't evaluate label.color as a callback, so
+  // auto-contrast routes through label.rich + a formatter that wraps
+  // values in '{l|...}' (light bg -> dark text) or '{d|...}' based on
+  // params.color luminance. setHeatmapAutoContrast(true) installs the
+  // wrapping formatter; (false) strips the wrap so values render with
+  // a single color (the built-in label.color or the ECharts default).
+  function _heatmapValueDecimalsFor(s){
+    // Heuristic: detect from the existing formatter string; default 1.
+    var f = s && s.label && s.label.formatter;
+    if (typeof f === 'function') f = f.toString();
+    if (typeof f === 'string'){
+      var m = f.match(/toFixed\(\s*(\d+)\s*\)/);
+      if (m) return +m[1];
+    }
+    return 1;
+  }
+  function _heatmapValueIndexFor(s){
+    // Calendar heatmap data is [date, value] (idx 1); regular heatmap
+    // is [xIdx, yIdx, value] (idx 2). Coordinate system flag is the
+    // most reliable indicator.
+    return s && s.coordinateSystem === 'calendar' ? 1 : 2;
+  }
+  function _heatmapMakeContrastFormatter(decimals, valueIdx){
+    return function(p){
+      var v = null; var d = p && p.data;
+      if (d != null && d.value != null){
+        v = Array.isArray(d.value) ? d.value[valueIdx] : d.value;
+      } else if (Array.isArray(d)){
+        v = d[valueIdx];
+      } else if (d != null){ v = d; }
+      if (v == null || isNaN(+v)) return '';
+      var c = p && p.color; var r = 128, g = 128, b = 128;
+      if (typeof c === 'string'){
+        if (c.charAt(0) === '#'){
+          if (c.length === 4){
+            r = parseInt(c.charAt(1) + c.charAt(1), 16);
+            g = parseInt(c.charAt(2) + c.charAt(2), 16);
+            b = parseInt(c.charAt(3) + c.charAt(3), 16);
+          } else if (c.length >= 7){
+            r = parseInt(c.substr(1, 2), 16);
+            g = parseInt(c.substr(3, 2), 16);
+            b = parseInt(c.substr(5, 2), 16);
+          }
+        } else if (c.indexOf('rgb') === 0){
+          var m = c.match(/[\d\.]+/g);
+          if (m && m.length >= 3){ r = +m[0]; g = +m[1]; b = +m[2]; }
+        }
+      }
+      function _L(x){ x /= 255; return x <= 0.03928 ? x / 12.92
+        : Math.pow((x + 0.055) / 1.055, 2.4); }
+      var L = 0.2126 * _L(r) + 0.7152 * _L(g) + 0.0722 * _L(b);
+      var s = L > 0.5 ? 'l' : 'd';
+      return '{' + s + '|' + (+v).toFixed(decimals) + '}';
+    };
+  }
+  function _heatmapMakePlainFormatter(decimals, valueIdx){
+    return function(p){
+      var v = null; var d = p && p.data;
+      if (d != null && d.value != null){
+        v = Array.isArray(d.value) ? d.value[valueIdx] : d.value;
+      } else if (Array.isArray(d)){
+        v = d[valueIdx];
+      } else if (d != null){ v = d; }
+      if (v == null || isNaN(+v)) return '';
+      return (+v).toFixed(decimals);
+    };
+  }
   APPLY.setHeatmapShowLabels = function(v){ seriesOfType('heatmap').forEach(function(s){ s.label = s.label || {}; s.label.show = !!v; }); };
+  APPLY.setHeatmapAutoContrast = function(v){ seriesOfType('heatmap').forEach(function(s){
+    s.label = s.label || {};
+    var fontSize = +(s.label.fontSize || 11);
+    var dec = _heatmapValueDecimalsFor(s);
+    var vi  = _heatmapValueIndexFor(s);
+    if (v){
+      s.label.formatter = _heatmapMakeContrastFormatter(dec, vi);
+      s.label.rich = {
+        l: {color: '#111', fontSize: fontSize},
+        d: {color: '#fff', fontSize: fontSize}
+      };
+      delete s.label.color;
+    } else {
+      s.label.formatter = _heatmapMakePlainFormatter(dec, vi);
+      delete s.label.rich;
+    }
+  }); };
   APPLY.setHeatmapBorderWidth = function(v){ seriesOfType('heatmap').forEach(function(s){ s.itemStyle = s.itemStyle || {}; s.itemStyle.borderWidth = v; }); };
 
   // Pie
@@ -1165,7 +1249,7 @@ DASHBOARD_SHELL = """<!doctype html>
 <style>
 /* =============================================================
    Goldman Sachs canonical design tokens (synced with
-   GS/viz/echarts/config.py). There is one style -- this one.
+   ai_development/dashboards/config.py). There is one style -- this one.
    ============================================================= */
 :root {
   --gs-navy:       __GS_NAVY__;
@@ -1452,11 +1536,6 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
   box-shadow: var(--shadow-md);
   border-color: var(--accent-2);
 }
-.tile.is-fullscreen {
-  position: fixed; inset: 16px; z-index: 50;
-  box-shadow: var(--shadow-lg);
-  grid-column: 1/-1 !important;
-}
 .tile-header {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
@@ -1563,6 +1642,141 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 .chart-tile .tile-body { padding: 6px 8px 8px; }
 .chart-div { width: 100%; min-height: 240px; }
 
+/* chart controls drawer
+   Lives between the tile header and the chart canvas. Closed by
+   default; the gear button in the toolbar toggles data-open.
+   Populated lazily by JS on first open so we can introspect the
+   lowered ECharts option (chart type, series, axes) before deciding
+   which knobs to render. */
+.chart-controls {
+  display: none;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px 8px;
+  font-family: var(--gs-font-sans);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.chart-controls[data-open="true"] { display: block; }
+.chart-controls .cc-section {
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed var(--border);
+}
+.chart-controls .cc-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.chart-controls .cc-section-title {
+  font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.chart-controls .cc-row {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 6px 14px; padding: 2px 0;
+}
+.chart-controls .cc-row > .cc-label {
+  font-size: 10px; font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  min-width: 80px;
+}
+.chart-controls .cc-series-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px 12px; align-items: center;
+  padding: 2px 0;
+}
+.chart-controls .cc-series-row > .cc-series-name {
+  font-size: 11px; font-weight: 600;
+  color: var(--text);
+  font-family: var(--gs-font-sans);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chart-controls .cc-series-row .cc-series-swatch {
+  display: inline-block; width: 10px; height: 10px;
+  border-radius: 2px; margin-right: 6px; vertical-align: middle;
+}
+.chart-controls select,
+.chart-controls input[type=text],
+.chart-controls input[type=date],
+.chart-controls input[type=number] {
+  font-family: var(--gs-font-sans);
+  font-size: 11px; padding: 2px 6px;
+  border: 1px solid var(--border); border-radius: 2px;
+  background: var(--surface);
+  color: var(--text);
+  min-width: 100px;
+}
+.chart-controls select:focus,
+.chart-controls input:focus {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+  border-color: var(--accent-2);
+}
+.chart-controls input[type=checkbox] { accent-color: var(--accent); }
+.chart-controls .cc-actions {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  padding-top: 4px;
+}
+.chart-controls .cc-action-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 9px;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-family: var(--gs-font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: color 0.12s var(--ease),
+              background-color 0.12s var(--ease),
+              border-color 0.12s var(--ease);
+}
+.chart-controls .cc-action-btn:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+  border-color: var(--accent-2);
+}
+.tile-btn.controls { padding: 3px 6px; }
+.tile-btn-glyph { display: inline-block; transform: scale(1.2);
+                    line-height: 1; }
+.tile-btn.controls[data-active="true"] {
+  background: var(--gs-navy); color: white; border-color: var(--gs-navy);
+}
+.tile-btn.controls[data-active="true"] .tile-btn-glyph { color: white; }
+
+/* studio stats strip (scatter_studio) */
+.tile-stats-strip {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px 14px;
+  padding: 6px 10px 4px;
+  margin-top: 4px;
+  font-family: var(--gs-font-sans);
+  font-size: 11px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+}
+.tile-stats-strip:empty { display: none; }
+.tile-stats-strip .cc-stat { white-space: nowrap; }
+.tile-stats-strip .cc-stat b { color: var(--text); font-weight: 600; }
+.tile-stats-strip .cc-stats-empty { font-style: italic; }
+.tile-stats-strip .cc-stats-groups {
+  flex-basis: 100%; display: flex; flex-wrap: wrap;
+  gap: 2px 12px; padding-top: 2px;
+  font-size: 10.5px; color: var(--text-dim);
+}
+.tile-stats-strip .cc-stat-group { white-space: nowrap; }
+.tile-stats-strip .cc-stats-swatch {
+  display: inline-block; width: 9px; height: 9px;
+  border-radius: 2px; margin-right: 4px; vertical-align: middle;
+}
+
 /* kpi tile */
 .kpi-tile {
   padding: 16px 20px 18px 20px;
@@ -1570,11 +1784,19 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
   min-height: 118px; gap: 0;
   border-top: 3px solid var(--gs-navy);
 }
+.kpi-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 6px;
+}
+.kpi-header .tile-actions { margin-left: auto; }
+.kpi-controls { margin: 8px -4px 4px -4px; padding: 8px 10px 6px; }
+.kpi-controls .cc-section { padding-bottom: 6px; margin-bottom: 6px; }
 .kpi-label {
   font-family: var(--gs-font-sans);
   font-size: 10px; color: var(--text-dim);
   text-transform: uppercase; letter-spacing: 0.09em;
   font-weight: 700;
+  flex: 1 1 auto; min-width: 0;
 }
 .kpi-value {
   font-family: var(--gs-font-serif);
@@ -1838,6 +2060,19 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 .data-table.clickable tbody tr { cursor: pointer; }
 .data-table th.sortable { cursor: pointer; user-select: none; }
 .data-table th.sortable:hover { background: var(--gs-grey-10); }
+/* Drawer "Freeze first col" toggle. Pins col 1 to the left edge so
+   wide tables stay readable when scrolled horizontally. We pair the
+   sticky position with a solid background so the pinned cells aren't
+   transparent over scrolled content. */
+.data-table.freeze-first-col th:first-child,
+.data-table.freeze-first-col td:first-child {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--border);
+}
+.data-table.freeze-first-col thead th:first-child {
+  background: var(--gs-grey-05);
+}
 
 /* Row highlight buckets (see row_highlight on table widgets).
    Subtle left-border accent + tinted background so the row pops
@@ -2030,6 +2265,32 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
   color: var(--text-faint);
 }
 
+/* View Data modal (chart controls -> View data) */
+.view-data-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.view-data-table th, .view-data-table td {
+  text-align: right; padding: 4px 10px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.view-data-table th {
+  text-align: left; color: var(--text-faint); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em; font-size: 9.5px;
+  background: var(--surface-2); position: sticky; top: 0;
+}
+.view-data-table td:first-child, .view-data-table th:first-child {
+  text-align: left; font-weight: 500; color: var(--text);
+}
+.view-data-table tr:hover td { background: var(--surface-2); }
+.view-data-meta {
+  font-size: 11px; color: var(--text-faint);
+  margin-bottom: 8px; font-family: var(--gs-font-sans);
+}
+.view-data-scroll { max-height: 60vh; overflow: auto;
+                    border: 1px solid var(--border);
+                    border-radius: var(--radius-sm); }
+
 /* Rich row-click detail layout (row_click.detail.sections) */
 .detail-section-title {
   font-family: var(--gs-font-sans); font-size: 10px;
@@ -2091,6 +2352,49 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 }
 .modal-detail-table.sub td {
   font-size: 12px; padding: 4px 8px 4px 0;
+}
+
+/* provenance footer (driven by dataset.field_provenance) */
+.provenance-footer {
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.provenance-footer .detail-section-title {
+  margin: 0 0 6px;
+}
+.provenance-footer table.provenance-table {
+  font-size: 11px; color: var(--text-dim);
+}
+.provenance-footer table.provenance-table th {
+  width: 38%; font-size: 10px;
+  color: var(--text-faint); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 4px 12px 4px 0;
+}
+.provenance-footer table.provenance-table td {
+  padding: 4px 0; color: var(--text-dim);
+}
+.provenance-footer table.provenance-table code {
+  background: var(--gs-grey-05); padding: 1px 5px;
+  border-radius: 3px; font-family: ui-monospace, monospace;
+  font-size: 10.5px; color: var(--gs-navy);
+}
+.provenance-footer .prov-system {
+  font-family: var(--gs-font-sans);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 9.5px; color: var(--text-faint);
+}
+.provenance-footer .prov-units {
+  font-style: italic; color: var(--text-faint);
+}
+.detail-stat-src {
+  font-size: 10px; color: var(--text-faint);
+  margin-top: 2px;
+}
+.detail-stat-src code {
+  background: var(--gs-grey-05); padding: 1px 4px;
+  border-radius: 3px; font-family: ui-monospace, monospace;
+  font-size: 10px; color: var(--gs-navy);
 }
 
 /* filter widgets extensions */
@@ -2325,9 +2629,51 @@ DASHBOARD_APP_JS = r"""
     });
   }
   function broadcast(filterId){
-    (listeners[filterId] || []).forEach(rerenderChart);
+    var f = (MANIFEST.filters || []).find(function(x){
+      return x && x.id === filterId;
+    });
+    // dateRange filters in their default view-mode don't reshape any
+    // chart data -- they only move the in-chart dataZoom window.
+    // Dispatch a dataZoom action instead of a full rerender so we
+    // preserve series animations, tooltips, and any per-chart user
+    // interactions (e.g. another dataZoom slider position on a chart
+    // not subscribed to this filter).
+    if (f && f.type === 'dateRange' && (f.mode || 'view') === 'view'){
+      (listeners[filterId] || []).forEach(function(cid){
+        _dispatchChartDateZoom(cid);
+      });
+    } else {
+      (listeners[filterId] || []).forEach(rerenderChart);
+    }
     renderKpis();
     renderTables();
+  }
+
+  // Move every targeting chart's dataZoom to the current dateRange
+  // filter value. No-op when the chart isn't initialised yet (lazy
+  // tab) or has no dataZoom configured.
+  function _dispatchChartDateZoom(cid){
+    var rec = CHARTS[cid]; if (!rec || !rec.inst) return;
+    var dr = _dateRangeForChart(cid);
+    if (!dr) return;
+    var range = resolveDateRange(dr.value);
+    var t0 = range[0], t1 = range[1];
+    try {
+      var opt = rec.inst.getOption();
+      var dz = opt && opt.dataZoom;
+      if (!dz || !dz.length) return;
+      // Dispatch one action per dataZoom index so multi-axis charts
+      // (rare for time series, but possible for stacked composites)
+      // all move together.
+      for (var i = 0; i < dz.length; i++){
+        rec.inst.dispatchAction({
+          type: 'dataZoom',
+          dataZoomIndex: i,
+          startValue: t0,
+          endValue: t1,
+        });
+      }
+    } catch (e) {}
   }
 
   // ----- dataset management -----
@@ -2418,7 +2764,16 @@ DASHBOARD_APP_JS = r"""
     return false;
   }
 
-  function applyFilters(name, rows){
+  // applyFilters: filter dataset rows by every applicable global filter.
+  //
+  // ``widgetType`` lets the caller signal whether this dataset is being
+  // pulled for a chart, table, or KPI. Chart widgets get full data with
+  // their visible window controlled by per-chart dataZoom controls
+  // (slider / scroll / drag). Tables and KPIs still want real row
+  // filtering -- "rows in the last 6M", "average over the lookback".
+  // So we treat ``dateRange`` filters as view-only (skipped) when the
+  // caller is a chart, and apply them normally elsewhere.
+  function applyFilters(name, rows, widgetType){
     var header = rows[0]; var body = rows.slice(1); var out = body;
     (MANIFEST.filters || []).forEach(function(f){
       var val = filterState[f.id];
@@ -2430,6 +2785,11 @@ DASHBOARD_APP_JS = r"""
       if (f.all_value != null && String(val) === String(f.all_value)) return;
       var idx = f.field != null ? header.indexOf(f.field) : -1;
       if (f.type === 'dateRange'){
+        // For chart targets, dateRange is a "view" filter -- it sets
+        // the initial dataZoom window, not the underlying dataset.
+        // Author can flip back to row-filtering with `mode: 'filter'`
+        // on the filter declaration.
+        if (widgetType === 'chart' && (f.mode || 'view') === 'view') return;
         if (idx < 0) idx = 0;
         var r = resolveDateRange(val);
         out = out.filter(function(row){
@@ -2462,6 +2822,2807 @@ DASHBOARD_APP_JS = r"""
     return [header].concat(out);
   }
 
+  // Translate a ``dateRange`` filter value -> dataZoom start/end on
+  // every time-axis dataZoom entry on the chart's option. Charts get
+  // full data, so the filter only ever moves the visible window.
+  // Returns true when at least one dataZoom entry was updated.
+  function _dateRangeForChart(cid){
+    var matches = [];
+    (MANIFEST.filters || []).forEach(function(f){
+      if (f.type !== 'dateRange') return;
+      if ((f.mode || 'view') !== 'view') return;
+      if (!(f.targets || []).some(function(t){ return targetMatch(t, cid); })) return;
+      var val = filterState[f.id];
+      if (val === '' || val == null) return;
+      if (f.all_value != null && String(val) === String(f.all_value)) return;
+      matches.push({filter: f, value: val});
+    });
+    if (!matches.length) return null;
+    // If multiple dateRange filters target the same chart, the most
+    // recent declaration wins. (This shouldn't happen in practice;
+    // validator can later flag it.)
+    return matches[matches.length - 1];
+  }
+  function _applyChartDateZoom(opt, dr){
+    if (!opt || !dr) return;
+    var dz = opt.dataZoom;
+    if (!dz) return;
+    var arr = Array.isArray(dz) ? dz : [dz];
+    var range = resolveDateRange(dr.value);
+    var t0 = range[0], t1 = range[1];
+    arr.forEach(function(z){
+      if (!z || typeof z !== 'object') return;
+      // Setting startValue/endValue overrides start/end. ECharts
+      // clamps out-of-range values to the data extent so undersized
+      // datasets don't blow up.
+      delete z.start; delete z.end;
+      z.startValue = t0;
+      z.endValue = t1;
+    });
+    if (!Array.isArray(opt.dataZoom)) opt.dataZoom = arr;
+  }
+
+  // =========================================================================
+  // CHART CONTROLS  (gear-icon drawer)
+  //
+  // Per-chart, runtime-only knobs:
+  //
+  //   Time series (line / multi_line / area / bar with time axis):
+  //     - Per-series transform  (raw / Δ / %Δ / YoY Δ / YoY % / index=100)
+  //     - Smoothing  (off / 5 / 20 / 50 / 200)
+  //     - Y-scale  (linear / log)
+  //     - Y-range  (auto / from zero)
+  //
+  //   Bar (categorical):
+  //     - Sort  (input / value desc / value asc / alphabetical)
+  //     - Stack mode  (group / stack / 100% stack)
+  //     - Y-scale  (linear / log)
+  //
+  //   Scatter:
+  //     - Trendline  (off / linear)
+  //     - X-scale  (linear / log)
+  //     - Y-scale  (linear / log)
+  //
+  //   Heatmap:
+  //     - Color scale  (sequential / diverging-around-zero)
+  //     - Show cell labels  (on / off)
+  //
+  //   Pie / donut:
+  //     - Sort  (input / largest first)
+  //     - "Other" bucket  (off / <1% / <3% / <5%)
+  //
+  //   Universal:
+  //     - View data  -> modal table
+  //     - Copy CSV   -> clipboard
+  //     - PNG export -> existing toolbar button
+  //     - Reset      -> back to compile-time defaults
+  //
+  // State lives in chartControlState[cid] and is reapplied inside
+  // materializeOption() on every rerender so the option produced by
+  // setOption() always reflects the user's latest knob settings.
+  // =========================================================================
+
+  var chartControlState = {};
+
+  function _ccGetState(cid){
+    if (!chartControlState[cid]) chartControlState[cid] = {series: {}};
+    if (!chartControlState[cid].series) chartControlState[cid].series = {};
+    return chartControlState[cid];
+  }
+
+  // ---- per-series transforms ----
+
+  function _ccParseT(d){
+    return (typeof d === 'string') ? Date.parse(d) : +d;
+  }
+  function _ccChange(values){
+    return values.map(function(v, i){
+      if (i === 0) return null;
+      if (v == null || values[i-1] == null) return null;
+      var a = +v, b = +values[i-1];
+      if (isNaN(a) || isNaN(b)) return null;
+      return a - b;
+    });
+  }
+  function _ccPctChange(values){
+    return values.map(function(v, i){
+      if (i === 0) return null;
+      if (v == null || values[i-1] == null) return null;
+      var a = +v, b = +values[i-1];
+      if (isNaN(a) || isNaN(b) || b === 0) return null;
+      return (a - b) / b * 100;
+    });
+  }
+  function _ccFindYearAgo(times, i){
+    var t = times[i]; if (t == null || isNaN(t)) return -1;
+    var target = t - 365 * 86400000;
+    var lo = 0, hi = i, best = -1;
+    while (lo <= hi){
+      var mid = (lo + hi) >> 1;
+      var tm = times[mid];
+      if (tm == null || isNaN(tm)){ hi = mid - 1; continue; }
+      if (tm <= target){ best = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return best;
+  }
+  function _ccYoyChange(times, values){
+    return times.map(function(t, i){
+      if (values[i] == null) return null;
+      var j = _ccFindYearAgo(times, i);
+      if (j < 0 || values[j] == null) return null;
+      var a = +values[i], b = +values[j];
+      if (isNaN(a) || isNaN(b)) return null;
+      return a - b;
+    });
+  }
+  function _ccYoyPct(times, values){
+    return times.map(function(t, i){
+      if (values[i] == null) return null;
+      var j = _ccFindYearAgo(times, i);
+      if (j < 0 || values[j] == null) return null;
+      var a = +values[i], b = +values[j];
+      if (isNaN(a) || isNaN(b) || b === 0) return null;
+      return (a - b) / b * 100;
+    });
+  }
+  function _ccIndex100(values){
+    var anchor = null;
+    for (var i = 0; i < values.length; i++){
+      if (values[i] != null && !isNaN(+values[i]) && +values[i] !== 0){
+        anchor = +values[i]; break;
+      }
+    }
+    if (anchor == null) return values.slice();
+    return values.map(function(v){
+      if (v == null || isNaN(+v)) return null;
+      return (+v / anchor) * 100;
+    });
+  }
+  function _ccLog(values){
+    return values.map(function(v){
+      if (v == null || isNaN(+v) || +v <= 0) return null;
+      return Math.log(+v);
+    });
+  }
+  function _ccLogChange(values){
+    return values.map(function(v, i){
+      if (i === 0) return null;
+      var a = values[i], b = values[i-1];
+      if (a == null || b == null) return null;
+      var na = +a, nb = +b;
+      if (isNaN(na) || isNaN(nb) || na <= 0 || nb <= 0) return null;
+      return Math.log(na) - Math.log(nb);
+    });
+  }
+  function _ccYoyLog(times, values){
+    return times.map(function(t, i){
+      if (values[i] == null) return null;
+      var j = _ccFindYearAgo(times, i);
+      if (j < 0 || values[j] == null) return null;
+      var a = +values[i], b = +values[j];
+      if (isNaN(a) || isNaN(b) || a <= 0 || b <= 0) return null;
+      return Math.log(a) - Math.log(b);
+    });
+  }
+  function _ccZscore(values){
+    var nums = [];
+    for (var i = 0; i < values.length; i++){
+      var v = values[i];
+      if (v != null && !isNaN(+v)) nums.push(+v);
+    }
+    if (nums.length < 2) return values.map(function(){ return null; });
+    var mean = 0;
+    for (var k = 0; k < nums.length; k++) mean += nums[k];
+    mean /= nums.length;
+    var v2 = 0;
+    for (var k2 = 0; k2 < nums.length; k2++){
+      v2 += (nums[k2] - mean) * (nums[k2] - mean);
+    }
+    v2 /= (nums.length - 1);
+    var sd = v2 > 0 ? Math.sqrt(v2) : 0;
+    if (sd === 0) return values.map(function(){ return null; });
+    return values.map(function(v){
+      if (v == null || isNaN(+v)) return null;
+      return (+v - mean) / sd;
+    });
+  }
+  function _ccRollingZscore(values, window){
+    window = Math.max(2, window | 0);
+    var queue = []; var sum = 0; var sumSq = 0; var cnt = 0;
+    var means = new Array(values.length);
+    var stds  = new Array(values.length);
+    for (var ix = 0; ix < values.length; ix++){
+      means[ix] = null; stds[ix] = null;
+      var vv = values[ix];
+      if (vv != null && !isNaN(+vv)){
+        var f = +vv; queue.push(f); sum += f; sumSq += f * f; cnt++;
+      } else {
+        queue.push(null);
+      }
+      if (queue.length > window){
+        var rem = queue.shift();
+        if (rem != null){ sum -= rem; sumSq -= rem * rem; cnt--; }
+      }
+      if (queue.length === window && cnt >= 2){
+        var m = sum / cnt;
+        var var2 = (sumSq - cnt * m * m) / (cnt - 1);
+        if (var2 < 0) var2 = 0;
+        means[ix] = m; stds[ix] = Math.sqrt(var2);
+      }
+    }
+    var out = new Array(values.length);
+    for (var iy = 0; iy < values.length; iy++){
+      var v = values[iy], m2 = means[iy], s2 = stds[iy];
+      if (v == null || m2 == null || s2 == null || s2 === 0){
+        out[iy] = null; continue;
+      }
+      out[iy] = (+v - m2) / s2;
+    }
+    return out;
+  }
+  function _ccRankPct(values){
+    var pairs = [];
+    values.forEach(function(v, i){
+      if (v != null && !isNaN(+v)) pairs.push({v: +v, i: i});
+    });
+    pairs.sort(function(a, b){ return a.v - b.v; });
+    var out = new Array(values.length);
+    for (var k = 0; k < values.length; k++) out[k] = null;
+    var m = pairs.length;
+    if (m === 0) return out;
+    var i = 0;
+    while (i < m){
+      var j = i;
+      while (j + 1 < m && pairs[j + 1].v === pairs[i].v) j++;
+      var avgRank = (i + j) / 2.0;
+      var pct = m > 1 ? (100 * avgRank / (m - 1)) : 50;
+      for (var k2 = i; k2 <= j; k2++) out[pairs[k2].i] = pct;
+      i = j + 1;
+    }
+    return out;
+  }
+  function _ccYtd(times, values){
+    // Cumulative change vs. the first value of the same calendar year.
+    // The transformed value at row i is (values[i] - anchor[year(i)]).
+    var anchors = {};
+    return times.map(function(t, i){
+      var v = values[i];
+      if (v == null || isNaN(+v) || t == null || isNaN(t)) return null;
+      var d = new Date(+t); var yr = d.getUTCFullYear();
+      if (anchors[yr] == null) anchors[yr] = +v;
+      return +v - anchors[yr];
+    });
+  }
+  function _ccDetectAnnualizationFactor(times){
+    // Median gap between consecutive timestamps -> annualization factor.
+    // Daily ~ 252 obs/yr, weekly ~ 52, monthly ~ 12, quarterly ~ 4,
+    // semi-annual ~ 2, annual ~ 1. Falls back to 252 when uncertain.
+    var gaps = [];
+    for (var i = 1; i < times.length; i++){
+      var a = times[i], b = times[i-1];
+      if (a == null || b == null || isNaN(a) || isNaN(b)) continue;
+      var dt = (a - b) / 86400000;
+      if (dt > 0) gaps.push(dt);
+    }
+    if (!gaps.length) return 1;
+    gaps.sort(function(x, y){ return x - y; });
+    var med = gaps[gaps.length >> 1];
+    if (med <= 1.5)   return 252;
+    if (med <= 4)     return 252;
+    if (med <= 10)    return 52;
+    if (med <= 45)    return 12;
+    if (med <= 120)   return 4;
+    if (med <= 240)   return 2;
+    return 1;
+  }
+  function _ccAnnualizedChange(times, values){
+    var f = _ccDetectAnnualizationFactor(times);
+    var diffs = _ccChange(values);
+    return diffs.map(function(d){
+      return (d == null || isNaN(+d)) ? null : +d * f;
+    });
+  }
+  function _ccRollingMean(values, n){
+    if (!n || n <= 1) return values.slice();
+    var out = new Array(values.length);
+    var sum = 0; var cnt = 0; var queue = [];
+    for (var i = 0; i < values.length; i++){
+      var v = values[i];
+      var add = (v != null && !isNaN(+v)) ? +v : null;
+      queue.push(add);
+      if (add != null){ sum += add; cnt++; }
+      if (queue.length > n){
+        var rem = queue.shift();
+        if (rem != null){ sum -= rem; cnt--; }
+      }
+      out[i] = (queue.length === n && cnt > 0) ? sum / cnt : null;
+    }
+    return out;
+  }
+  function _ccTransformValues(times, values, transform){
+    if (transform && transform.indexOf('rolling_zscore_') === 0){
+      var w = parseInt(transform.split('_').pop(), 10) || 252;
+      return _ccRollingZscore(values, w);
+    }
+    switch (transform){
+      case 'change':         return _ccChange(values);
+      case 'pct_change':     return _ccPctChange(values);
+      case 'log_change':     return _ccLogChange(values);
+      case 'yoy_change':     return _ccYoyChange(times, values);
+      case 'yoy_pct':        return _ccYoyPct(times, values);
+      case 'yoy_log':        return _ccYoyLog(times, values);
+      case 'annualized_change': return _ccAnnualizedChange(times, values);
+      case 'log':            return _ccLog(values);
+      case 'zscore':         return _ccZscore(values);
+      case 'rank_pct':       return _ccRankPct(values);
+      case 'ytd':            return _ccYtd(times, values);
+      case 'index100':       return _ccIndex100(values);
+      case 'raw': default:   return values.slice();
+    }
+  }
+  function _ccTransformLabel(t){
+    if (t && t.indexOf('rolling_zscore_') === 0){
+      var w = parseInt(t.split('_').pop(), 10) || 252;
+      return 'z (' + w + 'd)';
+    }
+    return ({
+      raw:               '',
+      change:            'Δ',
+      pct_change:        '%Δ',
+      log_change:        'log Δ',
+      yoy_change:        'YoY Δ',
+      yoy_pct:           'YoY %',
+      yoy_log:           'YoY log Δ',
+      annualized_change: 'ann. Δ',
+      log:               'ln',
+      zscore:            'z',
+      rank_pct:          'pct rank',
+      ytd:               'YTD Δ',
+      index100:          'Index=100',
+    })[t] || '';
+  }
+  function _ccTransformAxisLabel(transforms){
+    // If every active series uses the same transform, label the y-axis
+    // with that transform's units. Mixed transforms -> blank label.
+    var seen = {};
+    transforms.forEach(function(t){ seen[t || 'raw'] = 1; });
+    var keys = Object.keys(seen);
+    if (keys.length !== 1) return null;
+    return _ccTransformLabel(keys[0]);
+  }
+  // Suffix applied to formatted values inside the tooltip when a
+  // transform is active. ECharts tooltips are global; we just attach a
+  // valueFormatter that respects the per-series transform via a map.
+  function _ccTransformSuffix(t){
+    if (t === 'pct_change' || t === 'yoy_pct') return '%';
+    if (t === 'rank_pct') return '%';
+    return '';
+  }
+
+  // ---- option mutation entry point ----
+  //
+  // Called from materializeOption AFTER applyFilters + after the
+  // dataset rewire. The option already has its dataset.source filled
+  // in. We mutate `opt.series[*]` in place and (for time-series
+  // transforms) replace `series[i].data` with explicit pairs so the
+  // transformed values are rendered.
+  function applyChartControls(cid, opt){
+    if (!opt) return opt;
+    var w = WIDGET_META[cid];
+    var ct = String(((w && w.spec) || {}).chart_type || '').toLowerCase();
+    // scatter_studio must always run its apply pass on EVERY render
+    // (even before the user touches the drawer) so the OLS line +
+    // stats strip reflect the author's `regression_default`. For all
+    // other chart types we early-return when no state exists since
+    // the chart's compile-time defaults are already correct.
+    var state = chartControlState[cid];
+    if (!state){
+      if (ct === 'scatter_studio'){
+        state = _ccGetState(cid);
+      } else {
+        return opt;
+      }
+    }
+
+    // --- time-series knobs (line / multi_line / area) ---
+    if (ct === 'line' || ct === 'multi_line' || ct === 'area'){
+      _ccApplyTimeSeries(cid, opt, state);
+      _ccApplyLineShape(opt, state);
+    }
+
+    // --- bar knobs ---
+    if (ct === 'bar' || ct === 'bar_horizontal'){
+      _ccApplyBar(opt, state, ct === 'bar_horizontal');
+    }
+
+    // --- scatter knobs ---
+    if (ct === 'scatter' || ct === 'scatter_multi'){
+      _ccApplyScatter(opt, state);
+    }
+
+    // --- scatter studio (interactive X/Y picker + regression) ---
+    if (ct === 'scatter_studio'){
+      var statsBundle = _ccApplyStudio(cid, opt, state);
+      // Stash the stats bundle on the state so the chart-render
+      // callback can update the strip below the canvas after
+      // setOption() completes.
+      state._lastStudioStats = statsBundle;
+    }
+
+    // --- heatmap / correlation_matrix knobs ---
+    if (ct === 'heatmap' || ct === 'correlation_matrix'){
+      _ccApplyHeatmap(opt, state);
+    }
+
+    // --- pie knobs ---
+    if (ct === 'pie' || ct === 'donut'){
+      _ccApplyPie(opt, state);
+    }
+
+    // --- universal axis toggles (apply last so they aren't clobbered) ---
+    if (state.yScale)  _ccApplyYScale(opt, state.yScale);
+    if (state.yRange)  _ccApplyYRange(opt, state.yRange);
+    if (state.xScale && (ct === 'scatter'
+                          || ct === 'scatter_multi'
+                          || ct === 'scatter_studio')){
+      _ccApplyXScale(opt, state.xScale);
+    }
+
+    return opt;
+  }
+
+  // ---- helpers: time-series transform + smoothing ----
+
+  function _ccApplyTimeSeries(cid, opt, state){
+    // Two source paths:
+    //   1) dataset rewired (chart has dataset_ref) -> opt.dataset.source
+    //      is set; series have ``encode`` and no ``.data``.
+    //   2) inline data path (chart wasn't auto-rewired) -> series each
+    //      carry ``[[x, y], ...]`` directly. Per-series transform pulls
+    //      pairs straight from s.data.
+    // We support both so transforms work for any chart configuration.
+    var smoothing = parseInt(state.smoothing || '0', 10) || 0;
+    var hasDataset = !!(opt.dataset && opt.dataset.source
+                          && opt.dataset.source.length >= 2);
+    var header = hasDataset ? opt.dataset.source[0] : null;
+    var body   = hasDataset ? opt.dataset.source.slice(1) : null;
+    var xCol   = hasDataset
+      ? ((opt.series && opt.series[0] && opt.series[0].encode)
+          ? opt.series[0].encode.x : header[0])
+      : null;
+    var xIdx   = (hasDataset && header) ? header.indexOf(xCol) : 0;
+    if (xIdx < 0) xIdx = 0;
+    var datasetTimes = body ? body.map(function(r){
+      return _ccParseT(r[xIdx]);
+    }) : null;
+
+    var anyTransform = false;
+    var anySmooth    = smoothing > 1;
+    var transforms   = [];
+
+    (opt.series || []).forEach(function(s, i){
+      if (!s || typeof s !== 'object') return;
+      var t = s.type;
+      if (t !== 'line' && t !== 'bar' && t !== 'area' && t !== 'scatter') return;
+
+      var seriesKey = s._column || s.name || ('series_' + i);
+      var sState = state.series[seriesKey] || {};
+      var transform = sState.transform || 'raw';
+      var visible = (sState.visible !== false);
+      transforms.push(transform);
+
+      // Hide series cleanly (ECharts respects empty data).
+      if (!visible){
+        s.data = [];
+        delete s.encode;
+        return;
+      }
+
+      // Collect pairs [[x, y], ...] from whichever source we have.
+      var pairs = null;
+      if (hasDataset){
+        var yIdx = -1;
+        if (s._column && header.indexOf(s._column) >= 0){
+          yIdx = header.indexOf(s._column);
+        } else if (s.name && header.indexOf(s.name) >= 0){
+          yIdx = header.indexOf(s.name);
+        } else {
+          yIdx = Math.min(1 + i, header.length - 1);
+        }
+        if (yIdx <= 0) return;
+        pairs = body.map(function(r){ return [r[xIdx], r[yIdx]]; });
+      } else if (Array.isArray(s.data)){
+        pairs = s.data.map(function(p){
+          if (Array.isArray(p)) return [p[0], p[1]];
+          if (p && typeof p === 'object'){
+            // ECharts allows {value: [x,y], name: ...}
+            var v = p.value;
+            if (Array.isArray(v) && v.length >= 2) return [v[0], v[1]];
+          }
+          return null;
+        }).filter(function(p){ return p != null; });
+      }
+      if (!pairs || !pairs.length) return;
+
+      var times = pairs.map(function(p){ return _ccParseT(p[0]); });
+      var values = pairs.map(function(p){ return p[1]; });
+
+      if (transform !== 'raw'){
+        values = _ccTransformValues(times, values, transform);
+        anyTransform = true;
+      }
+      if (smoothing > 1){
+        values = _ccRollingMean(values, smoothing);
+      }
+
+      if (transform !== 'raw' || smoothing > 1){
+        s.data = pairs.map(function(p, j){
+          var v = values[j];
+          if (v == null || isNaN(+v)) return [p[0], null];
+          return [p[0], +v];
+        });
+        delete s.encode;
+        // Annotate series name with the transform tag so the legend
+        // reads "US 10Y · YoY %" rather than just "US 10Y".
+        var tag = _ccTransformLabel(transform);
+        if (tag && s.name && s.name.indexOf(' \u00B7 ') < 0){
+          s.name = s.name + ' \u00B7 ' + tag;
+        }
+      }
+    });
+
+    // Y-axis title hint when every visible series shares the same transform
+    if (anyTransform){
+      var axisTag = _ccTransformAxisLabel(transforms);
+      if (axisTag){
+        var yax = opt.yAxis;
+        if (Array.isArray(yax) && yax.length) yax = yax[0];
+        if (yax && typeof yax === 'object' && !yax._cc_orig_name){
+          yax._cc_orig_name = yax.name || '';
+          yax.name = axisTag;
+        }
+      }
+    }
+
+    if (anySmooth || anyTransform){
+      // Force tooltip to format with sensible decimals; the percent
+      // forms get a "%" suffix.
+      var commonSuffix = _ccTransformSuffix(transforms[0] || 'raw');
+      var tt = opt.tooltip || {};
+      if (typeof tt === 'object'){
+        tt.valueFormatter = (
+          'function(v){ if (v == null || isNaN(+v)) return ""; '
+          + 'var n = +v; var d = Math.abs(n) >= 100 ? 1 : 2; '
+          + 'return n.toFixed(d) + "' + commonSuffix + '"; }');
+        opt.tooltip = tt;
+      }
+    }
+  }
+
+  // ---- helpers: line/area shape (style / step / area / stack / width) ----
+  //
+  // Mutates every line/area series in opt to reflect the user's shape
+  // selections. Each knob is applied independently so a user can layer
+  // them (e.g. dashed + step + filled). Defaults are no-op: if the
+  // state key is missing or 'inherit' the field on the series is left
+  // untouched and the compile-time choice survives.
+  function _ccApplyLineShape(opt, state){
+    var shape = state.shape || null;
+    if (!shape) return;
+    var seriesArr = (opt.series || []).filter(function(s){
+      return s && (s.type === 'line' || s.type === 'area');
+    });
+    if (!seriesArr.length) return;
+    seriesArr.forEach(function(s){
+      // ---- line style: solid | dotted | dashed ----
+      if (shape.lineStyleType && shape.lineStyleType !== 'inherit'){
+        s.lineStyle = s.lineStyle || {};
+        s.lineStyle.type = shape.lineStyleType;
+      }
+      // ---- step: off | start | middle | end ----
+      if (shape.step != null && shape.step !== 'inherit'){
+        if (shape.step === 'off' || shape.step === 'none') delete s.step;
+        else s.step = shape.step;
+      }
+      // ---- area fill: on | off ----
+      if (shape.areaFill === 'on'){
+        s.areaStyle = s.areaStyle || {opacity: 0.30};
+      } else if (shape.areaFill === 'off'){
+        delete s.areaStyle;
+      }
+      // ---- stack: group | stack | percent ----
+      if (shape.stack && shape.stack !== 'inherit'){
+        if (shape.stack === 'group') delete s.stack;
+        else s.stack = 'total';
+      }
+      // ---- line width: 1 | 2 | 3 (px) ----
+      if (shape.lineWidth != null && shape.lineWidth !== 'inherit'){
+        s.lineStyle = s.lineStyle || {};
+        s.lineStyle.width = +shape.lineWidth;
+      }
+      // ---- show point markers ----
+      if (shape.showSymbol === 'on') s.showSymbol = true;
+      else if (shape.showSymbol === 'off') s.showSymbol = false;
+    });
+
+    // 100% stack rescale -- only meaningful for line/area, mirrors the
+    // bar `percent` behavior. Computes per-x totals across stacked
+    // series and rewrites each series .data to its share of the total.
+    if (shape.stack === 'percent' && seriesArr.length){
+      var minLen = Infinity;
+      seriesArr.forEach(function(s){
+        var d = (s.data || []);
+        if (d.length < minLen) minLen = d.length;
+      });
+      if (minLen === Infinity) minLen = 0;
+      for (var i = 0; i < minLen; i++){
+        var total = 0;
+        seriesArr.forEach(function(s){
+          var p = (s.data || [])[i];
+          var v = Array.isArray(p) ? p[1] : p;
+          if (v != null && !isNaN(+v)) total += +v;
+        });
+        if (total > 0){
+          seriesArr.forEach(function(s){
+            var p = (s.data || [])[i];
+            if (Array.isArray(p)){
+              var v2 = p[1];
+              s.data[i] = [p[0], (v2 == null || isNaN(+v2))
+                            ? null : (+v2 / total) * 100];
+            } else if (p != null && !isNaN(+p)){
+              s.data[i] = (+p / total) * 100;
+            }
+          });
+        }
+      }
+      // Format the y axis as percent, clipped to 0..100.
+      var yax = opt.yAxis;
+      var yaxes = Array.isArray(yax) ? yax : (yax ? [yax] : []);
+      yaxes.forEach(function(a){
+        if (!a || typeof a !== 'object') return;
+        var al = a.axisLabel || {};
+        al.formatter = 'function(v){ return v.toFixed(0) + "%"; }';
+        a.axisLabel = al;
+        a.max = 100;
+        if (a.min === undefined) a.min = 0;
+      });
+    }
+  }
+
+  // ---- helpers: bar sort / stack ----
+
+  function _ccApplyBar(opt, state, horizontal){
+    var sort = state.barSort;
+    var stack = state.barStack;
+    var catAxisKey = horizontal ? 'yAxis' : 'xAxis';
+    var valAxisKey = horizontal ? 'xAxis' : 'yAxis';
+
+    // Identify category axis (with .data) and series structure.
+    // build_bar produces xAxis.data = categories, series[i].data = values.
+    // build_bar_horizontal produces yAxis.data = categories.
+    if (sort && sort !== 'input'){
+      var catAxis = opt[catAxisKey];
+      if (Array.isArray(catAxis) && catAxis.length) catAxis = catAxis[0];
+      if (!catAxis || !Array.isArray(catAxis.data)) return;
+      var cats = catAxis.data.slice();
+      var n = cats.length;
+      if (!n) return;
+
+      // For each category index, sum across all bar series to get a
+      // sortable value. Single-series falls out as the series value.
+      var seriesArr = (opt.series || []).filter(function(s){
+        return s && s.type === 'bar';
+      });
+      function valAt(i){
+        var s = 0; var any = false;
+        seriesArr.forEach(function(ser){
+          var d = ser.data || [];
+          var v = d[i];
+          if (v != null && !isNaN(+v)){ s += +v; any = true; }
+        });
+        return any ? s : null;
+      }
+
+      // Build [(category, sumValue, originalIndex)] then sort.
+      var pairs = cats.map(function(c, i){ return [c, valAt(i), i]; });
+      if (sort === 'val_desc' || sort === 'val_asc'){
+        pairs.sort(function(a, b){
+          if (a[1] == null && b[1] == null) return 0;
+          if (a[1] == null) return 1;
+          if (b[1] == null) return -1;
+          return sort === 'val_desc' ? b[1] - a[1] : a[1] - b[1];
+        });
+      } else if (sort === 'name'){
+        pairs.sort(function(a, b){
+          return String(a[0]).localeCompare(String(b[0]));
+        });
+      }
+
+      // Apply the new permutation: reorder category list and each
+      // series' data array in lockstep.
+      var newOrder = pairs.map(function(p){ return p[2]; });
+      catAxis.data = pairs.map(function(p){ return p[0]; });
+      seriesArr.forEach(function(ser){
+        if (Array.isArray(ser.data)){
+          ser.data = newOrder.map(function(j){ return ser.data[j]; });
+        }
+      });
+    }
+
+    if (stack){
+      // group | stack | percent (100% stacked)
+      var seriesArr2 = (opt.series || []).filter(function(s){
+        return s && s.type === 'bar';
+      });
+      seriesArr2.forEach(function(s){
+        if (stack === 'group'){
+          delete s.stack;
+        } else {
+          s.stack = 'total';
+        }
+      });
+      if (stack === 'percent' && seriesArr2.length){
+        // Compute per-category totals across all bar series, then
+        // rescale every series value to a percentage of its total.
+        var catAxis2 = opt[catAxisKey];
+        if (Array.isArray(catAxis2) && catAxis2.length) catAxis2 = catAxis2[0];
+        var n2 = (catAxis2 && Array.isArray(catAxis2.data))
+          ? catAxis2.data.length
+          : (seriesArr2[0].data || []).length;
+        for (var i = 0; i < n2; i++){
+          var total = 0;
+          seriesArr2.forEach(function(s){
+            var v = (s.data || [])[i];
+            if (v != null && !isNaN(+v)) total += +v;
+          });
+          if (total > 0){
+            seriesArr2.forEach(function(s){
+              var v = (s.data || [])[i];
+              s.data[i] = (v == null || isNaN(+v)) ? null : (+v / total) * 100;
+            });
+          }
+        }
+        // Format the value axis as percent and clip 0..100
+        var valAx = opt[valAxisKey];
+        var valAxes = Array.isArray(valAx) ? valAx : (valAx ? [valAx] : []);
+        valAxes.forEach(function(a){
+          if (!a || typeof a !== 'object') return;
+          var al = a.axisLabel || {};
+          al.formatter = 'function(v){ return v.toFixed(0) + "%"; }';
+          a.axisLabel = al;
+          a.max = 100;
+          if (a.min === undefined) a.min = 0;
+        });
+      }
+    }
+  }
+
+  // ---- helpers: scatter trendline + axis log ----
+
+  function _ccApplyScatter(opt, state){
+    var tline = state.scatterTrendline;
+    if (!tline || tline === 'off') return;
+    if (tline !== 'linear') return;
+    // Compute OLS over every scatter series and inject a markLine.
+    (opt.series || []).forEach(function(s){
+      if (!s || s.type !== 'scatter') return;
+      var pts = (s.data || []).map(function(p){
+        if (Array.isArray(p)) return [+p[0], +p[1]];
+        return null;
+      }).filter(function(p){
+        return p && !isNaN(p[0]) && !isNaN(p[1]);
+      });
+      if (pts.length < 2) return;
+      var n = pts.length;
+      var sx = 0, sy = 0, sxx = 0, sxy = 0;
+      pts.forEach(function(p){
+        sx += p[0]; sy += p[1]; sxx += p[0]*p[0]; sxy += p[0]*p[1];
+      });
+      var denom = n*sxx - sx*sx;
+      if (denom === 0) return;
+      var m = (n*sxy - sx*sy) / denom;
+      var b = (sy - m*sx) / n;
+      var xs = pts.map(function(p){ return p[0]; });
+      var xmin = Math.min.apply(null, xs);
+      var xmax = Math.max.apply(null, xs);
+      s.markLine = s.markLine || {};
+      s.markLine.symbol = ['none', 'none'];
+      s.markLine.lineStyle = {color: '#1a365d', type: 'dashed', width: 1.5};
+      s.markLine.label = {show: false};
+      s.markLine.data = [[
+        {coord: [xmin, m*xmin + b]},
+        {coord: [xmax, m*xmax + b]},
+      ]];
+      s.markLine.silent = true;
+    });
+  }
+
+  // =========================================================================
+  // SCATTER STUDIO  (interactive X/Y picker + per-axis transforms +
+  //                  regression stats strip)
+  //
+  // Compile-time builder embeds opt._studio with the column whitelists,
+  // initial defaults, transform options, regression options. Runtime
+  // state lives on chartControlState[cid].studio. _ccApplyStudio
+  // resamples the dataset, applies per-axis transforms, optionally
+  // groups by color, computes regression on the visible data, and
+  // populates a stats strip below the canvas.
+  // =========================================================================
+
+  function _ccStudioCfg(cid){
+    // Returns the spec-level studio config block embedded by
+    // build_scatter_studio. Returns null when the chart isn't a studio.
+    var base = SPECS[cid];
+    if (!base) return null;
+    return base._studio || null;
+  }
+
+  function _ccColumnTransform(values, times, name){
+    // JS mirror of echart_studio._compute_transform. Operates on a
+    // numeric column producing a same-length list with null for
+    // undefined positions. Used by _ccApplyStudio per axis.
+    if (!name || name === 'raw'){
+      return values.map(function(v){
+        if (v == null || isNaN(+v)) return null;
+        return +v;
+      });
+    }
+    if (name === 'log'){
+      return values.map(function(v){
+        if (v == null || isNaN(+v) || +v <= 0) return null;
+        return Math.log(+v);
+      });
+    }
+    if (name === 'rank_pct'){
+      var pairs = [];
+      values.forEach(function(v, i){
+        if (v != null && !isNaN(+v)) pairs.push({v: +v, i: i});
+      });
+      pairs.sort(function(a, b){ return a.v - b.v; });
+      var out = new Array(values.length);
+      for (var k = 0; k < values.length; k++) out[k] = null;
+      var m = pairs.length;
+      if (m === 0) return out;
+      var i = 0;
+      while (i < m){
+        var j = i;
+        while (j + 1 < m && pairs[j + 1].v === pairs[i].v) j++;
+        var avgRank = (i + j) / 2.0;
+        var pct = m > 1 ? (100 * avgRank / (m - 1)) : 50;
+        for (var k2 = i; k2 <= j; k2++) out[pairs[k2].i] = pct;
+        i = j + 1;
+      }
+      return out;
+    }
+    if (name === 'zscore'){
+      var nums = []; var anyNull = false;
+      values.forEach(function(v){
+        if (v != null && !isNaN(+v)) nums.push(+v);
+        else anyNull = true;
+      });
+      if (nums.length < 2) return values.map(function(){ return null; });
+      var mean = 0;
+      for (var k3 = 0; k3 < nums.length; k3++) mean += nums[k3];
+      mean /= nums.length;
+      var v2 = 0;
+      for (var k4 = 0; k4 < nums.length; k4++){
+        v2 += (nums[k4] - mean) * (nums[k4] - mean);
+      }
+      v2 /= (nums.length - 1);
+      var sd = v2 > 0 ? Math.sqrt(v2) : 0;
+      if (sd === 0) return values.map(function(){ return null; });
+      return values.map(function(v){
+        if (v == null || isNaN(+v)) return null;
+        return (+v - mean) / sd;
+      });
+    }
+    if (name === 'change' || name === 'pct_change'){
+      var out2 = [null];
+      for (var i2 = 1; i2 < values.length; i2++){
+        var a = values[i2]; var b = values[i2 - 1];
+        if (a == null || b == null || isNaN(+a) || isNaN(+b)){
+          out2.push(null); continue;
+        }
+        if (name === 'change'){ out2.push(+a - +b); }
+        else if (+b === 0){ out2.push(null); }
+        else { out2.push((+a - +b) / +b * 100); }
+      }
+      return out2;
+    }
+    if (name === 'yoy_change' || name === 'yoy_pct'){
+      // Use the same helper as the time-series transform for parity.
+      var ts = (times || []).map(function(t){ return _ccParseT(t); });
+      var out3 = new Array(values.length);
+      for (var i3 = 0; i3 < values.length; i3++) out3[i3] = null;
+      for (var i4 = 0; i4 < values.length; i4++){
+        if (values[i4] == null) continue;
+        var j2 = _ccFindYearAgo(ts, i4);
+        if (j2 < 0 || values[j2] == null) continue;
+        var a2 = +values[i4]; var b2 = +values[j2];
+        if (isNaN(a2) || isNaN(b2)) continue;
+        if (name === 'yoy_change'){ out3[i4] = a2 - b2; }
+        else if (b2 === 0){ continue; }
+        else { out3[i4] = (a2 - b2) / b2 * 100; }
+      }
+      return out3;
+    }
+    if (name.indexOf('rolling_zscore_') === 0){
+      var window = parseInt(name.split('_').pop(), 10) || 252;
+      window = Math.max(2, window);
+      var queue = []; var sum = 0; var sumSq = 0; var cnt = 0;
+      var means = new Array(values.length);
+      var stds  = new Array(values.length);
+      for (var ix = 0; ix < values.length; ix++){
+        means[ix] = null; stds[ix] = null;
+        var vv = values[ix];
+        if (vv != null && !isNaN(+vv)){
+          var f = +vv; queue.push(f); sum += f; sumSq += f * f; cnt++;
+        } else {
+          queue.push(null);
+        }
+        if (queue.length > window){
+          var rem = queue.shift();
+          if (rem != null){ sum -= rem; sumSq -= rem * rem; cnt--; }
+        }
+        if (queue.length === window && cnt >= 2){
+          var m2 = sum / cnt;
+          var var2 = (sumSq - cnt * m2 * m2) / (cnt - 1);
+          if (var2 < 0) var2 = 0;
+          means[ix] = m2; stds[ix] = Math.sqrt(var2);
+        }
+      }
+      var out4 = new Array(values.length);
+      for (var iy = 0; iy < values.length; iy++){
+        var v3 = values[iy], m3 = means[iy], s3 = stds[iy];
+        if (v3 == null || m3 == null || s3 == null || s3 === 0){
+          out4[iy] = null; continue;
+        }
+        out4[iy] = (+v3 - m3) / s3;
+      }
+      return out4;
+    }
+    if (name === 'index100'){
+      var anchor = null;
+      for (var ia = 0; ia < values.length; ia++){
+        var va = values[ia];
+        if (va != null && !isNaN(+va) && +va !== 0){ anchor = +va; break; }
+      }
+      if (anchor == null) return values.slice();
+      return values.map(function(v){
+        if (v == null || isNaN(+v)) return null;
+        return (+v / anchor) * 100;
+      });
+    }
+    return values.slice();
+  }
+
+  function _ccTransformAxisSuffix(name){
+    if (!name || name === 'raw') return '';
+    if (name.indexOf('rolling_zscore_') === 0){
+      var w = parseInt(name.split('_').pop(), 10) || 252;
+      return ' (z, ' + w + 'd)';
+    }
+    return ({
+      log:        ' (ln)',
+      change:     ' (\u0394)',
+      pct_change: ' (%\u0394)',
+      yoy_change: ' (YoY \u0394)',
+      yoy_pct:    ' (YoY %)',
+      zscore:     ' (z)',
+      rank_pct:   ' (pct rank)',
+      index100:   ' (index=100)'
+    })[name] || '';
+  }
+
+  function _ccTransformLabelShort(name){
+    if (!name || name === 'raw') return 'Raw';
+    if (name.indexOf('rolling_zscore_') === 0){
+      var w = parseInt(name.split('_').pop(), 10) || 252;
+      return 'Rolling z (' + w + 'd)';
+    }
+    return ({
+      log:        'log',
+      change:     '\u0394',
+      pct_change: '%\u0394',
+      yoy_change: 'YoY \u0394',
+      yoy_pct:    'YoY %',
+      zscore:     'z-score',
+      rank_pct:   'pct rank',
+      index100:   'Index=100'
+    })[name] || name;
+  }
+
+  function _ccRegStats(xs, ys){
+    // OLS regression statistics. Returns {n, slope, intercept, r, r2,
+    // rmse, se_slope, se_intercept, t_slope, p_slope}, or null when
+    // n<2, or {n, degenerate:'x_zero_variance'} when Sxx==0.
+    var pairs = [];
+    for (var i = 0; i < xs.length; i++){
+      var a = xs[i], b = ys[i];
+      if (a == null || b == null || isNaN(+a) || isNaN(+b)) continue;
+      pairs.push([+a, +b]);
+    }
+    var n = pairs.length;
+    if (n < 2) return null;
+    var mx = 0, my = 0;
+    for (var k = 0; k < n; k++){ mx += pairs[k][0]; my += pairs[k][1]; }
+    mx /= n; my /= n;
+    var sxx = 0, syy = 0, sxy = 0;
+    for (var k2 = 0; k2 < n; k2++){
+      var dx = pairs[k2][0] - mx;
+      var dy = pairs[k2][1] - my;
+      sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+    }
+    if (sxx <= 0){
+      return {n: n, slope: null, intercept: null, r: null,
+              r2: null, rmse: null, p_slope: null,
+              degenerate: 'x_zero_variance'};
+    }
+    var slope = sxy / sxx;
+    var intercept = my - slope * mx;
+    var r = (syy > 0) ? sxy / Math.sqrt(sxx * syy) : 0;
+    var rss = 0;
+    for (var k3 = 0; k3 < n; k3++){
+      var pred = slope * pairs[k3][0] + intercept;
+      var diff = pairs[k3][1] - pred;
+      rss += diff * diff;
+    }
+    var df = Math.max(1, n - 2);
+    var rmse = Math.sqrt(rss / df);
+    var seSlope = rmse / Math.sqrt(sxx);
+    var seIntercept = rmse * Math.sqrt(1 / n + (mx * mx) / sxx);
+    var tSlope = (seSlope > 0) ? slope / seSlope : null;
+    var pSlope = (tSlope == null) ? null
+      : 2 * (1 - _ccPhi(Math.abs(tSlope)));
+    return {n: n, slope: slope, intercept: intercept,
+            r: r, r2: r * r, rmse: rmse,
+            se_slope: seSlope, se_intercept: seIntercept,
+            t_slope: tSlope, p_slope: pSlope};
+  }
+
+  function _ccPhi(x){
+    // Standard-normal CDF via erf; sufficient precision for the
+    // display strip's p-value.
+    return 0.5 * (1 + _ccErf(x / Math.SQRT2));
+  }
+  function _ccErf(x){
+    // Abramowitz & Stegun 7.1.26 approximation.
+    var sign = x < 0 ? -1 : 1; x = Math.abs(x);
+    var a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741,
+        a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+    var t = 1.0 / (1.0 + p * x);
+    var y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1)
+              * t * Math.exp(-x * x);
+    return sign * y;
+  }
+
+  function _ccPStars(p){
+    if (p == null || isNaN(p)) return '';
+    if (p < 0.001) return '***';
+    if (p < 0.01)  return '**';
+    if (p < 0.05)  return '*';
+    if (p < 0.10)  return '\u00B7';
+    return '';
+  }
+
+  function _ccFmt(v, d){
+    if (v == null || isNaN(+v)) return '\u2014';
+    var n = +v;
+    var dec = (d != null) ? d : (Math.abs(n) >= 100 ? 1 : 3);
+    return n.toFixed(dec);
+  }
+
+  function _ccApplyStudio(cid, opt, state){
+    var cfg = _ccStudioCfg(cid);
+    if (!cfg) return null;
+    var st = state.studio = state.studio || {};
+
+    // Resolve current selections (fall back to defaults).
+    var xCol = st.xCol || cfg.x_default;
+    var yCol = st.yCol || cfg.y_default;
+    var colorCol = (st.colorCol === '' ? null : (st.colorCol || cfg.color_default));
+    var sizeCol  = (st.sizeCol  === '' ? null : (st.sizeCol  || cfg.size_default));
+    var xT = st.xTransform || cfg.x_transform_default || 'raw';
+    var yT = st.yTransform || cfg.y_transform_default || 'raw';
+    var winSel = st.window || cfg.window_default || 'all';
+    var outSel = st.outliers || cfg.outlier_default || 'off';
+    var regSel = st.regression || cfg.regression_default || 'off';
+
+    // Pull rows from the (filtered) dataset.
+    var w = WIDGET_META[cid];
+    var ds = w && w.dataset_ref ? currentDatasets[w.dataset_ref] : null;
+    if (!ds || !ds.length){
+      // Compile-time inline data: fall back to opt.series[*].data.
+      // The studio drawer is largely meaningless without a dataset_ref,
+      // but at least don't crash.
+      return null;
+    }
+    var filt = applyFilters(w.dataset_ref, ds, 'chart');
+    var header = filt[0];
+    var body = filt.slice(1);
+
+    var xIdx = header.indexOf(xCol);
+    var yIdx = header.indexOf(yCol);
+    var cIdx = colorCol ? header.indexOf(colorCol) : -1;
+    var sIdx = sizeCol  ? header.indexOf(sizeCol)  : -1;
+    var oIdx = cfg.order_by ? header.indexOf(cfg.order_by) : -1;
+    var labelIdx = cfg.label_column ? header.indexOf(cfg.label_column) : -1;
+    if (xIdx < 0 || yIdx < 0){
+      return null;
+    }
+
+    // Sort by order_by if present (so order-aware transforms apply).
+    var rows = body.slice();
+    if (oIdx >= 0){
+      rows.sort(function(a, b){
+        var ta = _ccParseT(a[oIdx]); var tb = _ccParseT(b[oIdx]);
+        if (isNaN(ta) && isNaN(tb)) return 0;
+        if (isNaN(ta)) return 1;
+        if (isNaN(tb)) return -1;
+        return ta - tb;
+      });
+    }
+
+    // Window slicing (only meaningful when order_by is a date col).
+    if (oIdx >= 0 && winSel && winSel !== 'all'){
+      var keepDays = null;
+      if (/^\d+d$/.test(winSel))     keepDays = parseInt(winSel, 10);
+      else if (/^\d+y$/.test(winSel)) keepDays = parseInt(winSel, 10) * 365;
+      if (keepDays && rows.length){
+        var lastT = _ccParseT(rows[rows.length - 1][oIdx]);
+        if (!isNaN(lastT)){
+          var cutoff = lastT - keepDays * 86400000;
+          rows = rows.filter(function(r){
+            var t = _ccParseT(r[oIdx]);
+            return !isNaN(t) && t >= cutoff;
+          });
+        }
+      }
+    }
+
+    var xRaw = rows.map(function(r){ return r[xIdx]; });
+    var yRaw = rows.map(function(r){ return r[yIdx]; });
+    var times = (oIdx >= 0)
+      ? rows.map(function(r){ return r[oIdx]; })
+      : null;
+    var xT_vals = _ccColumnTransform(xRaw, times, xT);
+    var yT_vals = _ccColumnTransform(yRaw, times, yT);
+
+    // Outlier filter (after transform, before grouping/regression).
+    if (outSel === 'iqr_3' || outSel === 'z_4'){
+      var keep = _ccStudioOutlierMask(xT_vals, yT_vals, outSel);
+      for (var i = 0; i < xT_vals.length; i++){
+        if (!keep[i]){ xT_vals[i] = null; yT_vals[i] = null; }
+      }
+    }
+
+    // Group rows by color column (if any).
+    var groups = [];      // [{name, indices: [...]}, ...]
+    if (cIdx >= 0){
+      var gmap = {}; var order = [];
+      for (var i = 0; i < rows.length; i++){
+        var g = rows[i][cIdx];
+        var gk = (g == null) ? '\u2014' : String(g);
+        if (gmap[gk] == null){
+          gmap[gk] = groups.length;
+          groups.push({name: gk, indices: []});
+          order.push(gk);
+        }
+        groups[gmap[gk]].indices.push(i);
+      }
+    } else {
+      var allIdx = [];
+      for (var ii = 0; ii < rows.length; ii++) allIdx.push(ii);
+      groups = [{name: yCol || 'series', indices: allIdx}];
+    }
+
+    // Resolve a categorical palette for groups.
+    var palette = (PAYLOAD.palettes &&
+      ((PAYLOAD.palettes[MANIFEST.palette]
+         && PAYLOAD.palettes[MANIFEST.palette].colors)
+        || (PAYLOAD.palettes.gs_primary
+             && PAYLOAD.palettes.gs_primary.colors))) || [];
+
+    // Build series.
+    var series = [];
+    var legend = [];
+    groups.forEach(function(grp, gi){
+      var data = [];
+      grp.indices.forEach(function(idx){
+        var xv = xT_vals[idx]; var yv = yT_vals[idx];
+        if (xv == null || yv == null) return;
+        var pt = [xv, yv];
+        if (sIdx >= 0){
+          var sv = rows[idx][sIdx];
+          pt.push(sv == null ? 1 : +sv);
+        }
+        // Tooltip / popup row reference: original row index from the
+        // (filtered, post-window) array. Keep as a property so the
+        // builder can find the source row.
+        data.push({
+          value: pt,
+          _row: rows[idx],
+          _label: (labelIdx >= 0) ? rows[idx][labelIdx] : null
+        });
+      });
+      var entry = {
+        type: 'scatter', name: grp.name, data: data,
+        emphasis: {focus: 'series'}
+      };
+      if (sIdx >= 0){
+        entry.symbolSize = function(val){
+          return Math.sqrt(Math.abs(val[2] || 1)) * 4;
+        };
+      } else {
+        entry.symbolSize = 10;
+      }
+      var color = palette[gi % (palette.length || 1)];
+      if (color) entry.itemStyle = {color: color};
+      series.push(entry);
+      legend.push(grp.name);
+    });
+
+    // Regression (overall or per-group).
+    var statsBundle = {n_total: 0, perGroup: [], overall: null,
+                        x: xCol, y: yCol, xT: xT, yT: yT};
+    var allX = [], allY = [];
+    groups.forEach(function(grp){
+      var gx = [], gy = [];
+      grp.indices.forEach(function(idx){
+        gx.push(xT_vals[idx]); gy.push(yT_vals[idx]);
+        allX.push(xT_vals[idx]); allY.push(yT_vals[idx]);
+      });
+      var s = _ccRegStats(gx, gy);
+      statsBundle.perGroup.push({name: grp.name, stats: s,
+                                   color: (palette[statsBundle.perGroup.length % (palette.length || 1)])});
+    });
+    statsBundle.overall = _ccRegStats(allX, allY);
+    statsBundle.n_total = statsBundle.overall ? statsBundle.overall.n : 0;
+
+    // Inject regression markLines per the user's selection.
+    if (regSel === 'ols' && statsBundle.overall
+          && statsBundle.overall.slope != null){
+      var os = statsBundle.overall;
+      var xMin = Infinity, xMax = -Infinity;
+      series.forEach(function(s){
+        (s.data || []).forEach(function(p){
+          var v = (p && p.value) || p;
+          if (Array.isArray(v)){
+            if (+v[0] < xMin) xMin = +v[0];
+            if (+v[0] > xMax) xMax = +v[0];
+          }
+        });
+      });
+      if (isFinite(xMin) && isFinite(xMax) && series.length){
+        // Attach the OLS line as its own series so it has a legend
+        // entry the user can toggle.
+        series.push({
+          type: 'line', name: 'OLS', showSymbol: false,
+          smooth: false, silent: true,
+          lineStyle: {type: 'dashed', width: 1.5, color: '#1a365d'},
+          data: [[xMin, os.slope * xMin + os.intercept],
+                 [xMax, os.slope * xMax + os.intercept]],
+          tooltip: {show: false},
+          emphasis: {focus: 'none'}
+        });
+        legend.push('OLS');
+      }
+    } else if (regSel === 'ols_per_group'){
+      // One markLine per group, colored to match.
+      statsBundle.perGroup.forEach(function(pg, gi){
+        var s = pg.stats;
+        if (!s || s.slope == null) return;
+        var sxs = []; var pts = (series[gi] && series[gi].data) || [];
+        pts.forEach(function(p){
+          var v = (p && p.value) || p;
+          if (Array.isArray(v)) sxs.push(+v[0]);
+        });
+        if (!sxs.length) return;
+        var lo = Math.min.apply(null, sxs);
+        var hi = Math.max.apply(null, sxs);
+        var color = (palette[gi % (palette.length || 1)]) || '#666';
+        series.push({
+          type: 'line', name: pg.name + ' OLS',
+          showSymbol: false, smooth: false, silent: true,
+          lineStyle: {type: 'dashed', width: 1.4, color: color},
+          data: [[lo, s.slope * lo + s.intercept],
+                 [hi, s.slope * hi + s.intercept]],
+          tooltip: {show: false},
+          emphasis: {focus: 'none'}
+        });
+      });
+    }
+
+    // Wire axis names + scales. nameLocation/nameGap mirror what the
+    // Python builder set so the names render centered (not at the
+    // ECharts-default 'end' which clips on tight grids).
+    var xName = xCol + _ccTransformAxisSuffix(xT);
+    var yName = yCol + _ccTransformAxisSuffix(yT);
+    opt.xAxis = {type: 'value', name: xName, scale: true,
+                  nameLocation: 'middle', nameGap: 28};
+    opt.yAxis = {type: 'value', name: yName, scale: true,
+                  nameLocation: 'middle', nameGap: 48};
+    opt.tooltip = opt.tooltip || {};
+    opt.tooltip.trigger = 'item';
+    opt.tooltip.formatter = (
+      'function(p){var v = (p.data && p.data.value) || p.data; '
+      + 'if (!Array.isArray(v)) return ""; '
+      + 'var lab = (p.data && p.data._label != null) '
+      + '            ? (\"<b>\" + p.data._label + \"</b><br/>\") : \"\"; '
+      + 'return lab + \"' + xName.replace(/"/g, '\\"') + ': \" + (+v[0]).toFixed(3) + \"<br/>\"'
+      + ' + \"' + yName.replace(/"/g, '\\"') + ': \" + (+v[1]).toFixed(3); }'
+    );
+    opt.series = series;
+    if (opt.legend){
+      opt.legend.data = legend;
+    }
+
+    return statsBundle;
+  }
+
+  function _ccStudioOutlierMask(xs, ys, mode){
+    var n = xs.length;
+    var keep = new Array(n);
+    for (var k = 0; k < n; k++) keep[k] = true;
+    function pruneCol(vals){
+      var nums = [];
+      for (var i = 0; i < n; i++){
+        if (vals[i] != null && !isNaN(+vals[i])) nums.push(+vals[i]);
+      }
+      if (nums.length < 4) return;
+      nums.sort(function(a, b){ return a - b; });
+      function quant(p){
+        var idx = p * (nums.length - 1);
+        var lo = Math.floor(idx), hi = Math.min(nums.length - 1, lo + 1);
+        var f = idx - lo;
+        return nums[lo] + (nums[hi] - nums[lo]) * f;
+      }
+      if (mode === 'iqr_3'){
+        var q1 = quant(0.25), q3 = quant(0.75); var iqr = q3 - q1;
+        var lo = q1 - 3 * iqr, hi = q3 + 3 * iqr;
+        for (var i2 = 0; i2 < n; i2++){
+          if (vals[i2] == null || isNaN(+vals[i2])) continue;
+          var v = +vals[i2];
+          if (v < lo || v > hi) keep[i2] = false;
+        }
+      } else if (mode === 'z_4'){
+        var mean = 0;
+        for (var k2 = 0; k2 < nums.length; k2++) mean += nums[k2];
+        mean /= nums.length;
+        var v2 = 0;
+        for (var k3 = 0; k3 < nums.length; k3++){
+          v2 += (nums[k3] - mean) * (nums[k3] - mean);
+        }
+        v2 /= Math.max(1, nums.length - 1);
+        var sd = v2 > 0 ? Math.sqrt(v2) : 0;
+        if (sd === 0) return;
+        for (var i3 = 0; i3 < n; i3++){
+          if (vals[i3] == null || isNaN(+vals[i3])) continue;
+          var z = Math.abs((+vals[i3] - mean) / sd);
+          if (z > 4) keep[i3] = false;
+        }
+      }
+    }
+    pruneCol(xs);
+    pruneCol(ys);
+    return keep;
+  }
+
+  function _ccRenderStatsStrip(cid, bundle){
+    var el = document.getElementById('stats-' + cid);
+    if (!el) return;
+    if (!bundle){ el.innerHTML = ''; return; }
+    var cfg = _ccStudioCfg(cid);
+    if (!cfg || !cfg.show_stats){ el.innerHTML = ''; return; }
+    var os = bundle.overall;
+    if (!os){
+      el.innerHTML = '<span class="cc-stats-empty">'
+        + 'n &lt; 2 \u2014 regression unavailable</span>';
+      return;
+    }
+    if (os.degenerate === 'x_zero_variance'){
+      el.innerHTML = '<span class="cc-stats-empty">'
+        + 'n=' + os.n + ' \u2014 zero x-variance, regression undefined</span>';
+      return;
+    }
+    var stars = _ccPStars(os.p_slope);
+    var fmt = function(v, d){ return _ccFmt(v, d); };
+    var html = '<span class="cc-stat">n=<b>' + os.n + '</b></span>'
+      + '<span class="cc-stat">r=<b>' + fmt(os.r, 3) + '</b>' + stars + '</span>'
+      + '<span class="cc-stat">R\u00B2=<b>' + fmt(os.r2, 3) + '</b></span>'
+      + '<span class="cc-stat">\u03B2=<b>' + fmt(os.slope, 4)
+      + '</b> (SE ' + fmt(os.se_slope, 4) + ')</span>'
+      + '<span class="cc-stat">\u03B1=<b>' + fmt(os.intercept, 4) + '</b></span>'
+      + '<span class="cc-stat">RMSE=<b>' + fmt(os.rmse, 4) + '</b></span>'
+      + '<span class="cc-stat">p=<b>' + (os.p_slope == null
+          ? '\u2014' : (+os.p_slope).toExponential(2)) + '</b></span>';
+    if ((bundle.perGroup || []).length > 1){
+      var pgHtml = (bundle.perGroup || []).map(function(pg){
+        var s = pg.stats;
+        if (!s) return '';
+        var sw = pg.color
+          ? ('<span class="cc-stats-swatch" style="background:'
+              + pg.color + '"></span>')
+          : '';
+        return '<span class="cc-stat-group">' + sw + (pg.name || '')
+          + ': r=' + fmt(s.r, 2) + ', R\u00B2=' + fmt(s.r2, 2)
+          + ', \u03B2=' + fmt(s.slope, 3)
+          + ' (n=' + s.n + ')</span>';
+      }).filter(function(x){ return !!x; }).join('');
+      if (pgHtml) html += '<div class="cc-stats-groups">' + pgHtml + '</div>';
+    }
+    el.innerHTML = html;
+  }
+
+  // ---- helpers: heatmap color scale ----
+
+  function _ccApplyHeatmap(opt, state){
+    if (!state.heatmapScale) return;
+    var vm = opt.visualMap;
+    if (Array.isArray(vm)) vm = vm[0];
+    if (!vm) return;
+    if (state.heatmapScale === 'diverging'){
+      vm.inRange = vm.inRange || {};
+      vm.inRange.color = ['#8C1D40', '#f5f5f5', '#1a365d'];
+    } else if (state.heatmapScale === 'sequential'){
+      vm.inRange = vm.inRange || {};
+      vm.inRange.color = ['#f0f5fb', '#7399C6', '#002F6C'];
+    }
+  }
+
+  // ---- helpers: pie sort + other-bucket ----
+
+  function _ccApplyPie(opt, state){
+    (opt.series || []).forEach(function(s){
+      if (!s || (s.type !== 'pie')) return;
+      var data = (s.data || []).slice();
+      if (state.pieSort === 'desc'){
+        data.sort(function(a, b){
+          var av = (a && a.value != null) ? +a.value : -Infinity;
+          var bv = (b && b.value != null) ? +b.value : -Infinity;
+          return bv - av;
+        });
+      }
+      var thresh = parseFloat(state.pieOther) || 0;
+      if (thresh > 0){
+        var total = data.reduce(function(a, x){
+          return a + (x && x.value != null ? +x.value : 0);
+        }, 0);
+        if (total > 0){
+          var keep = []; var otherSum = 0;
+          data.forEach(function(d){
+            if (!d) return;
+            var v = +d.value || 0;
+            if (v / total < thresh){ otherSum += v; }
+            else { keep.push(d); }
+          });
+          if (otherSum > 0){
+            keep.push({name: 'Other', value: otherSum});
+          }
+          data = keep;
+        }
+      }
+      s.data = data;
+    });
+  }
+
+  // ---- helpers: axis scale / range ----
+
+  function _ccApplyYScale(opt, mode){
+    var yax = opt.yAxis;
+    var axes = Array.isArray(yax) ? yax : (yax ? [yax] : []);
+    axes.forEach(function(a){
+      if (!a || typeof a !== 'object') return;
+      if (a.type === 'category') return;          // log only on numeric
+      a.type = (mode === 'log') ? 'log' : 'value';
+    });
+  }
+  function _ccApplyXScale(opt, mode){
+    var xax = opt.xAxis;
+    var axes = Array.isArray(xax) ? xax : (xax ? [xax] : []);
+    axes.forEach(function(a){
+      if (!a || typeof a !== 'object') return;
+      if (a.type === 'category' || a.type === 'time') return;
+      a.type = (mode === 'log') ? 'log' : 'value';
+    });
+  }
+  function _ccApplyYRange(opt, mode){
+    var yax = opt.yAxis;
+    var axes = Array.isArray(yax) ? yax : (yax ? [yax] : []);
+    axes.forEach(function(a){
+      if (!a || typeof a !== 'object') return;
+      if (a.type === 'category') return;
+      if (mode === 'zero'){
+        a.scale = false;
+        a.min  = 0;
+      } else {
+        a.scale = true;
+        if (a.min === 0) delete a.min;
+      }
+    });
+  }
+
+  // =========================================================================
+  // CONTROLS DRAWER UI  (DOM rendering + event wiring)
+  // =========================================================================
+
+  function _ccTransformOptions(){
+    // Grouped by category for the controls drawer dropdown. The
+    // <optgroup> rendering happens in _ccBuildSelect; flat code paths
+    // (legend tags, axis label) read these via _ccTransformLabel.
+    return [
+      {group: 'Basic', value: 'raw',                label: 'Raw'},
+      {group: 'Basic', value: 'change',             label: 'Δ (period)'},
+      {group: 'Basic', value: 'pct_change',         label: '% Δ (period)'},
+      {group: 'Basic', value: 'log_change',         label: 'log Δ (period)'},
+      {group: 'Basic', value: 'yoy_change',         label: 'YoY Δ'},
+      {group: 'Basic', value: 'yoy_pct',            label: 'YoY %'},
+      {group: 'Basic', value: 'yoy_log',            label: 'YoY log Δ'},
+      {group: 'Basic', value: 'annualized_change',  label: 'Annualized Δ'},
+      {group: 'Advanced', value: 'log',             label: 'log'},
+      {group: 'Advanced', value: 'zscore',          label: 'z-score'},
+      {group: 'Advanced', value: 'rolling_zscore_252', label: 'Rolling z (252)'},
+      {group: 'Advanced', value: 'rank_pct',        label: 'Pct rank'},
+      {group: 'Advanced', value: 'ytd',             label: 'Year-to-date Δ'},
+      {group: 'Advanced', value: 'index100',        label: 'Index = 100 (first)'},
+    ];
+  }
+  function _ccSmoothingOptions(){
+    return [
+      {value: 'off', label: 'Off'},
+      {value: '5',   label: '5'},
+      {value: '20',  label: '20'},
+      {value: '50',  label: '50'},
+      {value: '200', label: '200'},
+    ];
+  }
+  function _ccBarSortOptions(){
+    return [
+      {value: 'input',    label: 'Input order'},
+      {value: 'val_desc', label: 'Value desc'},
+      {value: 'val_asc',  label: 'Value asc'},
+      {value: 'name',     label: 'Alphabetical'},
+    ];
+  }
+  function _ccBarStackOptions(){
+    return [
+      {value: 'group',   label: 'Grouped'},
+      {value: 'stack',   label: 'Stacked'},
+      {value: 'percent', label: '100% stacked'},
+    ];
+  }
+  function _ccPieOtherOptions(){
+    return [
+      {value: '0',     label: 'Off'},
+      {value: '0.01',  label: '< 1%'},
+      {value: '0.03',  label: '< 3%'},
+      {value: '0.05',  label: '< 5%'},
+    ];
+  }
+
+  function _ccBuildSelect(name, current, options){
+    // Renders a <select> with optional <optgroup> sections. An option
+    // entry may carry a `group` key; consecutive entries with the same
+    // group land inside one <optgroup label="...">. Entries without a
+    // group fall through as bare <option> elements.
+    var html = '<select data-cc-control="' + name + '">';
+    var openGroup = null;
+    options.forEach(function(o){
+      var grp = o.group || null;
+      if (grp !== openGroup){
+        if (openGroup !== null) html += '</optgroup>';
+        if (grp !== null){
+          html += '<optgroup label="' + _he(String(grp)) + '">';
+        }
+        openGroup = grp;
+      }
+      var sel = (String(o.value) === String(current)) ? ' selected' : '';
+      html += '<option value="' + _he(String(o.value)) + '"' + sel + '>'
+            + _he(o.label) + '</option>';
+    });
+    if (openGroup !== null) html += '</optgroup>';
+    return html + '</select>';
+  }
+  // Lightweight HTML escaper (mirrors _he used elsewhere; kept local
+  // here so the controls module is self-contained).
+  function _he(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _ccPopulateDrawer(cid){
+    // Top-level dispatcher. Routes to the chart / table / kpi
+    // populator based on the widget kind in WIDGET_META, then runs
+    // the matching wirer. The drawer DOM elements are emitted by the
+    // Python tile renderer for every supported widget kind, so this
+    // function only has to figure out *which* knobs to render.
+    var drawer = document.getElementById('controls-' + cid);
+    if (!drawer) return;
+    if (drawer.getAttribute('data-populated') === 'true') return;
+    var w = WIDGET_META[cid];
+    var kind = w && w.widget;
+    if (kind === 'table'){ _ccPopulateTableDrawer(cid, drawer); return; }
+    if (kind === 'kpi'){   _ccPopulateKpiDrawer(cid, drawer);   return; }
+    _ccPopulateChartDrawer(cid, drawer);
+  }
+
+  function _ccPopulateChartDrawer(cid, drawer){
+    var w = WIDGET_META[cid];
+    var spec = (w && w.spec) || {};
+    var ct = String(spec.chart_type || '').toLowerCase();
+    var state = _ccGetState(cid);
+
+    var html = [];
+    var hasSection = false;
+
+    // --- Per-series transforms (time series only, no color long-form) ---
+    var isTimeSeries = (ct === 'line' || ct === 'multi_line' || ct === 'area');
+    var hasColorMapping = !!(spec.mapping && (spec.mapping.color || spec.mapping.colour));
+    if (isTimeSeries && !hasColorMapping){
+      // Read series list from SPECS (compile-time source of truth) -
+      // ECharts strips unknown fields like ``_column`` from
+      // ``inst.getOption()`` in some versions, which would break
+      // key alignment between the drawer state and the transform
+      // application path. SPECS preserves _column verbatim.
+      var baseOpt = SPECS[cid];
+      var seriesList = (baseOpt && baseOpt.series) || [];
+      // Filter out non-line/scatter/bar series (e.g. annotation overlays)
+      seriesList = seriesList.filter(function(s){
+        var t = s && s.type;
+        return t === 'line' || t === 'bar' || t === 'scatter' || t === 'area';
+      });
+      if (seriesList.length){
+        // Resolve a palette so each series row can show a small color
+        // swatch. We use the per-chart palette if set on the option,
+        // otherwise the manifest palette, otherwise the first
+        // categorical palette in PAYLOAD.
+        var palette = (baseOpt && baseOpt.color) ||
+          (PAYLOAD.palettes && (
+            (PAYLOAD.palettes[MANIFEST.palette] && PAYLOAD.palettes[MANIFEST.palette].colors) ||
+            (PAYLOAD.palettes.gs_primary && PAYLOAD.palettes.gs_primary.colors))
+          ) || [];
+        html.push('<div class="cc-section">');
+        html.push('<div class="cc-section-title">Series</div>');
+        seriesList.forEach(function(s, i){
+          // strip transform tag if already appended
+          var rawName = String(s.name || '').replace(/\s+\u00B7\s+.*$/, '');
+          var key = s._column || rawName;
+          var sState = state.series[key] || {};
+          var color = (s.lineStyle && s.lineStyle.color)
+            || (s.itemStyle && s.itemStyle.color)
+            || palette[i % (palette.length || 1)]
+            || '';
+          html.push('<div class="cc-series-row" data-series-key="'
+            + _he(key) + '">');
+          html.push('<span class="cc-series-name">');
+          if (color){
+            html.push('<span class="cc-series-swatch" style="background:'
+              + _he(color) + '"></span>');
+          }
+          html.push(_he(rawName) + '</span>');
+          html.push(_ccBuildSelect(
+            'series-transform', sState.transform || 'raw',
+            _ccTransformOptions()));
+          html.push('<label style="display:inline-flex;'
+            + 'align-items:center;gap:4px;font-size:11px;">'
+            + '<input type="checkbox" data-cc-control="series-visible"'
+            + (sState.visible === false ? '' : ' checked') + '/>'
+            + 'show</label>');
+          html.push('</div>');
+        });
+        html.push('</div>');
+        hasSection = true;
+      }
+    } else if (isTimeSeries && hasColorMapping){
+      // Long-form: single chart-wide transform
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Transform</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">All series</span>');
+      html.push(_ccBuildSelect(
+        'transform-all', state.transformAll || 'raw',
+        _ccTransformOptions()));
+      html.push('</div></div>');
+      hasSection = true;
+    }
+
+    // --- Shape (line / area only) ---
+    //   Mirrors Haver's chart-type strip (Line / Line dotted /
+    //   Line dashed / Area / Step / Stacked / 100% stacked) but
+    //   composable: each axis is its own dropdown, so a user can mix
+    //   "dashed" + "step start" + "area fill" + "stacked" if they
+    //   want. Keeps "inherit" as the default so the author's
+    //   compile-time choice (e.g. dotted line) survives until the
+    //   user explicitly overrides.
+    if (isTimeSeries){
+      var sh = state.shape || {};
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Shape</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Style</span>');
+      html.push(_ccBuildSelect(
+        'shape-line-style', sh.lineStyleType || 'inherit',
+        [{value: 'inherit', label: 'Inherit'},
+          {value: 'solid',   label: 'Solid'},
+          {value: 'dotted',  label: 'Dotted'},
+          {value: 'dashed',  label: 'Dashed'}]));
+      html.push('<span class="cc-label">Step</span>');
+      html.push(_ccBuildSelect(
+        'shape-step', sh.step || 'inherit',
+        [{value: 'inherit', label: 'Inherit'},
+          {value: 'off',    label: 'Off'},
+          {value: 'start',  label: 'Start'},
+          {value: 'middle', label: 'Middle'},
+          {value: 'end',    label: 'End'}]));
+      html.push('<span class="cc-label">Width</span>');
+      html.push(_ccBuildSelect(
+        'shape-line-width', sh.lineWidth || 'inherit',
+        [{value: 'inherit', label: 'Inherit'},
+          {value: '1', label: '1 px'},
+          {value: '2', label: '2 px'},
+          {value: '3', label: '3 px'}]));
+      html.push('</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Area fill</span>');
+      html.push(_ccBuildSelect(
+        'shape-area-fill', sh.areaFill || 'inherit',
+        [{value: 'inherit', label: 'Inherit'},
+          {value: 'on',  label: 'On'},
+          {value: 'off', label: 'Off'}]));
+      html.push('<span class="cc-label">Stack</span>');
+      html.push(_ccBuildSelect(
+        'shape-stack', sh.stack || 'inherit',
+        [{value: 'inherit', label: 'Inherit'},
+          {value: 'group',   label: 'Grouped'},
+          {value: 'stack',   label: 'Stacked'},
+          {value: 'percent', label: '100% stacked'}]));
+      html.push('<span class="cc-label">Markers</span>');
+      html.push(_ccBuildSelect(
+        'shape-show-symbol', sh.showSymbol || 'inherit',
+        [{value: 'inherit', label: 'Inherit'},
+          {value: 'on',  label: 'Show'},
+          {value: 'off', label: 'Hide'}]));
+      html.push('</div></div>');
+      hasSection = true;
+    }
+
+    // --- Time series chart-level knobs ---
+    if (isTimeSeries){
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Chart</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Smoothing</span>');
+      html.push(_ccBuildSelect(
+        'smoothing', state.smoothing || 'off',
+        _ccSmoothingOptions()));
+      html.push('<span class="cc-label">Y-scale</span>');
+      html.push(_ccBuildSelect(
+        'y-scale', state.yScale || 'linear',
+        [{value: 'linear', label: 'Linear'},
+          {value: 'log',    label: 'Log'}]));
+      html.push('<span class="cc-label">Y-range</span>');
+      html.push(_ccBuildSelect(
+        'y-range', state.yRange || 'auto',
+        [{value: 'auto', label: 'Auto'},
+          {value: 'zero', label: 'From zero'}]));
+      html.push('</div></div>');
+      hasSection = true;
+    }
+
+    // --- Bar knobs ---
+    if (ct === 'bar' || ct === 'bar_horizontal'){
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Bar</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Sort</span>');
+      html.push(_ccBuildSelect(
+        'bar-sort', state.barSort || 'input',
+        _ccBarSortOptions()));
+      html.push('<span class="cc-label">Stack</span>');
+      html.push(_ccBuildSelect(
+        'bar-stack', state.barStack || 'group',
+        _ccBarStackOptions()));
+      html.push('<span class="cc-label">Y-scale</span>');
+      html.push(_ccBuildSelect(
+        'y-scale', state.yScale || 'linear',
+        [{value: 'linear', label: 'Linear'},
+          {value: 'log',    label: 'Log'}]));
+      html.push('</div></div>');
+      hasSection = true;
+    }
+
+    // --- Scatter knobs ---
+    if (ct === 'scatter' || ct === 'scatter_multi'){
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Scatter</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Trendline</span>');
+      html.push(_ccBuildSelect(
+        'scatter-trendline', state.scatterTrendline || 'off',
+        [{value: 'off',    label: 'Off'},
+          {value: 'linear', label: 'Linear (OLS)'}]));
+      html.push('<span class="cc-label">X-scale</span>');
+      html.push(_ccBuildSelect(
+        'x-scale', state.xScale || 'linear',
+        [{value: 'linear', label: 'Linear'},
+          {value: 'log',    label: 'Log'}]));
+      html.push('<span class="cc-label">Y-scale</span>');
+      html.push(_ccBuildSelect(
+        'y-scale', state.yScale || 'linear',
+        [{value: 'linear', label: 'Linear'},
+          {value: 'log',    label: 'Log'}]));
+      html.push('</div></div>');
+      hasSection = true;
+    }
+
+    // --- Scatter studio (interactive X/Y picker + regression) ---
+    if (ct === 'scatter_studio'){
+      var cfg = _ccStudioCfg(cid);
+      if (cfg){
+        var st = state.studio = state.studio || {};
+        var xCol = st.xCol || cfg.x_default;
+        var yCol = st.yCol || cfg.y_default;
+        var colorCol = (st.colorCol === '')
+          ? '' : (st.colorCol || cfg.color_default || '');
+        var sizeCol = (st.sizeCol === '')
+          ? '' : (st.sizeCol || cfg.size_default || '');
+        var xT = st.xTransform || cfg.x_transform_default || 'raw';
+        var yT = st.yTransform || cfg.y_transform_default || 'raw';
+        var winSel = st.window || cfg.window_default || 'all';
+        var outSel = st.outliers || cfg.outlier_default || 'off';
+        var regSel = st.regression || cfg.regression_default || 'off';
+
+        var transformOpts = (cfg.transforms || []).map(function(t){
+          return {value: t, label: _ccTransformLabelShort(t)};
+        });
+        var colOpts = function(list){
+          return (list || []).map(function(c){
+            return {value: c, label: c};
+          });
+        };
+        var nullableOpts = function(list){
+          return [{value: '', label: '\u2014 none \u2014'}]
+            .concat(colOpts(list));
+        };
+
+        html.push('<div class="cc-section">');
+        html.push('<div class="cc-section-title">Studio</div>');
+
+        // Row 1: X axis
+        html.push('<div class="cc-row">');
+        html.push('<span class="cc-label">X axis</span>');
+        html.push(_ccBuildSelect('studio-x', xCol, colOpts(cfg.x_columns)));
+        html.push('<span class="cc-label">Transform</span>');
+        html.push(_ccBuildSelect('studio-x-transform', xT, transformOpts));
+        html.push('</div>');
+
+        // Row 2: Y axis
+        html.push('<div class="cc-row">');
+        html.push('<span class="cc-label">Y axis</span>');
+        html.push(_ccBuildSelect('studio-y', yCol, colOpts(cfg.y_columns)));
+        html.push('<span class="cc-label">Transform</span>');
+        html.push(_ccBuildSelect('studio-y-transform', yT, transformOpts));
+        html.push('</div>');
+
+        // Row 3: Color + Size (only when columns are configured).
+        if ((cfg.color_columns || []).length
+              || (cfg.size_columns || []).length){
+          html.push('<div class="cc-row">');
+          if ((cfg.color_columns || []).length){
+            html.push('<span class="cc-label">Color</span>');
+            html.push(_ccBuildSelect('studio-color', colorCol,
+                                        nullableOpts(cfg.color_columns)));
+          }
+          if ((cfg.size_columns || []).length){
+            html.push('<span class="cc-label">Size</span>');
+            html.push(_ccBuildSelect('studio-size', sizeCol,
+                                        nullableOpts(cfg.size_columns)));
+          }
+          html.push('</div>');
+        }
+
+        // Row 4: Window (only when order_by is set) + Regression
+        var hasOrder = !!cfg.order_by;
+        var winChoices = (cfg.window_options || ['all'])
+          .map(function(w){
+            var lbl = w;
+            if (w === 'all')   lbl = 'All';
+            else if (/^\d+d$/.test(w)) lbl = w.replace('d', ' days');
+            else if (/^\d+y$/.test(w)) lbl = w.replace('y', ' years');
+            return {value: w, label: lbl};
+          });
+        var regChoices = (cfg.regression_options || ['off', 'ols'])
+          .map(function(r){
+            var lbl = ({off: 'Off', ols: 'OLS',
+                         ols_per_group: 'OLS per color'})[r] || r;
+            return {value: r, label: lbl};
+          });
+        var outChoices = (cfg.outlier_options || ['off'])
+          .map(function(o){
+            var lbl = ({off: 'Off',
+                         iqr_3: 'IQR \u00D7 3',
+                         z_4: '|z| > 4'})[o] || o;
+            return {value: o, label: lbl};
+          });
+        html.push('<div class="cc-row">');
+        if (hasOrder){
+          html.push('<span class="cc-label">Window</span>');
+          html.push(_ccBuildSelect('studio-window', winSel, winChoices));
+        }
+        html.push('<span class="cc-label">Outliers</span>');
+        html.push(_ccBuildSelect('studio-outliers', outSel, outChoices));
+        html.push('<span class="cc-label">Regression</span>');
+        html.push(_ccBuildSelect('studio-regression', regSel, regChoices));
+        html.push('</div>');
+
+        // Row 5: X / Y scale
+        html.push('<div class="cc-row">');
+        html.push('<span class="cc-label">X-scale</span>');
+        html.push(_ccBuildSelect(
+          'x-scale', state.xScale || 'linear',
+          [{value: 'linear', label: 'Linear'},
+            {value: 'log',    label: 'Log'}]));
+        html.push('<span class="cc-label">Y-scale</span>');
+        html.push(_ccBuildSelect(
+          'y-scale', state.yScale || 'linear',
+          [{value: 'linear', label: 'Linear'},
+            {value: 'log',    label: 'Log'}]));
+        html.push('</div>');
+
+        html.push('</div>');
+        hasSection = true;
+      }
+    }
+
+    // --- Heatmap knobs ---
+    if (ct === 'heatmap'){
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Heatmap</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Color scale</span>');
+      html.push(_ccBuildSelect(
+        'heatmap-scale', state.heatmapScale || 'sequential',
+        [{value: 'sequential', label: 'Sequential'},
+          {value: 'diverging',  label: 'Diverging (around 0)'}]));
+      html.push('</div></div>');
+      hasSection = true;
+    }
+
+    // --- Pie knobs ---
+    if (ct === 'pie' || ct === 'donut'){
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Pie</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Sort</span>');
+      html.push(_ccBuildSelect(
+        'pie-sort', state.pieSort || 'input',
+        [{value: 'input', label: 'Input order'},
+          {value: 'desc',  label: 'Largest first'}]));
+      html.push('<span class="cc-label">"Other"</span>');
+      html.push(_ccBuildSelect(
+        'pie-other', state.pieOther || '0',
+        _ccPieOtherOptions()));
+      html.push('</div></div>');
+      hasSection = true;
+    }
+
+    // --- Universal action bar ---
+    //   Two rows of buttons:
+    //     1. Inspect actions (View data / Copy CSV / Reset)
+    //     2. Download trio  (PNG / CSV / XLSX) -- pulls the same
+    //        post-transform rows that View data shows, so what gets
+    //        downloaded matches exactly what the user sees on screen.
+    html.push('<div class="cc-section">');
+    html.push('<div class="cc-actions">');
+    html.push('<button class="cc-action-btn" data-cc-action="view-data">View data</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="copy-csv">Copy CSV</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="reset">Reset chart</button>');
+    html.push('</div>');
+    html.push('<div class="cc-actions">');
+    html.push('<button class="cc-action-btn" data-cc-action="download-png">Download PNG</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="download-csv">Download CSV</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="download-xlsx">Download XLSX</button>');
+    html.push('</div></div>');
+
+    drawer.innerHTML = html.join('');
+    drawer.setAttribute('data-populated', 'true');
+    _ccWireDrawer(cid, drawer);
+  }
+
+  function _ccWireDrawer(cid, drawer){
+    var state = _ccGetState(cid);
+    drawer.querySelectorAll('[data-cc-control]').forEach(function(el){
+      var name = el.getAttribute('data-cc-control');
+      el.addEventListener('change', function(){
+        if (name === 'series-transform'){
+          var key = el.closest('.cc-series-row').getAttribute('data-series-key');
+          state.series[key] = state.series[key] || {};
+          state.series[key].transform = el.value;
+        } else if (name === 'series-visible'){
+          var key2 = el.closest('.cc-series-row').getAttribute('data-series-key');
+          state.series[key2] = state.series[key2] || {};
+          state.series[key2].visible = el.checked;
+        } else if (name === 'transform-all'){
+          state.transformAll = el.value;
+          // Propagate to every series so the transform pass sees it.
+          // Read from SPECS (compile-time) not live opt, so _column
+          // matches the keys used by _ccApplyTimeSeries.
+          var baseOpt2 = SPECS[cid];
+          ((baseOpt2 && baseOpt2.series) || []).forEach(function(s){
+            var key3 = s._column ||
+              (s.name || '').replace(/\s+\u00B7\s+.*$/, '');
+            if (!key3) return;
+            state.series[key3] = state.series[key3] || {};
+            state.series[key3].transform = el.value;
+          });
+        }         else if (name === 'smoothing')           state.smoothing = el.value;
+        else if (name === 'y-scale')               state.yScale = el.value;
+        else if (name === 'y-range')               state.yRange = el.value;
+        else if (name === 'x-scale')               state.xScale = el.value;
+        else if (name === 'bar-sort')              state.barSort = el.value;
+        else if (name === 'bar-stack')             state.barStack = el.value;
+        else if (name === 'scatter-trendline')     state.scatterTrendline = el.value;
+        else if (name === 'heatmap-scale')         state.heatmapScale = el.value;
+        else if (name === 'pie-sort')              state.pieSort = el.value;
+        else if (name === 'pie-other')             state.pieOther = el.value;
+        else if (name === 'studio-x')              { state.studio = state.studio || {}; state.studio.xCol = el.value; }
+        else if (name === 'studio-y')              { state.studio = state.studio || {}; state.studio.yCol = el.value; }
+        else if (name === 'studio-color')          { state.studio = state.studio || {}; state.studio.colorCol = el.value; }
+        else if (name === 'studio-size')           { state.studio = state.studio || {}; state.studio.sizeCol = el.value; }
+        else if (name === 'studio-x-transform')    { state.studio = state.studio || {}; state.studio.xTransform = el.value; }
+        else if (name === 'studio-y-transform')    { state.studio = state.studio || {}; state.studio.yTransform = el.value; }
+        else if (name === 'studio-window')         { state.studio = state.studio || {}; state.studio.window = el.value; }
+        else if (name === 'studio-outliers')       { state.studio = state.studio || {}; state.studio.outliers = el.value; }
+        else if (name === 'studio-regression')     { state.studio = state.studio || {}; state.studio.regression = el.value; }
+        else if (name === 'shape-line-style')      { state.shape = state.shape || {}; state.shape.lineStyleType = el.value; }
+        else if (name === 'shape-step')            { state.shape = state.shape || {}; state.shape.step = el.value; }
+        else if (name === 'shape-line-width')      { state.shape = state.shape || {}; state.shape.lineWidth = el.value; }
+        else if (name === 'shape-area-fill')       { state.shape = state.shape || {}; state.shape.areaFill = el.value; }
+        else if (name === 'shape-stack')           { state.shape = state.shape || {}; state.shape.stack = el.value; }
+        else if (name === 'shape-show-symbol')     { state.shape = state.shape || {}; state.shape.showSymbol = el.value; }
+        rerenderChart(cid);
+      });
+    });
+    drawer.querySelectorAll('[data-cc-action]').forEach(function(btn){
+      var act = btn.getAttribute('data-cc-action');
+      btn.addEventListener('click', function(){
+        if (act === 'view-data')          _ccViewData(cid);
+        else if (act === 'copy-csv')      _ccCopyCsv(cid);
+        else if (act === 'download-csv')  _ccDownloadCsv(cid);
+        else if (act === 'download-png')  _ccDownloadPng(cid);
+        else if (act === 'download-xlsx') _ccDownloadXlsx(cid);
+        else if (act === 'reset')         _ccReset(cid);
+      });
+    });
+  }
+
+  // =========================================================================
+  // TABLE CONTROLS DRAWER  (mirror of chart drawer, scoped to TABLE_STATE)
+  // =========================================================================
+  //
+  // Knobs (only render the ones the table can support):
+  //   - Search rows                      always
+  //   - Sort by column ▾  + Asc/Desc     when w.sortable !== false
+  //   - Hide columns (multi-checkbox)    always
+  //   - Freeze first column ☐            always
+  //   - Row height: regular / compact    always
+  //   - Decimals: auto / 0 / 1 / 2 / 3   always (override numeric format)
+  //   - Actions: View raw / Copy CSV / Download CSV / Download XLSX
+  //              / Reset
+  //
+  // Runtime state lives on TABLE_STATE[cid] (same dict the existing
+  // sort + search code uses). Toggling any knob calls renderTables()
+  // which re-runs the table render path with the new state applied.
+  function _ccPopulateTableDrawer(cid, drawer){
+    var w = WIDGET_META[cid];
+    if (!w) return;
+    var ts = tableState(cid);
+    var ds = w.dataset_ref ? currentDatasets[w.dataset_ref] : null;
+    var header = (ds && ds.length) ? ds[0] : [];
+    var cols = w.columns;
+    if (!cols || !cols.length){
+      cols = header.map(function(h){ return {field: h, label: h}; });
+    }
+
+    var html = [];
+
+    // --- Search ---
+    html.push('<div class="cc-section">');
+    html.push('<div class="cc-section-title">Search</div>');
+    html.push('<div class="cc-row">');
+    html.push('<span class="cc-label">Filter rows</span>');
+    html.push('<input type="text" data-cc-control="table-search" '
+      + 'value="' + _he(ts.search || '') + '" placeholder="type to search..."/>');
+    html.push('</div></div>');
+
+    // --- Sort ---
+    if (w.sortable !== false){
+      var colOpts = [{value: '', label: 'No sort (input order)'}];
+      cols.forEach(function(c, i){
+        colOpts.push({value: String(i),
+                       label: String(c.label != null ? c.label : c.field)});
+      });
+      var curSort = (ts.sortCol == null) ? '' : String(ts.sortCol);
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Sort</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">By column</span>');
+      html.push(_ccBuildSelect('table-sort-col', curSort, colOpts));
+      html.push('<span class="cc-label">Direction</span>');
+      html.push(_ccBuildSelect(
+        'table-sort-dir', String(ts.sortDir || 1),
+        [{value: '1',  label: 'Ascending'},
+          {value: '-1', label: 'Descending'}]));
+      html.push('</div></div>');
+    }
+
+    // --- Hide columns ---
+    if (cols.length){
+      ts.hidden = ts.hidden || {};
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Columns</div>');
+      html.push('<div class="cc-row" style="flex-direction:column;'
+        + 'align-items:flex-start;gap:4px 14px;">');
+      cols.forEach(function(c, i){
+        var lbl = String(c.label != null ? c.label : c.field);
+        var checked = ts.hidden[i] ? '' : ' checked';
+        html.push('<label style="display:inline-flex;align-items:center;'
+          + 'gap:6px;font-size:11px;font-weight:500;color:var(--text);">'
+          + '<input type="checkbox" data-cc-control="table-col-visible" '
+          + 'data-col-idx="' + i + '"' + checked + '/>'
+          + _he(lbl) + '</label>');
+      });
+      html.push('</div></div>');
+    }
+
+    // --- Layout knobs ---
+    html.push('<div class="cc-section">');
+    html.push('<div class="cc-section-title">Layout</div>');
+    html.push('<div class="cc-row">');
+    html.push('<span class="cc-label">Density</span>');
+    html.push(_ccBuildSelect(
+      'table-density', ts.density || 'regular',
+      [{value: 'regular', label: 'Regular'},
+        {value: 'compact', label: 'Compact'}]));
+    html.push('<span class="cc-label">Freeze first col</span>');
+    html.push(_ccBuildSelect(
+      'table-freeze', String(!!ts.freezeFirst),
+      [{value: 'false', label: 'Off'},
+        {value: 'true',  label: 'On'}]));
+    html.push('<span class="cc-label">Decimals</span>');
+    html.push(_ccBuildSelect(
+      'table-decimals',
+      ts.decimals == null ? 'auto' : String(ts.decimals),
+      [{value: 'auto', label: 'Auto'},
+        {value: '0',   label: '0'},
+        {value: '1',   label: '1'},
+        {value: '2',   label: '2'},
+        {value: '3',   label: '3'},
+        {value: '4',   label: '4'}]));
+    html.push('</div></div>');
+
+    // --- Actions ---
+    html.push('<div class="cc-section">');
+    html.push('<div class="cc-actions">');
+    html.push('<button class="cc-action-btn" data-cc-action="table-view-raw">View raw</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="table-copy-csv">Copy CSV</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="table-reset">Reset table</button>');
+    html.push('</div>');
+    html.push('<div class="cc-actions">');
+    html.push('<button class="cc-action-btn" data-cc-action="table-download-csv">Download CSV</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="table-download-xlsx">Download XLSX</button>');
+    html.push('</div></div>');
+
+    drawer.innerHTML = html.join('');
+    drawer.setAttribute('data-populated', 'true');
+    _ccWireTableDrawer(cid, drawer);
+  }
+
+  function _ccWireTableDrawer(cid, drawer){
+    var ts = tableState(cid);
+    drawer.querySelectorAll('[data-cc-control]').forEach(function(el){
+      var name = el.getAttribute('data-cc-control');
+      var fire = function(){
+        if (name === 'table-search'){
+          ts.search = el.value;
+        } else if (name === 'table-sort-col'){
+          ts.sortCol = el.value === '' ? null : Number(el.value);
+        } else if (name === 'table-sort-dir'){
+          ts.sortDir = Number(el.value) || 1;
+        } else if (name === 'table-col-visible'){
+          var idx = Number(el.getAttribute('data-col-idx'));
+          ts.hidden = ts.hidden || {};
+          ts.hidden[idx] = !el.checked;
+        } else if (name === 'table-density'){
+          ts.density = el.value;
+        } else if (name === 'table-freeze'){
+          ts.freezeFirst = (el.value === 'true');
+        } else if (name === 'table-decimals'){
+          ts.decimals = (el.value === 'auto') ? null : Number(el.value);
+        }
+        renderTables();
+      };
+      el.addEventListener(el.tagName === 'INPUT'
+                            && el.type === 'text' ? 'input' : 'change', fire);
+    });
+    drawer.querySelectorAll('[data-cc-action]').forEach(function(btn){
+      var act = btn.getAttribute('data-cc-action');
+      btn.addEventListener('click', function(){
+        if (act === 'table-view-raw')           _ccTableViewRaw(cid);
+        else if (act === 'table-copy-csv')      _ccTableCopyCsv(cid);
+        else if (act === 'table-download-csv')  _ccTableDownloadCsv(cid);
+        else if (act === 'table-download-xlsx') _ccTableDownloadXlsx(cid);
+        else if (act === 'table-reset')         _ccTableReset(cid);
+      });
+    });
+  }
+
+  function _ccTableRows(cid){
+    var w = WIDGET_META[cid]; if (!w || w.widget !== 'table') return null;
+    var ds = w.dataset_ref ? currentDatasets[w.dataset_ref] : null;
+    if (!ds || !ds.length) return null;
+    return applyFilters(w.dataset_ref, ds, 'table');
+  }
+  function _ccTableViewRaw(cid){
+    var rows = _ccTableRows(cid);
+    if (!rows || !rows.length){
+      showModal('Raw data', '<p>No rows.</p>');
+      return;
+    }
+    var w = WIDGET_META[cid] || {};
+    var title = (w.title || w.id || 'Table') + ' - raw data';
+    var meta = '<div class="view-data-meta">'
+      + (rows.length - 1) + ' rows &middot; '
+      + (rows[0] || []).length + ' columns'
+      + '</div>';
+    var head = (rows[0] || []).map(function(h){
+      return '<th>' + _he(h) + '</th>';
+    }).join('');
+    var bodyRows = rows.slice(1, 1001).map(function(r){
+      return '<tr>' + r.map(function(v){
+        var t = (v == null) ? '' : (typeof v === 'number'
+          ? v.toLocaleString(undefined, {maximumFractionDigits: 4})
+          : String(v));
+        return '<td>' + _he(t) + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+    var trunc = rows.length > 1001
+      ? '<div class="view-data-meta">Showing first 1000 of '
+        + (rows.length - 1) + ' rows.</div>'
+      : '';
+    showModal(title,
+      meta
+      + '<div class="view-data-scroll"><table class="view-data-table">'
+      + '<thead><tr>' + head + '</tr></thead>'
+      + '<tbody>' + bodyRows + '</tbody></table></div>'
+      + trunc,
+      {wide: true});
+  }
+  function _ccTableCsvRows(cid){
+    if (typeof _exportTableRowsForXlsx !== 'function') return null;
+    return _exportTableRowsForXlsx(cid);
+  }
+  function _ccTableCopyCsv(cid){
+    var rows = _ccTableCsvRows(cid);
+    if (!rows || !rows.length){
+      showModal('Copy CSV', '<p>No rows.</p>');
+      return;
+    }
+    var csv = _ccRowsToCsv(rows);
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(csv).then(function(){
+        _ccFlashAction(cid, 'table-copy-csv', 'Copied');
+      }, function(){
+        _ccFallbackCopy(csv);
+        _ccFlashAction(cid, 'table-copy-csv', 'Copied');
+      });
+    } else {
+      _ccFallbackCopy(csv);
+      _ccFlashAction(cid, 'table-copy-csv', 'Copied');
+    }
+  }
+  function _ccTableDownloadCsv(cid){
+    var rows = _ccTableCsvRows(cid);
+    if (!rows || !rows.length){
+      showModal('Download CSV', '<p>No rows to download.</p>');
+      return;
+    }
+    var csv = _ccRowsToCsv(rows);
+    var blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = _ccChartFilenameStem(cid) + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1200);
+    _ccFlashAction(cid, 'table-download-csv', 'Saved');
+  }
+  function _ccTableDownloadXlsx(cid){
+    if (typeof window.downloadOneTableXlsx === 'function'){
+      window.downloadOneTableXlsx(cid);
+      _ccFlashAction(cid, 'table-download-xlsx', 'Saved');
+    }
+  }
+  function _ccTableReset(cid){
+    TABLE_STATE[cid] = {sortCol: null, sortDir: 1, search: ''};
+    var drawer = document.getElementById('controls-' + cid);
+    if (drawer){
+      drawer.setAttribute('data-populated', 'false');
+      drawer.innerHTML = '';
+      _ccPopulateTableDrawer(cid, drawer);
+    }
+    renderTables();
+  }
+
+  // =========================================================================
+  // KPI CONTROLS DRAWER
+  //
+  // Knobs (only render those the KPI can support):
+  //   - Compare period (when sparkline_source set):
+  //       Auto / Prev / 1d / 1w / 1m / 3m / 6m / 1y / YTD
+  //   - Show sparkline ☐
+  //   - Show delta ☐
+  //   - Decimals override (auto / 0..4)
+  //   - Actions: View data / Copy CSV / Download CSV / Download XLSX
+  //              / Reset
+  //
+  // State lives on KPI_STATE[cid]. The existing renderKpis() is
+  // re-invoked on every change so the displayed value, delta, and
+  // sparkline reflect the latest state.
+  // =========================================================================
+
+  var KPI_STATE = {};
+  function _kpiState(cid){
+    if (!KPI_STATE[cid]){
+      KPI_STATE[cid] = {
+        showSparkline: true,
+        showDelta: true,
+        comparePeriod: 'auto',
+        decimals: null,
+      };
+    }
+    return KPI_STATE[cid];
+  }
+
+  function _ccPopulateKpiDrawer(cid, drawer){
+    var w = WIDGET_META[cid];
+    if (!w) return;
+    var st = _kpiState(cid);
+    var hasSpark = !!w.sparkline_source;
+    var html = [];
+
+    if (hasSpark){
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Compare</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Period</span>');
+      html.push(_ccBuildSelect(
+        'kpi-compare', st.comparePeriod || 'auto',
+        [{value: 'auto', label: 'Auto (delta_source)'},
+          {value: 'prev', label: 'Previous point'},
+          {value: '1d',   label: '1 day'},
+          {value: '5d',   label: '5 days'},
+          {value: '1w',   label: '1 week'},
+          {value: '1m',   label: '1 month'},
+          {value: '3m',   label: '3 months'},
+          {value: '6m',   label: '6 months'},
+          {value: '1y',   label: '1 year'},
+          {value: 'ytd',  label: 'Year-to-date'}]));
+      html.push('</div></div>');
+    }
+
+    html.push('<div class="cc-section">');
+    html.push('<div class="cc-section-title">Display</div>');
+    html.push('<div class="cc-row">');
+    if (hasSpark){
+      html.push('<label style="display:inline-flex;align-items:center;'
+        + 'gap:4px;font-size:11px;color:var(--text);">'
+        + '<input type="checkbox" data-cc-control="kpi-show-sparkline"'
+        + (st.showSparkline === false ? '' : ' checked') + '/>'
+        + 'Sparkline</label>');
+    }
+    html.push('<label style="display:inline-flex;align-items:center;'
+      + 'gap:4px;font-size:11px;color:var(--text);">'
+      + '<input type="checkbox" data-cc-control="kpi-show-delta"'
+      + (st.showDelta === false ? '' : ' checked') + '/>'
+      + 'Delta</label>');
+    html.push('<span class="cc-label">Decimals</span>');
+    html.push(_ccBuildSelect(
+      'kpi-decimals',
+      st.decimals == null ? 'auto' : String(st.decimals),
+      [{value: 'auto', label: 'Auto (default)'},
+        {value: '0',   label: '0'},
+        {value: '1',   label: '1'},
+        {value: '2',   label: '2'},
+        {value: '3',   label: '3'},
+        {value: '4',   label: '4'}]));
+    html.push('</div></div>');
+
+    html.push('<div class="cc-section">');
+    html.push('<div class="cc-actions">');
+    html.push('<button class="cc-action-btn" data-cc-action="kpi-view-data">View data</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="kpi-copy-csv">Copy CSV</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="kpi-reset">Reset KPI</button>');
+    html.push('</div>');
+    html.push('<div class="cc-actions">');
+    html.push('<button class="cc-action-btn" data-cc-action="kpi-download-csv">Download CSV</button>');
+    html.push('<button class="cc-action-btn" data-cc-action="kpi-download-xlsx">Download XLSX</button>');
+    html.push('</div></div>');
+
+    drawer.innerHTML = html.join('');
+    drawer.setAttribute('data-populated', 'true');
+    _ccWireKpiDrawer(cid, drawer);
+  }
+
+  function _ccWireKpiDrawer(cid, drawer){
+    var st = _kpiState(cid);
+    drawer.querySelectorAll('[data-cc-control]').forEach(function(el){
+      var name = el.getAttribute('data-cc-control');
+      var ev = (el.tagName === 'INPUT' && el.type === 'checkbox')
+        ? 'change' : 'change';
+      el.addEventListener(ev, function(){
+        if (name === 'kpi-compare')               st.comparePeriod = el.value;
+        else if (name === 'kpi-show-sparkline')   st.showSparkline = el.checked;
+        else if (name === 'kpi-show-delta')       st.showDelta = el.checked;
+        else if (name === 'kpi-decimals')         st.decimals = (el.value === 'auto')
+                                                    ? null : Number(el.value);
+        renderKpis();
+      });
+    });
+    drawer.querySelectorAll('[data-cc-action]').forEach(function(btn){
+      var act = btn.getAttribute('data-cc-action');
+      btn.addEventListener('click', function(){
+        if (act === 'kpi-view-data')          _ccKpiViewData(cid);
+        else if (act === 'kpi-copy-csv')      _ccKpiCopyCsv(cid);
+        else if (act === 'kpi-download-csv')  _ccKpiDownloadCsv(cid);
+        else if (act === 'kpi-download-xlsx') _ccKpiDownloadXlsx(cid);
+        else if (act === 'kpi-reset')         _ccKpiReset(cid);
+      });
+    });
+  }
+
+  function _ccKpiSparklineRows(cid){
+    var w = WIDGET_META[cid]; if (!w || !w.sparkline_source) return null;
+    var sp = String(w.sparkline_source).split('.');
+    if (sp.length < 2) return null;
+    var dsName = sp[0]; var col = sp.slice(1).join('.');
+    var ds = currentDatasets[dsName]; if (!ds || !ds.length) return null;
+    var header = ds[0];
+    var idx = header.indexOf(col);
+    if (idx < 0) return null;
+    // Try to find a matching x/date column for context.
+    var xIdx = -1;
+    for (var i = 0; i < header.length; i++){
+      var h = String(header[i]).toLowerCase();
+      if (h === 'date' || h === 'time' || h === 'timestamp'
+          || h === 'x' || h.indexOf('date') >= 0){
+        xIdx = i; break;
+      }
+    }
+    if (xIdx < 0 && idx > 0) xIdx = 0;
+    var out = [[xIdx >= 0 ? header[xIdx] : 'i', col]];
+    for (var j = 1; j < ds.length; j++){
+      var row = ds[j];
+      out.push([xIdx >= 0 ? row[xIdx] : (j - 1), row[idx]]);
+    }
+    return out;
+  }
+  function _ccKpiViewData(cid){
+    var rows = _ccKpiSparklineRows(cid);
+    if (!rows || rows.length < 2){
+      showModal('KPI data', '<p>No backing time series for this KPI.</p>');
+      return;
+    }
+    var w = WIDGET_META[cid] || {};
+    var title = (w.label || w.title || w.id || 'KPI') + ' - data';
+    _ccShowDataModal(cid, rows[0], rows.slice(1));
+  }
+  function _ccKpiCopyCsv(cid){
+    var rows = _ccKpiSparklineRows(cid);
+    if (!rows || rows.length < 2){
+      showModal('Copy CSV', '<p>Nothing to copy.</p>');
+      return;
+    }
+    var csv = _ccRowsToCsv(rows);
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(csv).then(function(){
+        _ccFlashAction(cid, 'kpi-copy-csv', 'Copied');
+      });
+    } else {
+      _ccFallbackCopy(csv);
+      _ccFlashAction(cid, 'kpi-copy-csv', 'Copied');
+    }
+  }
+  function _ccKpiDownloadCsv(cid){
+    var rows = _ccKpiSparklineRows(cid);
+    if (!rows || rows.length < 2){
+      showModal('Download CSV', '<p>Nothing to download.</p>');
+      return;
+    }
+    var csv = _ccRowsToCsv(rows);
+    var blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = _ccChartFilenameStem(cid) + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1200);
+    _ccFlashAction(cid, 'kpi-download-csv', 'Saved');
+  }
+  function _ccKpiDownloadXlsx(cid){
+    if (typeof XLSX === 'undefined'){
+      alert('Excel export requires the SheetJS library.');
+      return;
+    }
+    var rows = _ccKpiSparklineRows(cid);
+    if (!rows || rows.length < 2){
+      showModal('Download XLSX', '<p>Nothing to download.</p>');
+      return;
+    }
+    var w = WIDGET_META[cid] || {};
+    var wb = XLSX.utils.book_new();
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    var sheet = String(w.label || w.title || cid)
+      .replace(/[\\\/\?\*\[\]:]/g, ' ').trim().slice(0, 31) || 'kpi';
+    XLSX.utils.book_append_sheet(wb, ws, sheet);
+    XLSX.writeFile(wb, _ccChartFilenameStem(cid) + '.xlsx');
+    _ccFlashAction(cid, 'kpi-download-xlsx', 'Saved');
+  }
+  function _ccKpiReset(cid){
+    KPI_STATE[cid] = {
+      showSparkline: true, showDelta: true,
+      comparePeriod: 'auto', decimals: null
+    };
+    var drawer = document.getElementById('controls-' + cid);
+    if (drawer){
+      drawer.setAttribute('data-populated', 'false');
+      drawer.innerHTML = '';
+      _ccPopulateKpiDrawer(cid, drawer);
+    }
+    renderKpis();
+  }
+
+  function _ccToggleDrawer(cid){
+    var drawer = document.getElementById('controls-' + cid);
+    if (!drawer) return;
+    var open = drawer.getAttribute('data-open') === 'true';
+    if (!open){
+      _ccPopulateDrawer(cid);
+      drawer.setAttribute('data-open', 'true');
+    } else {
+      drawer.setAttribute('data-open', 'false');
+    }
+    var btn = document.querySelector(
+      '[data-tile-id="' + cid + '"] .tile-btn.controls');
+    if (btn) btn.setAttribute('data-active', String(!open));
+    // Resize chart since the tile height changed
+    var rec = CHARTS[cid];
+    if (rec && rec.inst){
+      try { rec.inst.resize(); } catch(e){}
+    }
+  }
+
+  // ---- universal actions: View Data / Copy CSV / Reset ----
+
+  function _ccChartFiltered(cid){
+    var w = WIDGET_META[cid];
+    if (!w || !w.dataset_ref) return null;
+    var ds = currentDatasets[w.dataset_ref];
+    if (!ds || !ds.length) return null;
+    return applyFilters(w.dataset_ref, ds, 'chart');
+  }
+
+  function _ccViewData(cid){
+    var rows = _ccChartFiltered(cid);
+    if (!rows){
+      // Fallback to the chart's live option series .data
+      var rec = CHARTS[cid];
+      var liveOpt = rec && rec.inst && rec.inst.getOption();
+      var srs = (liveOpt && liveOpt.series) || [];
+      if (!srs.length){
+        showModal('No data', '<p>No data available for this chart.</p>');
+        return;
+      }
+      var maxLen = 0;
+      srs.forEach(function(s){
+        var d = (s && s.data) || [];
+        if (d.length > maxLen) maxLen = d.length;
+      });
+      var hdr = ['x'].concat(srs.map(function(s){
+        return (s && s.name) || '';
+      }));
+      var body = [];
+      for (var i = 0; i < maxLen; i++){
+        var row = [];
+        var any = false;
+        for (var j = 0; j < srs.length; j++){
+          var d2 = (srs[j] && srs[j].data) || [];
+          var p = d2[i];
+          if (Array.isArray(p)){
+            if (j === 0) row.push(p[0]);
+            row.push(p[1]);
+            any = true;
+          } else if (p && typeof p === 'object'){
+            if (j === 0) row.push(p.name || p.value && p.value[0]);
+            row.push(p.value != null ? p.value : null);
+            any = true;
+          } else if (p != null){
+            if (j === 0) row.push(i);
+            row.push(p);
+            any = true;
+          }
+        }
+        if (any) body.push(row);
+      }
+      _ccShowDataModal(cid, hdr, body);
+      return;
+    }
+    _ccShowDataModal(cid, rows[0], rows.slice(1));
+  }
+
+  function _ccShowDataModal(cid, header, body){
+    var w = WIDGET_META[cid] || {};
+    var title = (w.title || w.id || 'Chart') + ' - data';
+    var meta = '<div class="view-data-meta">'
+      + body.length + ' rows &middot; '
+      + header.length + ' columns'
+      + '</div>';
+    var html = ['<div class="view-data-scroll"><table class="view-data-table">'];
+    html.push('<thead><tr>');
+    header.forEach(function(h){ html.push('<th>' + _he(h) + '</th>'); });
+    html.push('</tr></thead><tbody>');
+    var maxRows = Math.min(body.length, 1000);
+    for (var i = 0; i < maxRows; i++){
+      var r = body[i];
+      html.push('<tr>');
+      for (var j = 0; j < header.length; j++){
+        var v = r[j];
+        var cell = (v == null) ? '' :
+          (typeof v === 'number' ?
+            v.toLocaleString(undefined, {maximumFractionDigits: 4})
+            : String(v));
+        html.push('<td>' + _he(cell) + '</td>');
+      }
+      html.push('</tr>');
+    }
+    html.push('</tbody></table></div>');
+    if (body.length > maxRows){
+      html.push('<div class="view-data-meta">'
+        + 'Showing first ' + maxRows + ' of ' + body.length + ' rows. '
+        + 'Use Copy CSV for the full dataset.</div>');
+    }
+    showModal(title, meta + html.join(''), {wide: true});
+  }
+
+  function _ccRowsToCsv(rows){
+    return rows.map(function(r){
+      return r.map(function(v){
+        if (v == null) return '';
+        var s = String(v);
+        if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0){
+          return '"' + s.replace(/"/g, '""') + '"';
+        }
+        return s;
+      }).join(',');
+    }).join('\n');
+  }
+  function _ccChartFilenameStem(cid){
+    var w = WIDGET_META[cid] || {};
+    var raw = w.title || w.id || cid;
+    return String(raw).replace(/[^\w\-]+/g, '_');
+  }
+  function _ccCopyCsv(cid){
+    var rows = _ccChartFiltered(cid);
+    if (!rows || !rows.length){
+      showModal('Copy CSV', '<p>No data to copy.</p>');
+      return;
+    }
+    var csv = _ccRowsToCsv(rows);
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(csv).then(function(){
+        _ccFlashAction(cid, 'copy-csv', 'Copied');
+      }, function(){
+        _ccFallbackCopy(csv);
+        _ccFlashAction(cid, 'copy-csv', 'Copied');
+      });
+    } else {
+      _ccFallbackCopy(csv);
+      _ccFlashAction(cid, 'copy-csv', 'Copied');
+    }
+  }
+  function _ccDownloadCsv(cid){
+    var rows = _ccChartFiltered(cid);
+    if (!rows || !rows.length){
+      showModal('Download CSV', '<p>No data to download.</p>');
+      return;
+    }
+    var csv = _ccRowsToCsv(rows);
+    var blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = _ccChartFilenameStem(cid) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1200);
+    _ccFlashAction(cid, 'download-csv', 'Saved');
+  }
+  function _ccDownloadPng(cid){
+    if (typeof _downloadChartPngTitled === 'function'){
+      try { _downloadChartPngTitled(cid, 2); }
+      catch(e){ showModal('Download PNG', '<p>PNG export failed.</p>'); }
+      _ccFlashAction(cid, 'download-png', 'Saved');
+      return;
+    }
+    var rec = CHARTS[cid];
+    if (!rec || !rec.inst){
+      showModal('Download PNG', '<p>Chart not initialized.</p>');
+      return;
+    }
+    var url = rec.inst.getDataURL({pixelRatio: 2,
+                                      backgroundColor: '#ffffff',
+                                      type: 'png'});
+    var a = document.createElement('a');
+    a.href = url; a.download = _ccChartFilenameStem(cid) + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    _ccFlashAction(cid, 'download-png', 'Saved');
+  }
+  function _ccDownloadXlsx(cid){
+    if (typeof XLSX === 'undefined'){
+      alert('Excel export requires the SheetJS library. Reload while ' +
+            'online so the dashboard can fetch it.');
+      return;
+    }
+    var rows = _ccChartFiltered(cid);
+    if (!rows || !rows.length){
+      showModal('Download XLSX', '<p>No data to download.</p>');
+      return;
+    }
+    var w = WIDGET_META[cid] || {};
+    var wb = XLSX.utils.book_new();
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    var sheet = String(w.title || cid).replace(/[\\\/\?\*\[\]:]/g, ' ').trim();
+    if (!sheet) sheet = 'data';
+    sheet = sheet.slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, sheet);
+    XLSX.writeFile(wb, _ccChartFilenameStem(cid) + '.xlsx');
+    _ccFlashAction(cid, 'download-xlsx', 'Saved');
+  }
+  function _ccFallbackCopy(text){
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e){}
+    document.body.removeChild(ta);
+  }
+  function _ccFlashAction(cid, action, label){
+    var btn = document.querySelector(
+      '#controls-' + cid + ' [data-cc-action="' + action + '"]');
+    if (!btn) return;
+    var orig = btn.textContent;
+    btn.textContent = label;
+    setTimeout(function(){ btn.textContent = orig; }, 1200);
+  }
+
+  function _ccReset(cid){
+    chartControlState[cid] = {series: {}};
+    var drawer = document.getElementById('controls-' + cid);
+    if (drawer){
+      drawer.setAttribute('data-populated', 'false');
+      drawer.innerHTML = '';
+      // Repopulate so dropdowns reflect reset state
+      _ccPopulateDrawer(cid);
+    }
+    // Clear the studio stats strip too (will repopulate after rerender).
+    var strip = document.getElementById('stats-' + cid);
+    if (strip) strip.innerHTML = '';
+    rerenderChart(cid);
+  }
+
   // ----- rewire a chart spec to use a shared dataset -----
   //
   // The widget was auto-wired by _augment_manifest ONLY when the chart
@@ -2474,33 +5635,58 @@ DASHBOARD_APP_JS = r"""
   function materializeOption(cid){
     var w = WIDGET_META[cid]; var base = SPECS[cid];
     var opt = JSON.parse(JSON.stringify(base));
-    if (!(w && w.dataset_ref && currentDatasets[w.dataset_ref])) return opt;
-    var filt = applyFilters(w.dataset_ref, currentDatasets[w.dataset_ref]);
-    opt.dataset = {source: filt};
-    var header = filt[0] || [];
-    (opt.series || []).forEach(function(s, i){
-      var t = s.type;
-      var isRewireable = (t === 'line' || t === 'bar'
-                          || t === 'scatter' || t === 'area');
-      if (!isRewireable) return;
-      if (s.encode) return;                // already fully specified
-      // Resolve the y dataset column. Priority:
-      //   1. `_column` hint set at build time (raw, pre-humanise col)
-      //   2. exact match of series name against header
-      //   3. positional index (x is col 0, series i -> col i+1)
-      var yIdx = -1;
-      if (s._column && header.indexOf(s._column) >= 0) {
-        yIdx = header.indexOf(s._column);
-      } else if (s.name && header.indexOf(s.name) >= 0) {
-        yIdx = header.indexOf(s.name);
-      } else {
-        yIdx = Math.min(1 + i, header.length - 1);
-      }
-      if (yIdx <= 0) yIdx = Math.min(1, header.length - 1);
-      s.encode = {x: header[0], y: header[yIdx]};
-      s.name = s.name || header[yIdx];
-      delete s.data;
-    });
+    // scatter_studio + correlation_matrix entirely rebuild their option
+    // shape inside applyChartControls (studio) or are stable (corr).
+    // The standard rewire path (encode + delete s.data) would clobber
+    // the studio's series so we skip it for that chart_type.
+    var ctMat = String(((w && w.spec) || {}).chart_type || '').toLowerCase();
+    var skipRewire = (ctMat === 'scatter_studio');
+    // Dataset rewire path: only when the widget was auto-wired with a
+    // dataset_ref (filter targets / safe rewire shapes). Charts that
+    // weren't rewired keep their inline ``series[*].data`` arrays.
+    if (!skipRewire && w && w.dataset_ref && currentDatasets[w.dataset_ref]){
+      // Chart widgets always render against the full dataset; the
+      // global dateRange filter only moves the dataZoom window. Other
+      // filter types (select / radio / numberRange / etc.) still
+      // narrow the dataset normally.
+      var filt = applyFilters(
+        w.dataset_ref, currentDatasets[w.dataset_ref], 'chart');
+      opt.dataset = {source: filt};
+      var header = filt[0] || [];
+      (opt.series || []).forEach(function(s, i){
+        var t = s.type;
+        var isRewireable = (t === 'line' || t === 'bar'
+                            || t === 'scatter' || t === 'area');
+        if (!isRewireable) return;
+        if (s.encode) return;                // already fully specified
+        // Resolve the y dataset column. Priority:
+        //   1. `_column` hint set at build time (raw, pre-humanise col)
+        //   2. exact match of series name against header
+        //   3. positional index (x is col 0, series i -> col i+1)
+        var yIdx = -1;
+        if (s._column && header.indexOf(s._column) >= 0) {
+          yIdx = header.indexOf(s._column);
+        } else if (s.name && header.indexOf(s.name) >= 0) {
+          yIdx = header.indexOf(s.name);
+        } else {
+          yIdx = Math.min(1 + i, header.length - 1);
+        }
+        if (yIdx <= 0) yIdx = Math.min(1, header.length - 1);
+        s.encode = {x: header[0], y: header[yIdx]};
+        s.name = s.name || header[yIdx];
+        delete s.data;
+      });
+    }
+    // Translate any targeting dateRange filter into the chart's
+    // dataZoom window. Charts without time-axis dataZoom (no
+    // injection happened at compile time) skip this naturally.
+    var dr = _dateRangeForChart(cid);
+    _applyChartDateZoom(opt, dr);
+    // Apply runtime per-chart controls (transforms, smoothing,
+    // y-scale, sort, stack, trendline, ...). No-op when the user
+    // hasn't touched the drawer yet. Runs whether or not the chart
+    // has a dataset_ref so transforms work on inline-data charts.
+    applyChartControls(cid, opt);
     return opt;
   }
 
@@ -2520,6 +5706,13 @@ DASHBOARD_APP_JS = r"""
     var inst = echarts.init(el, theme in PAYLOAD.themes ? theme : null);
     CHARTS[cid] = {inst: inst, datasetRef: WIDGET_META[cid].dataset_ref};
     inst.setOption(reviveFns(materializeOption(cid)), true);
+    // Studio charts: populate the stats strip on first render too.
+    var w = WIDGET_META[cid] || {};
+    var ct = String(((w && w.spec) || {}).chart_type || '').toLowerCase();
+    if (ct === 'scatter_studio'){
+      var st = chartControlState[cid];
+      _ccRenderStatsStrip(cid, (st && st._lastStudioStats) || null);
+    }
     subscribe(cid, filtersForChart(cid));
     wireBrush(cid, inst);
     wireChartClick(cid, inst);
@@ -2589,6 +5782,12 @@ DASHBOARD_APP_JS = r"""
   // table `row_click` -- simple `popup_fields` mode OR rich
   // `detail.sections[]` mode (stats / markdown / chart / table).
   //
+  // When `click_popup` is NOT set but the chart's dataset carries
+  // `field_provenance`, we synthesise a minimal default popup
+  // (clicked row's mapped fields + provenance footer) so every
+  // chart point becomes a click-to-trace surface for free. Set
+  // `click_popup: false` to suppress the default explicitly.
+  //
   // The row resolver maps ECharts click params -> dataset row across
   // chart types:
   //   line / area / multi_line / bar / scatter / candlestick / bullet
@@ -2617,26 +5816,37 @@ DASHBOARD_APP_JS = r"""
   function wireChartClickPopup(cid, inst){
     var w = WIDGET_META[cid] || {};
     var cp = w.click_popup;
-    if (!cp || typeof cp !== 'object') return;
+    // Explicit opt-out: click_popup:false suppresses the default popup
+    // even when the dataset has provenance.
+    if (cp === false) return;
     var spec = w.spec || {};
     var dsName = w.dataset_ref || spec.dataset;
     if (!dsName) return;
     var ds = (DATASETS[dsName] && DATASETS[dsName].source) || DATASETS[dsName];
     if (!Array.isArray(ds) || ds.length < 2) return;
+    var hasExplicit = (cp && typeof cp === 'object');
+    var hasProv = _datasetHasProvenance(dsName);
+    if (!hasExplicit && !hasProv && cp !== true) return;
     inst.on('click', function(params){
       if (!params || params.componentType !== 'series') return;
       // When the chart is rewireable, currentDatasets holds the
       // filter-stripped view that matches what's painted on screen;
-      // otherwise the original DATASETS entry is what we have.
+      // otherwise the original DATASETS entry is what we have. We
+      // pass 'chart' so dateRange filters stay view-only and the
+      // dataIndex coming back from ECharts indexes the same rows
+      // the chart actually rendered.
       var liveDs = currentDatasets[dsName] || ds;
       var filtered = w.dataset_ref
-        ? applyFilters(w.dataset_ref, liveDs)
+        ? applyFilters(w.dataset_ref, liveDs, 'chart')
         : liveDs;
       var header = filtered[0];
       var rows = filtered.slice(1);
       var row = _resolveClickRow(w, params, inst, header, rows);
       if (!row) return;
-      _openPopupModal(cp, header, row, null);
+      var rc = hasExplicit
+        ? cp
+        : _buildDefaultChartPopup(w, header, params);
+      _openPopupModal(rc, header, row, null, w);
     });
   }
 
@@ -2733,6 +5943,14 @@ DASHBOARD_APP_JS = r"""
   function rerenderChart(cid){
     var rec = CHARTS[cid]; if (!rec) return;
     rec.inst.setOption(reviveFns(materializeOption(cid)), true);
+    // Studio charts ship a stats strip below the canvas; populate it
+    // from the bundle stashed by _ccApplyStudio during materialize.
+    var st = chartControlState[cid];
+    var w = WIDGET_META[cid] || {};
+    var ct = String(((w && w.spec) || {}).chart_type || '').toLowerCase();
+    if (ct === 'scatter_studio'){
+      _ccRenderStatsStrip(cid, (st && st._lastStudioStats) || null);
+    }
   }
 
   // ----- brush cross-filter -----
@@ -3023,15 +6241,97 @@ DASHBOARD_APP_JS = r"""
     return resolveAgg(parts[0], parts[1], parts.slice(2).join('.'));
   }
 
+  // Compare-period delta: scan the sparkline-backed series for the
+  // most recent value, then look back N days (or to first day of
+  // year for 'ytd', or one row earlier for 'prev'). Returns
+  // {delta, pct, label} or null when the lookup can't resolve a
+  // comparison value.
+  function _kpiPeriodDelta(w, period){
+    if (!w.sparkline_source || !period) return null;
+    var sp = String(w.sparkline_source).split('.');
+    if (sp.length < 2) return null;
+    var dsName = sp[0]; var col = sp.slice(1).join('.');
+    var ds = currentDatasets[dsName] || DATASETS[dsName];
+    if (ds && ds.source) ds = ds.source;
+    if (!Array.isArray(ds) || ds.length < 2) return null;
+    var header = ds[0]; var idx = header.indexOf(col);
+    if (idx < 0) return null;
+    // Find the most likely date column.
+    var xIdx = -1;
+    for (var i = 0; i < header.length; i++){
+      var h = String(header[i]).toLowerCase();
+      if (h === 'date' || h === 'time' || h === 'timestamp'
+          || h.indexOf('date') >= 0){ xIdx = i; break; }
+    }
+    var rows = ds.slice(1);
+    if (!rows.length) return null;
+    var lastIdx = rows.length - 1;
+    var lastRow = rows[lastIdx];
+    var lastVal = lastRow[idx]; if (lastVal == null || isNaN(+lastVal)) return null;
+    lastVal = +lastVal;
+
+    if (period === 'prev'){
+      var prevIdx = lastIdx - 1;
+      while (prevIdx >= 0 && (rows[prevIdx][idx] == null
+        || isNaN(+rows[prevIdx][idx]))) prevIdx--;
+      if (prevIdx < 0) return null;
+      var pv = +rows[prevIdx][idx];
+      return {delta: lastVal - pv,
+               pct: pv !== 0 ? (lastVal - pv) / Math.abs(pv) * 100 : null,
+               label: 'vs prev'};
+    }
+    if (xIdx < 0) return null;
+    var lastT = (typeof lastRow[xIdx] === 'string')
+      ? Date.parse(lastRow[xIdx]) : +lastRow[xIdx];
+    if (!isFinite(lastT)) return null;
+
+    var DAY = 86400000;
+    var target;
+    if (period === 'ytd'){
+      var d = new Date(lastT);
+      target = Date.UTC(d.getUTCFullYear(), 0, 1);
+    } else {
+      var dayMap = {'1d': 1, '5d': 5, '1w': 7,
+                     '1m': 30, '3m': 91, '6m': 182, '1y': 365};
+      var ndays = dayMap[period];
+      if (ndays == null) return null;
+      target = lastT - ndays * DAY;
+    }
+    var bestIdx = -1;
+    for (var k = lastIdx - 1; k >= 0; k--){
+      var t = (typeof rows[k][xIdx] === 'string')
+        ? Date.parse(rows[k][xIdx]) : +rows[k][xIdx];
+      if (!isFinite(t)) continue;
+      if (t <= target){ bestIdx = k; break; }
+    }
+    if (bestIdx < 0){
+      // Use earliest available row when we don't have enough history.
+      for (var k2 = 0; k2 <= lastIdx; k2++){
+        if (rows[k2][idx] != null && !isNaN(+rows[k2][idx])){
+          bestIdx = k2; break;
+        }
+      }
+      if (bestIdx < 0) return null;
+    }
+    var bv = +rows[bestIdx][idx]; if (isNaN(bv)) return null;
+    var labelMap = {'1d': 'vs 1d', '5d': 'vs 5d', '1w': 'vs 1w',
+                     '1m': 'vs 1m', '3m': 'vs 3m', '6m': 'vs 6m',
+                     '1y': 'vs 1y', 'ytd': 'YTD'};
+    return {delta: lastVal - bv,
+             pct: bv !== 0 ? (lastVal - bv) / Math.abs(bv) * 100 : null,
+             label: labelMap[period] || ('vs ' + period)};
+  }
   function renderKpis(){
     Object.keys(WIDGET_META).forEach(function(id){
       var w = WIDGET_META[id]; if (w.widget !== 'kpi') return;
       var el = document.getElementById('kpi-' + id); if (!el) return;
+      var kst = (typeof KPI_STATE !== 'undefined') ? (KPI_STATE[id] || {}) : {};
       var value = w.value != null ? w.value : resolveSource(w.source);
       var formatted;
       if (typeof value === 'number'){
         formatted = formatNumber(value, {
-          decimals: w.decimals, format: w.format,
+          decimals: kst.decimals != null ? kst.decimals : w.decimals,
+          format: w.format,
           prefix: w.prefix || '', suffix: w.suffix || ''
         });
       } else {
@@ -3040,29 +6340,43 @@ DASHBOARD_APP_JS = r"""
       var vNode = el.querySelector('.kpi-value');
       if (vNode) vNode.textContent = formatted;
 
-      // delta: {delta: 1.2, delta_pct: 4.5, delta_label: 'vs prev'}
-      // or automatic if delta_source points to prev aggregator
+      // delta: drawer's `comparePeriod` (when set + sparkline-backed)
+      // takes priority. Falls back to declarative delta / delta_source
+      // when the drawer is on 'auto' or no sparkline is available.
       var dNode = el.querySelector('.kpi-delta');
       if (dNode){
-        var deltaVal = w.delta;
-        var deltaSrc = w.delta_source;
-        var pct = w.delta_pct;
-        if (deltaVal == null && deltaSrc){
-          var cur = (typeof value === 'number') ? value : resolveSource(w.source);
-          var prev = resolveSource(deltaSrc);
-          if (typeof cur === 'number' && typeof prev === 'number'){
-            deltaVal = cur - prev;
-            pct = prev !== 0 ? (deltaVal / Math.abs(prev)) * 100 : null;
+        var deltaVal = null;
+        var pct = null;
+        var deltaLabel = '';
+        if (kst.comparePeriod && kst.comparePeriod !== 'auto'){
+          var pd = _kpiPeriodDelta(w, kst.comparePeriod);
+          if (pd){
+            deltaVal = pd.delta; pct = pd.pct; deltaLabel = pd.label;
           }
         }
-        if (deltaVal != null){
+        if (deltaVal == null){
+          deltaVal = w.delta;
+          pct = w.delta_pct;
+          deltaLabel = w.delta_label || '';
+          var deltaSrc = w.delta_source;
+          if (deltaVal == null && deltaSrc){
+            var cur = (typeof value === 'number') ? value : resolveSource(w.source);
+            var prev = resolveSource(deltaSrc);
+            if (typeof cur === 'number' && typeof prev === 'number'){
+              deltaVal = cur - prev;
+              pct = prev !== 0 ? (deltaVal / Math.abs(prev)) * 100 : null;
+            }
+          }
+        }
+        var hide = (kst.showDelta === false);
+        if (!hide && deltaVal != null){
           dNode.classList.remove('pos','neg','flat');
           var sign = deltaVal > 0 ? 'pos' : (deltaVal < 0 ? 'neg' : 'flat');
           dNode.classList.add(sign);
           var arrow = deltaVal > 0 ? '\u25B2' : (deltaVal < 0 ? '\u25BC' : '\u25B6');
           var txt = arrow + ' ' + formatNumber(Math.abs(deltaVal), {decimals: w.delta_decimals || 2});
           if (pct != null && !isNaN(pct)) txt += ' (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)';
-          if (w.delta_label) txt += ' ' + w.delta_label;
+          if (deltaLabel) txt += ' ' + deltaLabel;
           dNode.textContent = txt;
           dNode.style.display = 'inline-flex';
         } else {
@@ -3072,26 +6386,30 @@ DASHBOARD_APP_JS = r"""
 
       // sparkline
       var sNode = el.querySelector('.kpi-sparkline');
-      if (sNode && w.sparkline_source){
-        var sp = String(w.sparkline_source).split('.');
-        if (sp.length >= 2){
-          var dsName = sp[0], col = sp.slice(1).join('.');
-          var ds = currentDatasets[dsName];
-          if (ds){
-            var header = ds[0]; var idx = header.indexOf(col);
-            var rows = ds.slice(1);
-            if (idx >= 0){
-              var data = rows.map(function(r){ return r[idx]; });
+      if (sNode){
+        var hideSpark = (kst.showSparkline === false);
+        sNode.style.display = hideSpark ? 'none' : '';
+      }
+      if (sNode && w.sparkline_source && (kst.showSparkline !== false)){
+        var sp2 = String(w.sparkline_source).split('.');
+        if (sp2.length >= 2){
+          var dsName2 = sp2[0], col2 = sp2.slice(1).join('.');
+          var ds2 = currentDatasets[dsName2];
+          if (ds2){
+            var header2 = ds2[0]; var idx2 = header2.indexOf(col2);
+            var rows2 = ds2.slice(1);
+            if (idx2 >= 0){
+              var data2 = rows2.map(function(r){ return r[idx2]; });
               if (!sNode._inst){
                 sNode._inst = echarts.init(sNode);
               }
               sNode._inst.setOption({
                 grid:{top:2,bottom:2,left:2,right:2,containLabel:false},
-                xAxis:{type:'category',show:false,data:data.map(function(_,i){return i;})},
+                xAxis:{type:'category',show:false,data:data2.map(function(_,i){return i;})},
                 yAxis:{type:'value',show:false,scale:true},
                 tooltip:{show:false},
                 animation:false,
-                series:[{type:'line',data:data,symbol:'none',
+                series:[{type:'line',data:data2,symbol:'none',
                           smooth:true,lineStyle:{width:1.6},
                           areaStyle:{opacity:0.18}}]
               }, true);
@@ -3205,11 +6523,16 @@ DASHBOARD_APP_JS = r"""
     return null;
   }
   // Table per-widget state: sort column index (null = original order),
-  // sort direction (1 = asc, -1 = desc), search string.
+  // sort direction (1 = asc, -1 = desc), search string. The drawer
+  // adds: hidden{} (col-idx -> bool), density ('regular' | 'compact'),
+  // freezeFirst (bool), decimals (null = use compile-time format).
   var TABLE_STATE = {};
   function tableState(id){
     if (!TABLE_STATE[id]){
-      TABLE_STATE[id] = {sortCol: null, sortDir: 1, search: ''};
+      TABLE_STATE[id] = {
+        sortCol: null, sortDir: 1, search: '',
+        hidden: {}, density: null, freezeFirst: false, decimals: null,
+      };
     }
     return TABLE_STATE[id];
   }
@@ -3250,7 +6573,7 @@ DASHBOARD_APP_JS = r"""
         return;
       }
       var header = ds[0];
-      var allBody = applyFilters(w.dataset_ref, ds).slice(1);
+      var allBody = applyFilters(w.dataset_ref, ds, 'table').slice(1);
       var ts = tableState(id);
 
       // Search filter
@@ -3259,10 +6582,17 @@ DASHBOARD_APP_JS = r"""
       }
 
       // Column config: if not supplied, auto-generate from header.
-      var cols = w.columns;
-      if (!cols || !cols.length){
-        cols = header.map(function(h){ return {field: h, label: h}; });
+      var allCols = w.columns;
+      if (!allCols || !allCols.length){
+        allCols = header.map(function(h){ return {field: h, label: h}; });
       }
+      // Drawer can hide columns by index (TABLE_STATE[id].hidden[i] = true).
+      // We split into "all cols + visibility map" so sort indexes stay
+      // stable even when columns are hidden, then filter to `cols`.
+      ts.hidden = ts.hidden || {};
+      var cols = allCols.filter(function(_, i){ return !ts.hidden[i]; });
+      var visIdxMap = [];
+      allCols.forEach(function(_, i){ if (!ts.hidden[i]) visIdxMap.push(i); });
       var colIndexes = cols.map(function(c){ return header.indexOf(c.field); });
       var colCompare = function(ci, dir){
         return function(a, b){
@@ -3275,13 +6605,27 @@ DASHBOARD_APP_JS = r"""
           return String(av).localeCompare(String(bv)) * dir;
         };
       };
-      if (ts.sortCol != null && colIndexes[ts.sortCol] >= 0){
-        allBody = allBody.slice().sort(colCompare(colIndexes[ts.sortCol], ts.sortDir));
+      // ts.sortCol is an index into allCols (drawer + header click both
+      // use the full list). Translate to header column for comparison.
+      if (ts.sortCol != null && allCols[ts.sortCol]){
+        var srcIdx = header.indexOf(allCols[ts.sortCol].field);
+        if (srcIdx >= 0){
+          allBody = allBody.slice().sort(colCompare(srcIdx, ts.sortDir));
+        }
       }
 
       var maxRows = w.max_rows || 100;
       var visible = allBody.slice(0, maxRows);
       var allRowsShown = allBody.length <= maxRows;
+
+      // Per-table density / decimals overrides (drawer). Density on the
+      // widget falls through if the user hasn't picked one; "compact"
+      // wins. Decimals overrides any column.format that's a number/
+      // integer/percent/currency/bps/signed/delta -- formatting falls
+      // back to the column's own format when ts.decimals is null.
+      var density = ts.density || (w.row_height === 'compact'
+        ? 'compact' : 'regular');
+      var decOverride = (ts.decimals == null) ? null : Number(ts.decimals);
 
       var html = '';
       var downloadable = w.downloadable !== false;
@@ -3302,12 +6646,23 @@ DASHBOARD_APP_JS = r"""
         }
         html += '</div>';
       }
+      // Default popup auto-fires when the table dataset carries
+      // field_provenance and no explicit row_click is set; suppress
+      // with `row_click: false`. The clickable visual cue mirrors
+      // either explicit row_click dict or a default popup we'll wire.
+      var rcExplicit = w.row_click && typeof w.row_click === 'object';
+      var rcOptOut = w.row_click === false;
+      var rcAuto = !rcExplicit && !rcOptOut
+        && w.dataset_ref && _datasetHasProvenance(w.dataset_ref);
+      var rowClickActive = !!(rcExplicit || rcAuto);
       html += '<table class="data-table' +
-              (w.row_height === 'compact' ? ' compact' : '') +
-              (w.row_click ? ' clickable' : '') +
+              (density === 'compact' ? ' compact' : '') +
+              (ts.freezeFirst ? ' freeze-first-col' : '') +
+              (rowClickActive ? ' clickable' : '') +
               '"><thead><tr>';
 
-      cols.forEach(function(c, ci){
+      cols.forEach(function(c, vi){
+        var ci = visIdxMap[vi]; // index into allCols (drawer-stable)
         var lbl = c.label != null ? c.label : c.field;
         var align = c.align || (c.format && /^(number|integer|percent|currency|bps|signed|delta)/.test(c.format) ? 'right' : 'left');
         var tip = c.tooltip ? ' title="' + _he(c.tooltip) + '"' : '';
@@ -3340,14 +6695,28 @@ DASHBOARD_APP_JS = r"""
         return null;
       }
 
+      // When the drawer's "Decimals" override is set, splice it into
+      // the column format string -- e.g. "number:2" + override(0) ->
+      // "number:0", "percent:1" + override(3) -> "percent:3", etc.
+      // Non-numeric formats (text/date/datetime/link) are left alone.
+      function _applyDecOverride(fmt){
+        if (decOverride == null) return fmt;
+        if (!fmt) return 'number:' + decOverride;
+        var parts = String(fmt).split(':');
+        var kind = parts[0];
+        if (/^(number|integer|percent|currency|bps|signed|delta)$/.test(kind)){
+          return kind + ':' + decOverride;
+        }
+        return fmt;
+      }
       visible.forEach(function(row, ri){
         var hlClass = _pickRowHL(row);
         var rowCls = hlClass ? ' class="row-hl-' + hlClass + '"' : '';
         html += '<tr' + rowCls + ' data-row-idx="' + ri + '" data-tid="' + id + '">';
-        cols.forEach(function(c, ci){
-          var hi = colIndexes[ci];
+        cols.forEach(function(c, vi){
+          var hi = colIndexes[vi];
           var v = hi >= 0 ? row[hi] : null;
-          var txt = formatValue(v, c.format);
+          var txt = formatValue(v, _applyDecOverride(c.format));
           var align = c.align || (c.format && /^(number|integer|percent|currency|bps|signed|delta)/.test(c.format) ? 'right' : 'left');
           var styleParts = ['text-align:' + align];
           // Conditional formatting
@@ -3409,8 +6778,10 @@ DASHBOARD_APP_JS = r"""
           renderTables();
         });
       });
-      // Wire row click -> popup modal
-      if (w.row_click){
+      // Wire row click -> popup modal. openRowModal picks the right
+      // popup config (explicit row_click dict OR auto default
+      // built from field_provenance).
+      if (rowClickActive){
         el.querySelectorAll('tbody tr').forEach(function(tr){
           tr.addEventListener('click', function(){
             var idx = Number(tr.dataset.rowIdx);
@@ -3426,6 +6797,202 @@ DASHBOARD_APP_JS = r"""
     return String(s == null ? '' : s)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  // ----- provenance: data lineage for click popups -----
+  //
+  // Datasets may carry `field_provenance` (per-column lineage) and
+  // `row_provenance` (per-entity overrides keyed by the value of
+  // `row_provenance_field`). Each provenance entry is a free-form
+  // dict that should at minimum carry `system` (e.g. "haver",
+  // "market_data", "plottool", "fred", "bloomberg", "computed",
+  // "csv") and `symbol` (canonical identifier in that system),
+  // plus optional `display_name`, `units`, `source_label`,
+  // `recipe`, `as_of`, etc.
+  //
+  // PRISM is responsible for cleaning upstream metadata into this
+  // shape -- the compiler does NOT introspect df.attrs or autoload
+  // anything. See README 3.6.
+  function _datasetWrapper(dsName){
+    var ds = DATASETS[dsName];
+    if (!ds || typeof ds !== 'object' || Array.isArray(ds)) return null;
+    return ds;
+  }
+  function _datasetHasProvenance(dsName){
+    var ds = _datasetWrapper(dsName);
+    if (!ds) return false;
+    var fp = ds.field_provenance;
+    if (fp && typeof fp === 'object'){
+      for (var k in fp){
+        if (Object.prototype.hasOwnProperty.call(fp, k)) return true;
+      }
+    }
+    return false;
+  }
+  function _rowKeyValueFor(dsName, header, row){
+    var ds = _datasetWrapper(dsName);
+    if (!ds) return null;
+    var rpf = ds.row_provenance_field;
+    if (!rpf) return null;
+    var ki = header.indexOf(rpf);
+    if (ki < 0) return null;
+    return row[ki];
+  }
+  function _rowKeyValueForRowMap(dsName, rowMap){
+    var ds = _datasetWrapper(dsName);
+    if (!ds || !rowMap) return null;
+    var rpf = ds.row_provenance_field;
+    if (!rpf) return null;
+    return rowMap[rpf];
+  }
+  // Resolve provenance for (dataset, column, optional row key).
+  // Row override wins over the column default; missing is null.
+  function _provenanceForCol(dsName, colName, rowKeyValue){
+    var ds = _datasetWrapper(dsName);
+    if (!ds || !colName) return null;
+    var fp = ds.field_provenance || {};
+    var rp = ds.row_provenance || {};
+    var base = fp[colName] || null;
+    var override = null;
+    if (rowKeyValue != null){
+      var perRow = rp[String(rowKeyValue)];
+      if (perRow) override = perRow[colName] || null;
+    }
+    if (!base && !override) return null;
+    var merged = {};
+    if (base){
+      for (var k in base){
+        if (Object.prototype.hasOwnProperty.call(base, k)) merged[k] = base[k];
+      }
+    }
+    if (override){
+      for (var k2 in override){
+        if (Object.prototype.hasOwnProperty.call(override, k2)) merged[k2] = override[k2];
+      }
+    }
+    return merged;
+  }
+  // Pick the most specific symbol the provenance carries. Order
+  // matters: caller-supplied `symbol` wins over system-specific
+  // alt keys when both are present.
+  function _provenancePrimarySymbol(p){
+    if (!p) return null;
+    return p.symbol || p.coordinate || p.expression
+      || p.haver_code || p.tsdb_symbol || p.fred_series
+      || p.bloomberg_ticker || p.refinitiv_ric || null;
+  }
+  // Compact one-liner for inline source attribution under a stat.
+  // Format: "<symbol> &middot; <source_label or system>".
+  function _provenanceInlineString(p){
+    if (!p) return '';
+    var sym = _provenancePrimarySymbol(p);
+    var src = p.source_label || p.system || '';
+    var bits = [];
+    if (sym) bits.push('<code>' + _he(sym) + '</code>');
+    if (src) bits.push(_he(src));
+    return bits.join(' &middot; ');
+  }
+  // Render a single <tr> for the provenance footer table.
+  function _provenanceFooterRowHTML(label, prov){
+    var sym = _provenancePrimarySymbol(prov);
+    var bits = [];
+    if (sym) bits.push('<code>' + _he(sym) + '</code>');
+    if (prov.system && prov.system !== prov.source_label){
+      bits.push('<span class="prov-system">' + _he(prov.system) + '</span>');
+    }
+    if (prov.source_label) bits.push(_he(prov.source_label));
+    if (prov.recipe) bits.push('<em>' + _he(prov.recipe) + '</em>');
+    if (prov.units) bits.push('<span class="prov-units">' + _he(prov.units) + '</span>');
+    var rowLabel = prov.display_name || label;
+    return '<tr><th>' + _he(rowLabel) + '</th>'
+      + '<td>' + bits.join(' &middot; ') + '</td></tr>';
+  }
+  // Render the provenance footer for a popup. `fields` is the list
+  // of columns the popup body referenced (string field names or
+  // `{field, label?}` dicts); when null, every dataset column with
+  // provenance is shown. Returns '' when there's nothing to show or
+  // the popup explicitly opted out via `rc.show_provenance: false`.
+  function _renderProvenanceFooterFor(rc, header, row, w, fields){
+    if (rc && rc.show_provenance === false) return '';
+    if (!w) return '';
+    var dsName = w.dataset_ref || (w.spec && w.spec.dataset);
+    if (!dsName) return '';
+    var ds = _datasetWrapper(dsName);
+    if (!ds) return '';
+    var rowKey = _rowKeyValueFor(dsName, header, row);
+    var seen = {};
+    var ordered = [];
+    function addField(f){
+      var fname = (typeof f === 'string') ? f : (f && f.field);
+      if (!fname || seen[fname]) return;
+      seen[fname] = 1;
+      var label = (f && typeof f === 'object' && f.label != null)
+        ? f.label : fname;
+      var prov = _provenanceForCol(dsName, fname, rowKey);
+      if (!prov) return;
+      ordered.push({label: label, prov: prov});
+    }
+    if (fields && fields.length){
+      fields.forEach(addField);
+    } else {
+      header.forEach(addField);
+    }
+    if (!ordered.length) return '';
+    var rows = ordered.map(function(e){
+      return _provenanceFooterRowHTML(e.label, e.prov);
+    });
+    return '<div class="provenance-footer">'
+      + '<div class="detail-section-title">Sources</div>'
+      + '<table class="modal-detail-table provenance-table">'
+      + rows.join('')
+      + '</table></div>';
+  }
+  // Build a synthetic popup config for charts that don't declare one
+  // but whose dataset carries provenance. The auto popup picks the
+  // mapped axes so a click on a multi-line / scatter / pie still
+  // opens with the relevant context.
+  function _buildDefaultChartPopup(w, header, params){
+    var spec = (w && w.spec) || {};
+    var m = spec.mapping || {};
+    var fields = [];
+    function add(f){
+      if (!f) return;
+      if (Array.isArray(f)){ f.forEach(add); return; }
+      if (fields.indexOf(f) < 0 && header.indexOf(f) >= 0) fields.push(f);
+    }
+    if (m.x) add(m.x);
+    if (m.date) add(m.date);
+    if (m.category) add(m.category);
+    if (m.name) add(m.name);
+    if (m.y){
+      if (Array.isArray(m.y)){
+        var clicked = params && params.seriesName;
+        if (clicked && m.y.indexOf(clicked) >= 0) add(clicked);
+        else m.y.forEach(add);
+      } else add(m.y);
+    }
+    if (m.value) add(m.value);
+    if (m.color && fields.indexOf(m.color) < 0) add(m.color);
+    if (!fields.length) fields = header.slice();
+    var titleField = m.category || m.name || m.x || m.date || fields[0] || null;
+    return {
+      auto: true,
+      title_field: titleField,
+      popup_fields: fields,
+    };
+  }
+  // Build a synthetic popup for tables with no row_click but whose
+  // dataset carries provenance. Uses every column so the click opens
+  // the full row + provenance footer.
+  function _buildDefaultTablePopup(w, header, cols){
+    var titleField = (cols && cols.length && cols[0] && cols[0].field)
+      ? cols[0].field
+      : (header && header.length ? header[0] : null);
+    return {
+      auto: true,
+      title_field: titleField,
+      popup_fields: header ? header.slice() : null,
+    };
   }
 
   // ----- popup modal (table row_click + chart click_popup) -----
@@ -3448,13 +7015,22 @@ DASHBOARD_APP_JS = r"""
   //      key value, so you can embed a per-entity time series,
   //      yield curve, etc.
   //
+  // The provenance footer (driven by dataset `field_provenance`) is
+  // auto-appended to both modes when present. Suppress per-popup
+  // with `rc.show_provenance: false`.
+  //
   // `cols` is the table widget's column config (per-column format
   // hints, used as a fallback when popup_fields entries are bare
   // field-name strings). Pass `null` for chart click popups.
+  // `w` (optional) is the originating widget; needed to resolve the
+  // dataset reference for the provenance footer.
   function openRowModal(w, header, row, cols){
-    _openPopupModal(w.row_click || {}, header, row, cols);
+    var rc = (w.row_click && typeof w.row_click === 'object')
+      ? w.row_click
+      : _buildDefaultTablePopup(w, header, cols);
+    _openPopupModal(rc, header, row, cols, w);
   }
-  function _openPopupModal(rc, header, row, cols){
+  function _openPopupModal(rc, header, row, cols, w){
     if (!rc || typeof rc !== 'object') return;
     var title = '';
     if (rc.title_field){
@@ -3476,7 +7052,7 @@ DASHBOARD_APP_JS = r"""
     }
 
     if (rc.detail && rc.detail.sections){
-      openRichRowModal(rc, title, subtitle, header, row, cols);
+      openRichRowModal(rc, title, subtitle, header, row, cols, w);
       return;
     }
 
@@ -3520,6 +7096,10 @@ DASHBOARD_APP_JS = r"""
       body += '<div class="modal-extra">' + String(rc.extra_content) + '</div>';
     }
 
+    // Auto-append provenance footer (suppressed by rc.show_provenance:false).
+    var provHtml = _renderProvenanceFooterFor(rc, header, row, w, showFields);
+    if (provHtml) body += provHtml;
+
     showModal(title || 'Details', body, {subtitle: subtitle, wide: false});
   }
 
@@ -3533,7 +7113,7 @@ DASHBOARD_APP_JS = r"""
     });
   }
 
-  function openRichRowModal(rc, title, subtitle, header, row, cols){
+  function openRichRowModal(rc, title, subtitle, header, row, cols, w){
     var detail = rc.detail || {};
     var sections = detail.sections || [];
     var rowMap = {};
@@ -3543,11 +7123,16 @@ DASHBOARD_APP_JS = r"""
     // after the modal HTML is in the DOM.
     var chartJobs = [];
     var parts = [];
+    var sectionFields = [];  // accumulated for the provenance footer
 
     sections.forEach(function(sec, si){
       var sType = (sec.type || '').toLowerCase();
       if (sType === 'stats'){
-        parts.push(_renderDetailStats(sec, rowMap, header, cols));
+        parts.push(_renderDetailStats(sec, rowMap, header, cols, w));
+        (sec.fields || []).forEach(function(f){
+          var fn = (typeof f === 'string') ? f : (f && f.field);
+          if (fn) sectionFields.push(fn);
+        });
       } else if (sType === 'markdown'){
         parts.push(_renderDetailMarkdown(sec, header, row));
       } else if (sType === 'chart'){
@@ -3563,10 +7148,17 @@ DASHBOARD_APP_JS = r"""
       } else if (sType === 'table'){
         parts.push(_renderDetailTable(sec, rowMap, header, row));
       } else if (sType === 'kv' || sType === 'kv_table'){
-        // Simple key/value inline
         parts.push(_renderDetailKV(sec, header, row, cols));
+        (sec.fields || header).forEach(function(f){ sectionFields.push(f); });
       }
     });
+
+    // Auto-append provenance footer using the union of fields the
+    // rich modal references (stats + kv). Suppressed per-popup with
+    // rc.show_provenance:false. Empty footer suppresses itself.
+    var provHtml = _renderProvenanceFooterFor(rc, header, row, w,
+                     sectionFields.length ? sectionFields : null);
+    if (provHtml) parts.push(provHtml);
 
     showModal(title || 'Details', parts.join('\n'),
                 {subtitle: subtitle, wide: detail.wide !== false});
@@ -3578,10 +7170,14 @@ DASHBOARD_APP_JS = r"""
     }, 0);
   }
 
-  function _renderDetailStats(sec, rowMap, header, cols){
+  function _renderDetailStats(sec, rowMap, header, cols, w){
+    // `f.show_source: true` adds an inline subline beneath the stat
+    // value rendering "<symbol> &middot; <source>" pulled from the
+    // dataset's field_provenance. Cheaper than the full footer when
+    // the caller wants per-stat attribution inline.
+    var dsName = w ? (w.dataset_ref || (w.spec && w.spec.dataset)) : null;
+    var rowKey = dsName ? _rowKeyValueForRowMap(dsName, rowMap) : null;
     var items = (sec.fields || []).map(function(f){
-      // Accept plain string ("ticker") or {field, label, format,
-      // prefix, suffix}.
       if (typeof f === 'string') f = {field: f};
       var v = rowMap[f.field];
       var lbl = f.label != null ? f.label : f.field;
@@ -3599,13 +7195,27 @@ DASHBOARD_APP_JS = r"""
         if (f.signed_color && v > 0) cls += ' pos';
         else if (f.signed_color && v < 0) cls += ' neg';
       }
+      var subHtml = '';
+      if (f.sub){
+        subHtml = '<div class="detail-stat-sub">'
+          + _he(_expandRowTemplate(f.sub, header,
+              header.map(function(h){ return rowMap[h]; })))
+          + '</div>';
+      }
+      if (f.show_source && dsName){
+        var prov = _provenanceForCol(dsName, f.field, rowKey);
+        if (prov){
+          var srcLine = _provenanceInlineString(prov);
+          if (srcLine){
+            subHtml += '<div class="detail-stat-src">'
+              + srcLine + '</div>';
+          }
+        }
+      }
       return '<div class="' + cls + '">'
         + '<div class="detail-stat-label">' + _he(lbl) + '</div>'
         + '<div class="detail-stat-value">' + text + '</div>'
-        + (f.sub ? '<div class="detail-stat-sub">'
-                    + _he(_expandRowTemplate(f.sub, header,
-                        header.map(function(h){ return rowMap[h]; })))
-                    + '</div>' : '')
+        + subHtml
         + '</div>';
     });
     var title = sec.title
@@ -4210,21 +7820,15 @@ DASHBOARD_APP_JS = r"""
   }
   window.downloadChartPngTitled = _downloadChartPngTitled;
 
-  // ----- per-tile fullscreen + export -----
+  // ----- per-tile controls -----
   function wireTileActions(){
     document.querySelectorAll('.tile').forEach(function(tile){
       var id = tile.dataset.tileId;
-      var fs = tile.querySelector('.tile-btn.fullscreen');
-      if (fs){
-        fs.addEventListener('click', function(){
-          tile.classList.toggle('is-fullscreen');
-          var c = CHARTS[id]; if (c) { setTimeout(function(){ c.inst.resize(); }, 120); }
-        });
-      }
-      var dl = tile.querySelector('.tile-btn.download');
-      if (dl){
-        dl.addEventListener('click', function(){
-          _downloadChartPngTitled(id, 2);
+      // Chart controls drawer toggle (three-dots icon, rightmost).
+      var cc = tile.querySelector('.tile-btn.controls');
+      if (cc){
+        cc.addEventListener('click', function(){
+          if (id) _ccToggleDrawer(id);
         });
       }
     });
@@ -4405,7 +8009,7 @@ DASHBOARD_APP_JS = r"""
     var ds = w.dataset_ref ? currentDatasets[w.dataset_ref] : null;
     if (!ds || !ds.length) return null;
     var header = ds[0];
-    var body = applyFilters(w.dataset_ref, ds).slice(1);
+    var body = applyFilters(w.dataset_ref, ds, 'table').slice(1);
     var ts = (typeof TABLE_STATE !== 'undefined' && TABLE_STATE[id])
               ? TABLE_STATE[id] : null;
     if (ts && ts.search){
@@ -4637,7 +8241,11 @@ DASHBOARD_APP_JS = r"""
   });
 
   window.DASHBOARD = { manifest: MANIFEST, charts: CHARTS,
-                        filters: filterState, datasets: currentDatasets };
+                        filters: filterState, datasets: currentDatasets,
+                        chartControlState: chartControlState,
+                        tableState: TABLE_STATE,
+                        kpiState: KPI_STATE,
+                        specs: SPECS };
 })();
 """
 
@@ -4686,10 +8294,33 @@ def _render_filter_controls(filters: List[Dict[str, Any]],
 
     for f in filters:
         fid = f["id"]
-        label = f.get("label", fid)
         ftype = f.get("type")
         default = f.get("default", "")
+        # dateRange filters in their default view-mode set the initial
+        # dataZoom window across every chart they target. Charts ship
+        # with their own slider + scroll/pinch zoom so the global
+        # dropdown is a "default view" knob, not a data filter. Make
+        # the label honest about that even when the manifest didn't
+        # set one (otherwise PRISM-emitted ids like "dt" or "fs_dt"
+        # leak into the UI as cryptic labels).
+        is_view_date = (
+            ftype == "dateRange"
+            and (f.get("mode") or "view") == "view"
+        )
+        if "label" in f and f["label"] is not None:
+            label = f["label"]
+        elif is_view_date:
+            label = "Initial range"
+        else:
+            label = fid
         desc = f.get("description") or f.get("help") or f.get("info")
+        if is_view_date and not desc:
+            desc = (
+                "Sets the initial visible window for every time-series "
+                "chart on this dashboard. Each chart can also be zoomed "
+                "or panned independently using its built-in slider, "
+                "scroll wheel, or drag handles."
+            )
         lbl = _label_html(label, desc, f.get("popup"))
         if ftype == "dateRange":
             options = ["1M", "3M", "6M", "YTD", "1Y", "2Y", "5Y", "All"]
@@ -4697,8 +8328,9 @@ def _render_filter_controls(filters: List[Dict[str, Any]],
                 f"<option value=\"{o}\"{' selected' if str(default) == o else ''}>{o}</option>"
                 for o in options
             )
+            extra_cls = " filter-view" if is_view_date else ""
             out.append(
-                f"<div class=\"filter-item\">{lbl}"
+                f"<div class=\"filter-item daterange{extra_cls}\">{lbl}"
                 f"<select id=\"filter-{fid}\">{opts_html}</select></div>"
             )
         elif ftype in ("select", "multiSelect"):
@@ -4799,14 +8431,66 @@ def _render_filter_controls(filters: List[Dict[str, Any]],
     return "\n".join(out)
 
 
+def _table_toolbar_buttons(w: Dict[str, Any]) -> str:
+    """Toolbar buttons for a table tile.
+
+    Today the only entry is the controls drawer toggle (three-dots
+    glyph) -- mirrors :func:`_chart_toolbar_buttons` so the markup
+    and JS wiring stay the same as for chart tiles. Suppressed when
+    ``table_controls`` is False on the widget.
+    """
+    if w.get("table_controls") is False:
+        return ""
+    controls_btn = (
+        '<button class="tile-btn controls" title="Table controls" '
+        'data-controls-toggle aria-label="Toggle table controls">'
+        '<span class="tile-btn-glyph">&#x22EE;</span></button>'
+    )
+    return (
+        "<div class=\"tile-actions\">"
+        + controls_btn
+        + "</div>"
+    )
+
+
+def _kpi_toolbar_buttons(w: Dict[str, Any]) -> str:
+    """Toolbar buttons for a KPI tile.
+
+    KPIs get the same three-dots affordance as charts and tables when
+    they have anything to expose (delta source, sparkline, dataset
+    binding for view/download). Suppressed when ``kpi_controls`` is
+    False on the widget.
+    """
+    if w.get("kpi_controls") is False:
+        return ""
+    controls_btn = (
+        '<button class="tile-btn controls" title="KPI controls" '
+        'data-controls-toggle aria-label="Toggle KPI controls">'
+        '<span class="tile-btn-glyph">&#x22EE;</span></button>'
+    )
+    return (
+        "<div class=\"tile-actions\">"
+        + controls_btn
+        + "</div>"
+    )
+
+
 def _chart_toolbar_buttons(w: Dict[str, Any]) -> str:
     """Toolbar buttons for a chart tile.
 
-    Includes built-in PNG / fullscreen buttons and any custom
-    ``action_buttons`` the widget defines. Each custom button is a
-    dict ``{label, onclick?, href?, icon?, title?}``. `onclick` names
-    a global JS function (wired via ``window.<name>``); `href` opens a
-    new tab. Unknown entries are skipped.
+    Layout (left -> right):
+
+      1. any custom ``action_buttons`` the widget defines
+      2. controls drawer toggle (three-dots glyph) -- rightmost
+
+    Each ``action_buttons`` entry is a dict ``{label, onclick?, href?,
+    icon?, title?}``. ``onclick`` names a global JS function (wired
+    via ``window.<name>``); ``href`` opens a new tab. Unknown entries
+    are skipped.
+
+    Setting ``spec.chart_controls = False`` (or the same on the widget)
+    suppresses the controls drawer toggle. Bulk PNG export is handled
+    by the dashboard-level "Download PNGs" header button.
     """
     extra: List[str] = []
     for btn in w.get("action_buttons") or []:
@@ -4839,13 +8523,33 @@ def _chart_toolbar_buttons(w: Dict[str, Any]) -> str:
                 f'<button class="{cls}" title="{title}" disabled>'
                 f'{label}</button>'
             )
+    # The "Controls" button toggles the per-chart controls drawer
+    # below the title. The drawer is populated lazily in JS at chart
+    # init time so it can introspect the lowered option (chart_type,
+    # series, axes) and only render the knobs that apply to this
+    # chart shape. The button is suppressed when ``chart_controls``
+    # is explicitly disabled on the spec.
+    show_controls = True
+    spec = w.get("spec") if isinstance(w.get("spec"), dict) else {}
+    if spec.get("chart_controls") is False:
+        show_controls = False
+    if w.get("chart_controls") is False:
+        show_controls = False
+    controls_btn = (
+        '<button class="tile-btn controls" title="Chart controls" '
+        'data-controls-toggle aria-label="Toggle chart controls">'
+        '<span class="tile-btn-glyph">&#x22EE;</span></button>'
+        if show_controls else ""
+    )
+    # Toolbar order: custom action_buttons followed by the controls
+    # drawer toggle (rightmost). The dashboard-level "Download PNGs"
+    # button in the header covers PNG export for the whole dashboard;
+    # per-tile PNG download was redundant and removed.
     return (
         "<div class=\"tile-actions\">"
         + "".join(extra)
-        + "<button class=\"tile-btn download\" title=\"PNG 2x\">PNG</button>"
-        "<button class=\"tile-btn fullscreen\" title=\"Fullscreen\">"
-        "&#x26F6;</button>"
-        "</div>"
+        + controls_btn
+        + "</div>"
     )
 
 
@@ -4952,6 +8656,41 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
     if wt == "chart":
         height = int(w.get("h_px", 280))
         cls = _tile_class(w, "tile chart-tile")
+        # The controls drawer container is always emitted; the JS
+        # populates it lazily on first toggle and the CSS hides it
+        # by default. We tag it with the widget id so click handlers
+        # can route directly. Suppressed when chart_controls is off
+        # (skip the empty container so the layout is unchanged).
+        spec_obj = w.get("spec") if isinstance(w.get("spec"), dict) else {}
+        controls_off = (
+            spec_obj.get("chart_controls") is False
+            or w.get("chart_controls") is False
+        )
+        controls_div = (
+            f"  <div class=\"chart-controls\" "
+            f"id=\"controls-{_html_escape(wid)}\" "
+            f"data-chart-id=\"{_html_escape(wid)}\" "
+            f"data-open=\"false\" "
+            f"data-populated=\"false\"></div>\n"
+            if not controls_off else ""
+        )
+        # Studio charts get a stats strip below the canvas. The runtime
+        # populates it from the bundle stashed by _ccApplyStudio after
+        # every materializeOption() call. Hidden for non-studio charts
+        # (the element is omitted entirely).
+        is_studio = (spec_obj.get("chart_type") == "scatter_studio")
+        studio_cfg = (
+            isinstance(spec_obj.get("studio"), dict)
+            and spec_obj["studio"]
+        ) or {}
+        show_stats_strip = (
+            is_studio and studio_cfg.get("show_stats", True) is not False
+        )
+        stats_strip_div = (
+            f"    <div class=\"tile-stats-strip\" "
+            f"id=\"stats-{_html_escape(wid)}\"></div>\n"
+            if show_stats_strip else ""
+        )
         return (
             f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
             f"style=\"{style}\">"
@@ -4959,9 +8698,11 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
             f"    {_tile_title_html(w)}"
             f"    {_chart_toolbar_buttons(w)}"
             f"  </div>"
+            f"{controls_div}"
             f"  <div class=\"tile-body\">"
             f"    <div id=\"chart-{_html_escape(wid)}\" class=\"chart-div\" "
             f"style=\"height:{height}px\"></div>"
+            f"{stats_strip_div}"
             f"  </div>"
             f"  {_tile_footer_html(w)}"
             f"</div>"
@@ -4985,10 +8726,23 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
                 cls="tile-info tile-info-kpi",
             )
         cls = _tile_class(w, "tile kpi-tile")
+        kpi_toolbar = _kpi_toolbar_buttons(w)
+        controls_off = w.get("kpi_controls") is False
+        controls_div = (
+            f'<div class="chart-controls kpi-controls" '
+            f'id="controls-{_html_escape(wid)}" '
+            f'data-kpi-id="{_html_escape(wid)}" '
+            f'data-open="false" data-populated="false"></div>'
+            if not controls_off else ""
+        )
         return (
             f"<div class=\"{cls}\" id=\"kpi-{_html_escape(wid)}\" "
             f"data-tile-id=\"{_html_escape(wid)}\" style=\"{style}\">"
+            f"<div class=\"kpi-header\">"
             f"<div class=\"kpi-label\">{_html_escape(label)}{info_html}</div>"
+            f"{kpi_toolbar}"
+            f"</div>"
+            f"{controls_div}"
             f"<div class=\"kpi-value\">{_html_escape(val)}</div>"
             f"<div class=\"kpi-delta\" style=\"display:none\"></div>"
             f"{sub_html}"
@@ -4999,12 +8753,29 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
 
     if wt == "table":
         cls = _tile_class(w, "tile table-tile")
+        # Tables get the same controls drawer pattern as charts. Off
+        # by default for legacy parity; opt out per widget via
+        # `table_controls: false` (matches `chart_controls: false`).
+        controls_off = w.get("table_controls") is False
+        toolbar_html = (
+            _table_toolbar_buttons(w) if not controls_off else ""
+        )
+        controls_div = (
+            f"  <div class=\"chart-controls\" "
+            f"id=\"controls-{_html_escape(wid)}\" "
+            f"data-table-id=\"{_html_escape(wid)}\" "
+            f"data-open=\"false\" "
+            f"data-populated=\"false\"></div>\n"
+            if not controls_off else ""
+        )
         return (
             f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
             f"style=\"{style}\">"
             f"  <div class=\"tile-header\">"
             f"    {_tile_title_html(w)}"
+            f"    {toolbar_html}"
             f"  </div>"
+            f"{controls_div}"
             f"  <div class=\"tile-body\" id=\"table-{_html_escape(wid)}\"></div>"
             f"  {_tile_footer_html(w)}"
             f"</div>"

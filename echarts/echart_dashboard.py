@@ -34,7 +34,12 @@ Example: JSON-first (PRISM's preferred shape)
         ]}
       },
       "filters": [
-        {"id": "dt", "type": "dateRange", "default": "6M",
+        # dateRange in view-mode (default): sets the initial dataZoom
+        # window on every targeted chart. Charts always render full
+        # history; tables and KPIs that target this filter still get
+        # real row-level filtering. Default label is "Initial range"
+        # when none is supplied.
+        {"id": "lookback", "type": "dateRange", "default": "6M",
          "targets": ["*"], "field": "date"}
       ],
       "layout": {
@@ -67,7 +72,7 @@ Example: Python builder
 
     db = (Dashboard(id="rates_monitor", title="Rates monitor")
           .add_dataset("rates", rates_df)
-          .add_filter(GlobalFilter(id="dt", type="dateRange",
+          .add_filter(GlobalFilter(id="lookback", type="dateRange",
                                     default="6M", targets=["*"]))
           .add_row([
               ChartRef(id="curve", w=12,
@@ -127,9 +132,18 @@ VALID_TABLE_FORMATS = {
 
 VALID_CHART_TYPES = {
     "line", "multi_line", "bar", "bar_horizontal", "scatter", "scatter_multi",
-    "area", "heatmap", "pie", "donut", "boxplot", "histogram", "bullet",
+    "scatter_studio", "area", "heatmap", "correlation_matrix",
+    "pie", "donut", "boxplot", "histogram", "bullet",
     "sankey", "treemap", "sunburst", "graph", "candlestick", "radar",
     "gauge", "calendar_heatmap", "funnel", "parallel_coords", "tree",
+}
+
+# Aggregators recognised by the KPI / stat_grid runtime resolver.
+# MUST mirror the ``resolveAgg`` switch in rendering.py's dashboard JS;
+# any divergence produces silent ``--`` placeholders that don't fire a
+# diagnostic. The JS implementation is pinned via TestKPIResolution.
+VALID_KPI_AGGREGATORS = {
+    "latest", "first", "sum", "mean", "min", "max", "count", "prev",
 }
 
 
@@ -274,6 +288,64 @@ def validate_manifest(manifest: Dict[str, Any]) -> Tuple[bool, List[str]]:
             continue
         if not isinstance(ds["source"], list):
             errs.append(_err(f"datasets.{name}.source", "must be a list"))
+
+        # Optional per-column provenance: maps column name -> provenance dict
+        # ({system, symbol, display_name, units, source_label, ...}). Light-
+        # touch shape check only -- the inner keys are intentionally free-
+        # form so PRISM can carry whatever the upstream data system emits
+        # (haver_code, tsdb_symbol, fred_series, bloomberg_ticker, computed
+        # recipe, etc.) without us needing to enumerate every system. See
+        # the provenance contract in README 3.6.
+        fp = ds.get("field_provenance")
+        if fp is not None:
+            if not isinstance(fp, dict):
+                errs.append(_err(
+                    f"datasets.{name}.field_provenance",
+                    "must be a dict mapping column name -> provenance dict "
+                    "(e.g. {\"UST10Y\": {\"system\": \"market_data\", "
+                    "\"symbol\": \"IR_USD_Treasury_10Y_Rate\", ...}})"
+                ))
+            else:
+                for col, prov in fp.items():
+                    if not isinstance(prov, dict):
+                        errs.append(_err(
+                            f"datasets.{name}.field_provenance.{col}",
+                            "must be a dict; got "
+                            f"{type(prov).__name__}"
+                        ))
+
+        # Optional per-row provenance overrides. `row_provenance_field`
+        # names a column whose cell value keys into `row_provenance`,
+        # which is a dict <row_key> -> {<column_name>: <provenance_dict>}.
+        # Use this when an entity-keyed table mixes sources per row
+        # (e.g. one bond pulled from Bloomberg, another from market_data).
+        rpf = ds.get("row_provenance_field")
+        if rpf is not None and not isinstance(rpf, str):
+            errs.append(_err(
+                f"datasets.{name}.row_provenance_field",
+                "must be a string column name"
+            ))
+        rp = ds.get("row_provenance")
+        if rp is not None:
+            if not isinstance(rp, dict):
+                errs.append(_err(
+                    f"datasets.{name}.row_provenance",
+                    "must be a dict <row_key> -> {<col>: <provenance_dict>}"
+                ))
+            else:
+                for key, overrides in rp.items():
+                    if not isinstance(overrides, dict):
+                        errs.append(_err(
+                            f"datasets.{name}.row_provenance.{key}",
+                            "must be a dict <col> -> provenance dict"
+                        ))
+                        continue
+                    for col, prov in overrides.items():
+                        if not isinstance(prov, dict):
+                            errs.append(_err(
+                                f"datasets.{name}.row_provenance.{key}.{col}",
+                                "must be a dict"
+                            ))
 
     dataset_names = set(datasets.keys())
 
@@ -461,12 +533,16 @@ def validate_manifest(manifest: Dict[str, Any]) -> Tuple[bool, List[str]]:
                         errs.append(_err(f"{wbase}.dataset_ref",
                                            f"dataset '{dsr}' not declared in manifest.datasets"))
                     click_popup = w.get("click_popup")
-                    if click_popup is not None and not isinstance(click_popup, dict):
+                    if click_popup is not None and not isinstance(
+                        click_popup, (dict, bool)
+                    ):
                         errs.append(_err(
                             f"{wbase}.click_popup",
-                            "must be a dict when present (mirrors table 'row_click' "
-                            "shape: title_field, subtitle_template, popup_fields, "
-                            "or detail.sections[])"
+                            "must be a dict, or boolean false to suppress the "
+                            "default provenance popup; got "
+                            f"{type(click_popup).__name__}. Dict shape mirrors "
+                            "table 'row_click': title_field, subtitle_template, "
+                            "popup_fields, or detail.sections[]"
                         ))
                 elif wt == "kpi":
                     for req in ("label",):
@@ -542,9 +618,15 @@ def validate_manifest(manifest: Dict[str, Any]) -> Tuple[bool, List[str]]:
                                                     f"unknown palette '{p}'"
                                                 ))
                     row_click = w.get("row_click")
-                    if row_click is not None and not isinstance(row_click, dict):
-                        errs.append(_err(f"{wbase}.row_click",
-                                           "must be a dict when present"))
+                    if row_click is not None and not isinstance(
+                        row_click, (dict, bool)
+                    ):
+                        errs.append(_err(
+                            f"{wbase}.row_click",
+                            "must be a dict, or boolean false to suppress the "
+                            "default provenance popup; got "
+                            f"{type(row_click).__name__}"
+                        ))
                 elif wt == "stat_grid":
                     stats = w.get("stats")
                     if not isinstance(stats, list) or not stats:
@@ -1016,14 +1098,45 @@ class Dashboard:
 
     # ----- datasets -----
 
-    def add_dataset(self, name: str, df_or_source: Any, *,
-                     field_types: Optional[Dict[str, str]] = None) -> "Dashboard":
-        """Add a shared dataset to the manifest. Accepts either a pandas
-        DataFrame (converted to a [header, ...rows] array) or a raw list."""
+    def add_dataset(
+        self,
+        name: str,
+        df_or_source: Any,
+        *,
+        field_types: Optional[Dict[str, str]] = None,
+        field_provenance: Optional[Dict[str, Dict[str, Any]]] = None,
+        row_provenance_field: Optional[str] = None,
+        row_provenance: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None,
+    ) -> "Dashboard":
+        """Add a shared dataset to the manifest.
+
+        Accepts either a pandas DataFrame (converted to a [header, ...rows]
+        array) or a raw list.
+
+        The optional ``field_provenance`` / ``row_provenance_field`` /
+        ``row_provenance`` arguments record the data lineage that flows into
+        the dashboard's click popups (default + explicit) and source
+        attribution footer. The compiler does NOT introspect ``df.attrs``;
+        PRISM is expected to clean the upstream metadata into the canonical
+        provenance shape and pass it explicitly here. See README 3.6 and the
+        skill file for the contract.
+
+        ``field_provenance`` shape: ``{column_name: {system, symbol,
+        display_name?, units?, source_label?, ...}}``. Keys other than
+        ``system`` and ``symbol`` are free-form so PRISM can carry whatever
+        fits the upstream system (haver_code, tsdb_symbol, fred_series,
+        bloomberg_ticker, computed recipe, etc.).
+        """
         source = _dataset_source(df_or_source)
         self.datasets[name] = {"source": source}
         if field_types:
             self.datasets[name]["field_types"] = dict(field_types)
+        if field_provenance:
+            self.datasets[name]["field_provenance"] = dict(field_provenance)
+        if row_provenance_field:
+            self.datasets[name]["row_provenance_field"] = str(row_provenance_field)
+        if row_provenance:
+            self.datasets[name]["row_provenance"] = dict(row_provenance)
         return self
 
     def add_dataset_inline(self, name: str, rows: List[List[Any]]) -> "Dashboard":
@@ -1355,6 +1468,12 @@ def _augment_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
     # KPIs referencing the same dataset_ref.
     def _is_safe_for_rewire(chart_type: Optional[str],
                               mapping: Dict[str, Any]) -> bool:
+        # scatter_studio + correlation_matrix recompute their entire
+        # series shape from the filtered dataset rows on the JS side
+        # (scatter_studio) or rebuild the cell list from a stable column
+        # whitelist (correlation_matrix). Both are safe to auto-wire.
+        if chart_type in {"scatter_studio", "correlation_matrix"}:
+            return True
         if chart_type not in {"line", "bar", "area", "multi_line"}:
             return False
         if mapping.get("color") or mapping.get("colour"):
@@ -1363,8 +1482,9 @@ def _augment_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
             return False
         if mapping.get("stack") is True:
             return False
-        if mapping.get("dual_axis_series"):
-            # Dual-axis multi_line keeps wide-form compatibility; allow.
+        if mapping.get("dual_axis_series") or mapping.get("axes"):
+            # Dual-axis (legacy) and N-axis (canonical) multi_line still
+            # use wide-form data so client-side filter reshape is safe.
             return chart_type == "multi_line"
         return True
 
@@ -1664,8 +1784,21 @@ def _spec_to_option(
         subtitle=spec.get("subtitle"),
     )
 
+    # scatter_studio: ``spec.studio`` is sibling to ``spec.mapping`` for
+    # readability (it describes the studio behavior, not column mappings),
+    # but the builder takes a single ``mapping`` dict. Merge under
+    # ``mapping["studio"]`` here so the builder sees both.
+    mapping_for_builder = dict(mapping)
+    if chart_type == "scatter_studio":
+        if isinstance(spec.get("studio"), dict):
+            existing = (mapping.get("studio")
+                          if isinstance(mapping.get("studio"), dict) else {})
+            merged = dict(existing)
+            merged.update(spec["studio"])
+            mapping_for_builder["studio"] = merged
+
     builder = _BUILDER_DISPATCH[chart_type]
-    opt = builder(df, dict(mapping), ctx)
+    opt = builder(df, mapping_for_builder, ctx)
 
     spec_annotations = spec.get("annotations")
     mapping_annotations = mapping.get("annotations")
@@ -2063,6 +2196,113 @@ def _apply_post_build_polish(opt: Dict[str, Any],
             # tick labels run to 4 or 5 digits on the right side.
             g["right"] = max(int(g.get("right", 24) or 24), 56)
 
+    # Default in-chart zoom for time-axis charts. Every chart ships with
+    # a draggable slider + scroll/pinch zoom so users can scrub the
+    # x-axis directly inside the chart instead of relying on a global
+    # "lookback" dropdown to chop the data. The slider sits below the
+    # grid and is bumped up when the chart already has bottom padding
+    # (legend at bottom, x-axis title, etc.) so it doesn't collide.
+    #
+    # Opt-out: ``spec.chart_zoom = False`` (or ``mapping.chart_zoom``)
+    # disables the auto-injection. Builders that already wrote their
+    # own ``dataZoom`` (candlestick) are left alone.
+    chart_zoom_opt = spec.get("chart_zoom")
+    if chart_zoom_opt is None:
+        chart_zoom_opt = mapping.get("chart_zoom")
+    _inject_default_chart_zoom(opt, chart_zoom_opt)
+
+
+def _inject_default_chart_zoom(opt: Dict[str, Any],
+                                  chart_zoom_opt: Any) -> None:
+    """Inject inside + slider dataZoom for time-axis charts.
+
+    Skip when:
+      * ``chart_zoom_opt`` is explicitly False
+      * ``opt`` already declares its own dataZoom (e.g. candlestick)
+      * the chart has no time-typed xAxis (heatmaps, pies, polar shapes)
+      * the chart uses a non-cartesian coordinate system (radar, polar)
+
+    The slider is sized to clear the grid bottom; we bump the grid's
+    bottom padding when needed so the slider doesn't overlap the
+    x-axis tick labels.
+    """
+    if chart_zoom_opt is False:
+        return
+    if "dataZoom" in opt:
+        return
+
+    x_axis = opt.get("xAxis")
+    if x_axis is None:
+        return
+    axes_list = x_axis if isinstance(x_axis, list) else [x_axis]
+    time_axis_indices = [
+        i for i, ax in enumerate(axes_list)
+        if isinstance(ax, dict) and ax.get("type") == "time"
+    ]
+    if not time_axis_indices:
+        return
+
+    # Slider sits ~28px tall at bottom: 18px control + 10px breathing
+    # room. Push the grid up if its bottom padding would clash.
+    slider_height = 18
+    slider_bottom = 10
+    slider_total = slider_height + slider_bottom + 14  # 14px clearance
+
+    grid = opt.get("grid")
+    if isinstance(grid, dict):
+        grids = [grid]
+    elif isinstance(grid, list):
+        grids = grid
+    else:
+        grids = []
+    for g in grids:
+        if not isinstance(g, dict):
+            continue
+        cur = g.get("bottom")
+        try:
+            cur_n = int(cur) if cur is not None else 0
+        except (TypeError, ValueError):
+            cur_n = 0
+        if cur_n < slider_total:
+            g["bottom"] = slider_total
+
+    opt["dataZoom"] = [
+        {
+            "type": "inside",
+            "xAxisIndex": time_axis_indices,
+            "zoomLock": False,
+            "moveOnMouseMove": True,
+            "preventDefaultMouseMove": False,
+        },
+        {
+            "type": "slider",
+            "xAxisIndex": time_axis_indices,
+            "height": slider_height,
+            "bottom": slider_bottom,
+            "borderColor": "transparent",
+            "fillerColor": "rgba(26,54,93,0.08)",
+            "handleStyle": {"color": "#1a365d", "borderColor": "#1a365d"},
+            "moveHandleStyle": {"color": "#1a365d", "opacity": 0.45},
+            "selectedDataBackground": {
+                "lineStyle": {"color": "#1a365d", "opacity": 0.45},
+                "areaStyle": {"color": "#1a365d", "opacity": 0.10},
+            },
+            "dataBackground": {
+                "lineStyle": {"color": "#94a3b8", "opacity": 0.45},
+                "areaStyle": {"color": "#94a3b8", "opacity": 0.10},
+            },
+            "labelFormatter": (
+                "function(v){"
+                " var d = new Date(v);"
+                " if (isNaN(d.getTime())) return v;"
+                " var m = ['Jan','Feb','Mar','Apr','May','Jun',"
+                " 'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];"
+                " return m + ' ' + d.getFullYear();"
+                "}"
+            ),
+        },
+    ]
+
 
 def _empty_placeholder_option(reason: str) -> Dict[str, Any]:
     """Minimal ECharts option used as a fallback when a chart's spec
@@ -2265,6 +2505,12 @@ _COLUMN_REF_KEYS = {
     "low", "high", "open", "close", "date",
     "strokeDash", "id", "parent", "labels",
     "dims", "path", "series", "node",
+    # bullet chart: x is current value, x_low/x_high are the range
+    "x_low", "x_high", "color_by", "label",
+    # scatter_studio + correlation_matrix mapping keys
+    "columns", "order_by", "label_column",
+    "x_columns", "y_columns", "color_columns", "size_columns",
+    "x_default", "y_default", "color_default", "size_default",
 }
 
 # Required mapping keys per chart_type. Mirrors the builder's own
@@ -2278,12 +2524,17 @@ _REQUIRED_MAPPING_KEYS: Dict[str, Tuple[str, ...]] = {
     "bar_horizontal": ("x", "y"),
     "scatter": ("x", "y"),
     "scatter_multi": ("x", "y"),
+    "scatter_studio": (),  # all author keys are optional (defaults derived)
     "area": ("x", "y"),
     "heatmap": ("x", "y", "value"),
+    "correlation_matrix": ("columns",),
     "pie": ("category", "value"),
     "donut": ("category", "value"),
     "histogram": ("x",),
-    "bullet": ("value",),
+    # bullet chart is "rates-RV style": for each row, draw the (low,
+    # high) range and put a marker at the current value. The required
+    # mapping keys mirror :func:`echart_studio.build_bullet`.
+    "bullet": ("y", "x", "x_low", "x_high"),
     "sankey": ("source", "target", "value"),
     "candlestick": ("x", "open", "high", "low", "close"),
     "calendar_heatmap": ("date", "value"),
@@ -2310,12 +2561,81 @@ _REQUIRED_MAPPING_KEYS_ANY_OF: Dict[str, List[Tuple[str, ...]]] = {
     "sunburst": [("path", "value"), ("name", "parent", "value")],
 }
 
-# Mapping keys whose referenced column should be numeric (floats / ints /
-# convertible). A non-numeric column here typically means the chart
-# silently degenerates to the wrong axis type or a flat line.
-_NUMERIC_COLUMN_REF_KEYS = {
+# Mapping keys whose referenced column should be numeric, per chart_type.
+# This used to be a single global set, but several chart_types put
+# categorical data on what's traditionally a "numeric" axis -- e.g.
+# bar_horizontal puts the category labels on `y` and the bar lengths
+# on `x`; heatmap puts categories on both axes and the magnitude on
+# `value`. The old global rule fired false-positive
+# `chart_mapping_column_non_numeric` errors on these and blocked
+# strict-mode compile of perfectly valid manifests. We now resolve
+# the numeric mapping keys per chart_type via :func:`_numeric_keys_for`.
+
+# Default rule for the majority of chart_types: y / value-shaped keys
+# are numeric, x / category-shaped keys are not. Used as the fallback
+# when a chart_type isn't in the override table below.
+_NUMERIC_KEYS_DEFAULT: frozenset = frozenset({
     "y", "value", "size", "weight", "low", "high", "open", "close",
+})
+
+# Per-chart-type overrides. The set is the FULL list of numeric mapping
+# keys for that chart_type (not additive over the default). Chart_types
+# that match the default don't appear here.
+_NUMERIC_KEYS_BY_CHART_TYPE: Dict[str, frozenset] = {
+    # Horizontal bar: bar length is x, the category label is y
+    "bar_horizontal": frozenset({"x", "size", "weight"}),
+    # Heatmap: x and y are categorical buckets; value is the
+    # magnitude shown via color. Same goes for correlation_matrix
+    # (which is a heatmap of NxN correlation coefficients).
+    "heatmap": frozenset({"value", "size", "weight"}),
+    "correlation_matrix": frozenset({"value", "size", "weight"}),
+    # Calendar heatmap: date and value; category-style date isn't
+    # numeric but we don't enforce date-ness here.
+    "calendar_heatmap": frozenset({"value"}),
+    # Pie/donut/funnel/radar: the category is a label, value is
+    # numeric.
+    "pie":    frozenset({"value", "size", "weight"}),
+    "donut":  frozenset({"value", "size", "weight"}),
+    "funnel": frozenset({"value", "size", "weight"}),
+    "radar":  frozenset({"value", "size", "weight"}),
+    # Tree / treemap / sunburst: hierarchy is name+parent (categorical),
+    # value is numeric.
+    "tree":     frozenset({"value", "size", "weight"}),
+    "treemap":  frozenset({"value", "size", "weight"}),
+    "sunburst": frozenset({"value", "size", "weight"}),
+    # Sankey: source and target are node labels; value is the flow
+    # magnitude.
+    "sankey": frozenset({"value", "size", "weight"}),
+    # Graph: source and target are node ids; weight is the edge weight.
+    "graph": frozenset({"value", "weight", "size"}),
+    # Gauge: a single number on a scale.
+    "gauge":  frozenset({"value", "low", "high"}),
+    # Bullet (rates-RV style): x is the current value, x_low / x_high
+    # the range bounds. y is the categorical row label (NOT numeric).
+    "bullet": frozenset({"x", "x_low", "x_high", "value"}),
+    # Histogram: x is binned, may or may not be numeric (we accept
+    # both).
+    "histogram": frozenset({"y", "value", "size", "weight"}),
+    # Scatter studio: arbitrary column picker, every offered column
+    # must be numeric. correlation_matrix uses the same `columns` key.
+    "scatter_studio": frozenset({
+        "columns", "x_columns", "y_columns", "size_columns",
+        "x_default", "y_default", "size_default",
+        "x", "y", "value", "size", "weight",
+    }),
+    # parallel_coords: dims is the list of dimension columns, all
+    # numeric.
+    "parallel_coords": frozenset({"dims", "value"}),
 }
+
+
+def _numeric_keys_for(chart_type: Optional[str]) -> frozenset:
+    """Return the set of mapping keys that must reference a numeric
+    column for ``chart_type``. Falls back to the default ``y/value``
+    set when the chart_type isn't in the override table."""
+    if chart_type and chart_type in _NUMERIC_KEYS_BY_CHART_TYPE:
+        return _NUMERIC_KEYS_BY_CHART_TYPE[chart_type]
+    return _NUMERIC_KEYS_DEFAULT
 
 
 @dataclass
@@ -2385,13 +2705,45 @@ def _nan_fraction(ser) -> float:
     return float(pd.isna(ser).mean())
 
 
-def _walk_column_refs(mapping: Dict[str, Any]) -> List[Tuple[str, str]]:
+# Per-chart-type EXCLUSIONS from the column-ref check. The default
+# universe of column-ref keys is :data:`_COLUMN_REF_KEYS` -- broad
+# enough to cover most chart types. Some chart types repurpose certain
+# keys as labels / config (e.g. gauge.mapping.name is the gauge title,
+# not a column). Keys listed here for a chart_type are NOT treated as
+# column references when the validator walks that chart's mapping.
+_NON_COLUMN_REF_KEYS_BY_CHART_TYPE: Dict[str, frozenset] = {
+    # gauge: 'name' is the gauge label rendered inside the dial.
+    # 'value' may be a literal number or a column.
+    "gauge": frozenset({"name"}),
+    # bullet: 'name' (when used) is a label, not a column.
+    "bullet": frozenset({"name"}),
+    # radar: 'name' is the radar series legend label, not a column.
+    "radar": frozenset({"name"}),
+}
+
+
+def _walk_column_refs(
+    mapping: Dict[str, Any],
+    chart_type: Optional[str] = None,
+) -> List[Tuple[str, str]]:
     """Return [(mapping_key, column_name), ...] for every column-reference
     in a chart mapping. Handles both string values and list-of-string
-    values. Skips non-string non-list values (those are config flags)."""
+    values. Skips non-string non-list values (those are config flags).
+
+    ``chart_type`` is consulted to filter out keys that are NOT column
+    references for that chart_type even though they appear in the
+    universal :data:`_COLUMN_REF_KEYS` set (e.g. ``gauge.mapping.name``
+    is a label, not a column). Defaults to the full set when
+    ``chart_type`` is None or unknown.
+    """
     out: List[Tuple[str, str]] = []
+    excluded = _NON_COLUMN_REF_KEYS_BY_CHART_TYPE.get(
+        chart_type or "", frozenset()
+    )
     for k, v in (mapping or {}).items():
         if k not in _COLUMN_REF_KEYS:
+            continue
+        if k in excluded:
             continue
         if isinstance(v, str):
             out.append((k, v))
@@ -2604,7 +2956,7 @@ def _check_chart_widget(w: Dict[str, Any], path: str,
                                f"a column in available_columns.")}))
 
     # Column existence / NaN coverage / numericity ---------------------
-    refs = _walk_column_refs(mapping)
+    refs = _walk_column_refs(mapping, chart_type)
     for key, col in refs:
         if col not in df.columns:
             ctx = {"mapping_key": key, "missing_column": col,
@@ -2645,7 +2997,7 @@ def _check_chart_widget(w: Dict[str, Any], path: str,
                            "dataset": ds_name,
                            "nan_fraction": round(nan_frac, 3),
                            "row_count": len(df)}))
-        if (key in _NUMERIC_COLUMN_REF_KEYS
+        if (key in _numeric_keys_for(chart_type)
                 and not _series_is_numeric(ser)):
             samples = [str(v) for v in ser.dropna().head(3).tolist()]
             out.append(Diagnostic(
@@ -2657,6 +3009,7 @@ def _check_chart_widget(w: Dict[str, Any], path: str,
                          f"non-numeric."),
                 context={"mapping_key": key, "column": col,
                            "dataset": ds_name,
+                           "chart_type": chart_type,
                            "sample_values": samples,
                            "fix_hint": (
                                f"Coerce '{col}' to numeric upstream "
@@ -2971,42 +3324,188 @@ def _check_table_widget(w: Dict[str, Any], path: str,
     return out
 
 
+def _parse_kpi_source(
+    src: str, kind: str
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Split a KPI / stat_grid source string into ``(ds, agg, col, error)``.
+
+    ``kind`` selects the format expected by the JS runtime:
+
+    * ``"value"`` (used by ``source`` / ``delta_source``) is
+      ``dataset.aggregator.column`` -- exactly 3+ dot-separated parts.
+      The column is the last segment and may contain dots itself.
+      Mirrors ``resolveSource`` in rendering.py's dashboard JS.
+    * ``"sparkline"`` (used by ``sparkline_source``) is
+      ``dataset.column`` -- 2+ dot-separated parts. The column is the
+      tail; no aggregator is applied (the sparkline plots all rows).
+
+    On failure ``error`` is a short reason; on success it is None.
+    """
+    if not isinstance(src, str) or not src.strip():
+        return None, None, None, "source must be a non-empty string"
+    parts = src.split(".")
+    if kind == "value":
+        if len(parts) < 3:
+            return None, None, None, (
+                "value source needs 3+ parts "
+                "'dataset.aggregator.column' "
+                f"(got {len(parts)})"
+            )
+        return parts[0], parts[1], ".".join(parts[2:]), None
+    if kind == "sparkline":
+        if len(parts) < 2:
+            return None, None, None, (
+                "sparkline source needs 2+ parts "
+                "'dataset.column' "
+                f"(got {len(parts)})"
+            )
+        return parts[0], None, ".".join(parts[1:]), None
+    raise ValueError(f"unknown kpi source kind: {kind}")
+
+
+def _resolve_kpi_value(
+    src: str, dfs: Dict[str, Any]
+) -> Tuple[Optional[float], Optional[str]]:
+    """Mirror of the JS ``resolveSource`` + ``resolveAgg``: return the
+    numeric value the runtime would compute, or ``(None, reason)`` if
+    the source cannot resolve.
+
+    The JS runtime renders ``--`` whenever this would return None, so
+    this is the single source of truth for the diagnostic check that
+    decides whether a KPI tile will be broken in production.
+    """
+    ds_name, agg, col, err = _parse_kpi_source(src, "value")
+    if err is not None:
+        return None, err
+    df = dfs.get(ds_name)
+    if df is None:
+        return None, f"dataset '{ds_name}' not declared"
+    if col not in df.columns:
+        return None, (f"column '{col}' not in dataset "
+                       f"'{ds_name}'")
+    if agg not in VALID_KPI_AGGREGATORS:
+        return None, (f"aggregator '{agg}' not in "
+                       f"{sorted(VALID_KPI_AGGREGATORS)}")
+    import pandas as pd
+    coerced = pd.to_numeric(df[col], errors="coerce")
+    vals = coerced.dropna().tolist()
+    if not vals:
+        return None, (f"column '{col}' has no numeric values "
+                       f"(after to_numeric coercion)")
+    if agg == "latest":
+        return float(vals[-1]), None
+    if agg == "first":
+        return float(vals[0]), None
+    if agg == "sum":
+        return float(sum(vals)), None
+    if agg == "mean":
+        return float(sum(vals) / len(vals)), None
+    if agg == "min":
+        return float(min(vals)), None
+    if agg == "max":
+        return float(max(vals)), None
+    if agg == "count":
+        return float(len(vals)), None
+    if agg == "prev":
+        return float(vals[-2] if len(vals) >= 2 else vals[-1]), None
+    return None, f"aggregator '{agg}' has no implementation"
+
+
 def _check_kpi_widget(w: Dict[str, Any], path: str,
                         dfs: Dict[str, Any]) -> List[Diagnostic]:
-    """KPI source-binding diagnostics. Three sources can be set:
-    `source` (the value), `delta_source` (the change indicator), and
-    `sparkline_source` (the inline mini-line). Each is checked
-    independently; sparkline gets an additional length check because a
-    sparkline with <2 points is not a line at all.
+    """KPI source-binding diagnostics. A KPI tile renders ``--`` in the
+    browser whenever ``value`` is missing AND ``source`` cannot resolve
+    to a number. We flag every path that ends in ``--`` as an error
+    severity diagnostic; that lets ``compile_dashboard(strict=True)``
+    refuse to publish a dashboard with a broken headline number.
+
+    Three independent sources can be set:
+
+    * ``source`` (the displayed value) -- ``dataset.aggregator.column``
+    * ``delta_source`` (vs-prev indicator) -- same format as ``source``
+    * ``sparkline_source`` (inline mini-line) -- ``dataset.column``
+
+    Failure modes covered:
+
+    * Tile has neither ``value`` nor ``source`` -> ``kpi_no_value_no_source``
+    * Source format is wrong shape -> ``kpi_source_malformed``
+    * Source dataset is undeclared -> ``kpi_source_dataset_unknown``
+    * Source column is not in dataset -> ``kpi_source_column_missing``
+    * Source aggregator is unknown -> ``kpi_source_aggregator_unknown``
+    * Source column has no numeric values -> ``kpi_source_no_numeric_values``
+    * Source column is all-NaN -> ``kpi_source_no_numeric_values`` (subset)
+    * Sparkline column has <2 numeric points -> ``kpi_sparkline_too_short``
     """
     import pandas as pd
     out: List[Diagnostic] = []
     wid = w.get("id")
+
+    # ---- presence check: must have value OR source ------------------
+    has_value = ("value" in w) and (w.get("value") is not None)
+    has_source = bool(w.get("source"))
+    if not has_value and not has_source:
+        out.append(Diagnostic(
+            severity="error", code="kpi_no_value_no_source",
+            widget_id=wid, path=path,
+            message=(f"kpi '{wid}' has neither 'value' nor 'source'; "
+                     f"the tile will render '--' and the user will "
+                     f"see a broken headline number."),
+            context={"fix_hint": (
+                "Set 'value' to a literal number (or string), or set "
+                "'source' to 'dataset.aggregator.column' to pull the "
+                "value from a dataset at runtime.")}))
+
+    # ``value="--"`` (or any string sentinel) renders verbatim. Treat
+    # the literal "--" sentinel as a hard error -- it's never what the
+    # author wanted to display.
+    if has_value and isinstance(w.get("value"), str) and \
+            w["value"].strip() in ("--", "—", "n/a", "N/A"):
+        out.append(Diagnostic(
+            severity="error", code="kpi_value_is_placeholder",
+            widget_id=wid, path=f"{path}.value",
+            message=(f"kpi '{wid}' value={w['value']!r} is a "
+                     f"placeholder string; the tile will literally "
+                     f"display the placeholder."),
+            context={"value": w["value"],
+                       "fix_hint": (
+                           "Pass a real number/string, or remove "
+                           "'value' and bind 'source' instead.")}))
+
+    # ---- per-source bind checks -------------------------------------
+    # When ``value`` is set, the JS runtime uses it directly and skips
+    # ``source`` resolution entirely (see ``renderKpis`` in
+    # rendering.py). So a broken ``source`` on a KPI with an explicit
+    # ``value`` is dead config -- we still validate ``delta_source``
+    # and ``sparkline_source`` because those are independently
+    # consumed regardless of ``value``.
     sources = [
-        ("source", w.get("source")),
-        ("delta_source", w.get("delta_source")),
-        ("sparkline_source", w.get("sparkline_source")),
+        ("source", w.get("source"), "value"),
+        ("delta_source", w.get("delta_source"), "value"),
+        ("sparkline_source", w.get("sparkline_source"), "sparkline"),
     ]
-    for key, src in sources:
+    for key, src, kind in sources:
         if not src or not isinstance(src, str):
             continue
-        # Source format is "dataset.column" or "dataset.column.aggregator"
-        parts = src.split(".")
-        if len(parts) < 2:
+        # Skip the main ``source`` validation if ``value`` overrides it
+        if key == "source" and has_value:
+            continue
+
+        ds_name, agg, col, parse_err = _parse_kpi_source(src, kind)
+        if parse_err is not None:
+            example = ("dataset.aggregator.column" if kind == "value"
+                       else "dataset.column")
             out.append(Diagnostic(
                 severity="error", code="kpi_source_malformed",
                 widget_id=wid, path=f"{path}.{key}",
-                message=(f"kpi '{wid}' {key}='{src}' must be "
-                         f"'dataset.column' or 'dataset.column.agg'."),
-                context={key: src,
+                message=(f"kpi '{wid}' {key}={src!r} is malformed: "
+                         f"{parse_err}."),
+                context={key: src, "expected_format": example,
+                           "valid_aggregators": sorted(
+                               VALID_KPI_AGGREGATORS),
                            "fix_hint": (
-                               f"Use the form 'dataset.column' (or "
-                               f"'dataset.column.aggregator' where "
-                               f"aggregator in last/first/min/max/mean/"
-                               f"sum). Got '{src}'.")}))
+                               f"Rewrite as '{example}'.")}))
             continue
-        ds_name = parts[0]
-        col_name = parts[1]
+
         if ds_name not in dfs:
             ds_suggestions = _did_you_mean(ds_name, sorted(dfs.keys()))
             ctx: Dict[str, Any] = {
@@ -3026,62 +3525,295 @@ def _check_kpi_widget(w: Dict[str, Any], path: str,
             out.append(Diagnostic(
                 severity="error", code="kpi_source_dataset_unknown",
                 widget_id=wid, path=f"{path}.{key}",
-                message=(f"kpi '{wid}' {key}='{src}' references "
+                message=(f"kpi '{wid}' {key}={src!r} references "
                          f"unknown dataset '{ds_name}'."),
                 context=ctx))
             continue
+
         df = dfs[ds_name]
-        if col_name not in df.columns:
+
+        # value-format only: agg must be in the allow-list
+        if kind == "value" and agg not in VALID_KPI_AGGREGATORS:
+            agg_suggestions = _did_you_mean(
+                agg, sorted(VALID_KPI_AGGREGATORS)
+            )
+            ctx = {key: src, "aggregator": agg,
+                    "valid_aggregators": sorted(VALID_KPI_AGGREGATORS)}
+            if agg_suggestions:
+                ctx["did_you_mean"] = agg_suggestions
+                ctx["fix_hint"] = (
+                    f"Did you mean '{agg_suggestions[0]}'? "
+                    f"Aggregator must be one of "
+                    f"{sorted(VALID_KPI_AGGREGATORS)}.")
+            else:
+                ctx["fix_hint"] = (
+                    f"Replace '{agg}' with one of "
+                    f"{sorted(VALID_KPI_AGGREGATORS)}.")
+            out.append(Diagnostic(
+                severity="error", code="kpi_source_aggregator_unknown",
+                widget_id=wid, path=f"{path}.{key}",
+                message=(f"kpi '{wid}' {key}={src!r} uses unknown "
+                         f"aggregator '{agg}'; the runtime will "
+                         f"return null and the tile will render '--'."),
+                context=ctx))
+            continue
+
+        if col not in df.columns:
             ctx = {key: src, "dataset": ds_name,
-                    "missing_column": col_name,
+                    "missing_column": col,
                     "available_columns": list(df.columns)}
             ctx.update(_suggest_for_missing_column(
-                col_name, list(df.columns)))
+                col, list(df.columns)))
             out.append(Diagnostic(
                 severity="error", code="kpi_source_column_missing",
                 widget_id=wid, path=f"{path}.{key}",
-                message=(f"kpi '{wid}' {key}='{src}' references "
-                         f"column '{col_name}' which is not in "
-                         f"dataset '{ds_name}'."),
+                message=(f"kpi '{wid}' {key}={src!r} references "
+                         f"column '{col}' which is not in dataset "
+                         f"'{ds_name}'."),
                 context=ctx))
             continue
-        if _all_nan(df[col_name]):
+
+        # Numeric-content check. JS resolveAgg keeps only ``typeof v
+        # === 'number'`` rows; a string-only column resolves to null
+        # and the tile shows ``--``. We coerce-then-count so a column
+        # of strings like "1.23" still passes (matches the runtime
+        # path in resolveAgg, which uses raw JS number values from
+        # the JSON dataset).
+        coerced = pd.to_numeric(df[col], errors="coerce")
+        n_valid = int(coerced.notna().sum())
+        if n_valid == 0:
+            samples = [str(v) for v in df[col].head(3).tolist()]
             out.append(Diagnostic(
-                severity="warning", code="kpi_source_column_all_nan",
+                severity="error",
+                code="kpi_source_no_numeric_values",
                 widget_id=wid, path=f"{path}.{key}",
-                message=(f"kpi '{wid}' {key}='{src}' column "
-                         f"'{col_name}' is all-NaN; the tile will "
-                         f"display '--'."),
+                message=(f"kpi '{wid}' {key}={src!r} column "
+                         f"'{col}' has 0 numeric values "
+                         f"(out of {len(df)} rows); the tile will "
+                         f"render '--'."),
                 context={key: src, "dataset": ds_name,
-                           "column": col_name,
+                           "column": col, "row_count": len(df),
+                           "sample_values": samples,
                            "fix_hint": (
-                               "Repopulate the column upstream, or "
-                               "point this source at a different "
-                               "column with data.")}))
+                               f"Repopulate the column upstream with "
+                               f"numeric values, or point at a "
+                               f"different column. Got non-numeric "
+                               f"samples: {samples}.")}))
             continue
+
         # Sparkline-specific: a 'line' of <2 points isn't a line.
-        if key == "sparkline_source":
-            n_valid = int(pd.to_numeric(
-                df[col_name], errors="coerce"
-            ).notna().sum())
-            if n_valid < 2:
-                out.append(Diagnostic(
-                    severity="warning",
-                    code="kpi_sparkline_too_short",
-                    widget_id=wid, path=f"{path}.{key}",
-                    message=(f"kpi '{wid}' sparkline_source='{src}' "
-                             f"has only {n_valid} numeric value(s); "
-                             f"the sparkline will be empty or a dot."),
-                    context={key: src, "dataset": ds_name,
-                               "column": col_name,
-                               "valid_value_count": n_valid,
-                               "row_count": len(df),
-                               "fix_hint": (
-                                   "Sparklines need >=2 points. Either "
-                                   "drop sparkline_source on this KPI or "
-                                   "point at a column with more "
-                                   "history.")}))
+        # Severity stays as warning -- the sparkline is purely
+        # cosmetic, the headline number still resolves.
+        if kind == "sparkline" and n_valid < 2:
+            out.append(Diagnostic(
+                severity="warning",
+                code="kpi_sparkline_too_short",
+                widget_id=wid, path=f"{path}.{key}",
+                message=(f"kpi '{wid}' sparkline_source={src!r} "
+                         f"has only {n_valid} numeric value(s); "
+                         f"the sparkline will be empty or a dot."),
+                context={key: src, "dataset": ds_name,
+                           "column": col,
+                           "valid_value_count": n_valid,
+                           "row_count": len(df),
+                           "fix_hint": (
+                               "Sparklines need >=2 points. Either "
+                               "drop sparkline_source on this KPI or "
+                               "point at a column with more "
+                               "history.")}))
     return out
+
+
+def _check_stat_grid_widget(w: Dict[str, Any], path: str,
+                              dfs: Dict[str, Any]) -> List[Diagnostic]:
+    """Per-stat source-binding diagnostics for a ``stat_grid`` widget.
+
+    The widget is server-rendered: every stat's ``value`` is baked into
+    the HTML at compile time (no JS resolves anything). So a stat with
+    ``source`` set but no ``value`` will silently render as ``--``
+    unless the compiler resolves the source to a real number first
+    (see :func:`_resolve_stat_grid_sources`). The diagnostic mirrors
+    the KPI checks so authors get the same actionable hints.
+    """
+    out: List[Diagnostic] = []
+    wid = w.get("id")
+    stats = w.get("stats")
+    if not isinstance(stats, list):
+        return out
+    for si, st in enumerate(stats):
+        if not isinstance(st, dict):
+            continue
+        stat_path = f"{path}.stats[{si}]"
+        has_value = ("value" in st) and (st.get("value") is not None)
+        src = st.get("source")
+        has_source = bool(src) and isinstance(src, str)
+        if not has_value and not has_source:
+            out.append(Diagnostic(
+                severity="error", code="stat_grid_no_value_no_source",
+                widget_id=wid, path=stat_path,
+                message=(
+                    f"stat_grid '{wid}' stats[{si}] (label="
+                    f"{st.get('label')!r}) has neither 'value' nor "
+                    f"'source'; the cell will render '--'."),
+                context={"fix_hint": (
+                    "Set 'value' to a literal, or set 'source' to "
+                    "'dataset.aggregator.column' so the compiler "
+                    "resolves it.")}))
+            continue
+        if has_value and isinstance(st.get("value"), str) and \
+                st["value"].strip() in ("--", "—", "n/a", "N/A"):
+            out.append(Diagnostic(
+                severity="error", code="stat_grid_value_is_placeholder",
+                widget_id=wid, path=f"{stat_path}.value",
+                message=(
+                    f"stat_grid '{wid}' stats[{si}] value="
+                    f"{st['value']!r} is a placeholder string."),
+                context={"value": st["value"]}))
+        # Only validate ``source`` when there is no ``value``. If
+        # the author has set both, ``value`` wins (the resolver
+        # respects pre-existing values), so a broken ``source`` is
+        # dead config -- not worth blocking compile.
+        if has_value:
+            continue
+        if not has_source:
+            continue
+        # Reuse KPI resolver -- stat_grid sources have the same
+        # ``dataset.aggregator.column`` shape.
+        resolved, reason = _resolve_kpi_value(src, dfs)
+        if resolved is None:
+            out.append(Diagnostic(
+                severity="error", code="stat_grid_source_unresolvable",
+                widget_id=wid, path=f"{stat_path}.source",
+                message=(
+                    f"stat_grid '{wid}' stats[{si}] source={src!r} "
+                    f"cannot resolve: {reason}; the cell will "
+                    f"render '--'."),
+                context={"source": src, "reason": reason,
+                           "fix_hint": (
+                               "Fix the source to point at a real "
+                               "dataset/column with numeric values, "
+                               "or set 'value' directly.")}))
+    return out
+
+
+def _resolve_stat_grid_sources(
+    manifest: Dict[str, Any], dfs: Dict[str, Any],
+) -> None:
+    """Compile-time resolve every ``stat_grid`` stat that has a
+    ``source`` but no ``value`` into a baked-in ``value``.
+
+    Stat_grid widgets are server-rendered only -- the JS dashboard
+    runtime never resolves their sources. So we have to do it here
+    or the cell will render as ``--``. Resolution failures are
+    surfaced via :func:`_check_stat_grid_widget`; this function does
+    NOT raise on failure (it leaves ``value`` unset so the diagnostic
+    can flag the right thing).
+
+    Mutates the manifest in-place. Idempotent: stats that already
+    have a ``value`` are left alone.
+    """
+    layout = manifest.get("layout") or {}
+
+    def _visit(rows):
+        for row in rows or []:
+            if not isinstance(row, list):
+                continue
+            for w in row:
+                if not isinstance(w, dict):
+                    continue
+                if w.get("widget") != "stat_grid":
+                    continue
+                stats = w.get("stats")
+                if not isinstance(stats, list):
+                    continue
+                for st in stats:
+                    if not isinstance(st, dict):
+                        continue
+                    if "value" in st and st["value"] is not None:
+                        continue
+                    src = st.get("source")
+                    if not isinstance(src, str):
+                        continue
+                    resolved, _reason = _resolve_kpi_value(src, dfs)
+                    if resolved is not None:
+                        # Apply prefix/suffix/decimals if specified;
+                        # mirror the JS formatter's compact-vs-comma
+                        # rules so server-rendered values match.
+                        st["value"] = _format_kpi_number(resolved, st)
+
+    if layout.get("kind") == "tabs":
+        for tab in layout.get("tabs", []) or []:
+            if isinstance(tab, dict):
+                _visit(tab.get("rows", []))
+    else:
+        _visit(layout.get("rows", []))
+
+
+def _format_kpi_number(n: float, opts: Dict[str, Any]) -> str:
+    """Mirror of the JS ``formatNumber`` helper for server-side
+    KPI/stat_grid rendering. Produces the same display string as the
+    browser would, given the same number + format options
+    (``decimals`` / ``format`` / ``prefix`` / ``suffix``).
+
+    Only used by :func:`_resolve_stat_grid_sources` (KPI uses JS at
+    runtime). Pinned to JS via ``TestKPIResolution``.
+    """
+    prefix = opts.get("prefix") or ""
+    suffix = opts.get("suffix") or ""
+    mode = opts.get("format") or "auto"
+    decimals = opts.get("decimals")
+    abs_n = abs(n)
+
+    def _comma(int_str: str) -> str:
+        # Insert thousands separators on the integer portion, mirroring
+        # the JS regex ``\B(?=(\d{3})+(?!\d))``.
+        sign = ""
+        if int_str.startswith("-"):
+            sign = "-"
+            int_str = int_str[1:]
+        rev = int_str[::-1]
+        chunks = [rev[i:i+3] for i in range(0, len(rev), 3)]
+        return sign + ",".join(chunks)[::-1]
+
+    if mode == "raw":
+        return f"{prefix}{n}{suffix}"
+    if mode == "percent":
+        d = 2 if decimals is None else decimals
+        return f"{prefix}{(n * 100):.{d}f}%{suffix}"
+    if mode == "comma":
+        d = 0 if decimals is None and abs_n >= 1000 else (
+            2 if decimals is None else decimals)
+        whole, _, frac = f"{n:.{d}f}".partition(".")
+        whole = _comma(whole)
+        out = whole if not frac else f"{whole}.{frac}"
+        return f"{prefix}{out}{suffix}"
+    if mode == "compact":
+        d = 1 if decimals is None else decimals
+        if abs_n >= 1e12:
+            return f"{prefix}{n/1e12:.{d}f}T{suffix}"
+        if abs_n >= 1e9:
+            return f"{prefix}{n/1e9:.{d}f}B{suffix}"
+        if abs_n >= 1e6:
+            return f"{prefix}{n/1e6:.{d}f}M{suffix}"
+        if abs_n >= 1e3:
+            return f"{prefix}{n/1e3:.{d}f}K{suffix}"
+        return f"{prefix}{n:.{d}f}{suffix}"
+    # auto: comma below 1M, compact above
+    if abs_n >= 1e12:
+        d = 1 if decimals is None else decimals
+        return f"{prefix}{n/1e12:.{d}f}T{suffix}"
+    if abs_n >= 1e9:
+        d = 1 if decimals is None else decimals
+        return f"{prefix}{n/1e9:.{d}f}B{suffix}"
+    if abs_n >= 1e6:
+        d = 1 if decimals is None else decimals
+        return f"{prefix}{n/1e6:.{d}f}M{suffix}"
+    d = 0 if decimals is None and abs_n >= 1000 else (
+        2 if decimals is None else decimals)
+    whole, _, frac = f"{n:.{d}f}".partition(".")
+    whole = _comma(whole)
+    out = whole if not frac else f"{whole}.{frac}"
+    return f"{prefix}{out}{suffix}"
 
 
 def _check_filter(f: Dict[str, Any], idx: int, manifest: Dict[str, Any],
@@ -3354,7 +4086,10 @@ def _columns_referenced_by_widgets(
                         continue
                     if spec.get("dataset") != ds_name:
                         continue
-                    for _k, c in _walk_column_refs(spec.get("mapping") or {}):
+                    chart_type = spec.get("chart_type")
+                    for _k, c in _walk_column_refs(
+                        spec.get("mapping") or {}, chart_type
+                    ):
                         refs.append(c)
                 elif wt == "table":
                     if w.get("dataset_ref") != ds_name:
@@ -3530,8 +4265,9 @@ def _any_widget_uses_date(manifest: Dict[str, Any], ds_name: str) -> bool:
                 if w.get("widget") == "chart":
                     spec = w.get("spec")
                     if isinstance(spec, dict) and spec.get("dataset") == ds_name:
+                        chart_type = spec.get("chart_type")
                         for _k, c in _walk_column_refs(
-                            spec.get("mapping") or {}
+                            spec.get("mapping") or {}, chart_type
                         ):
                             if c == "date":
                                 return True
@@ -3803,6 +4539,8 @@ def chart_data_diagnostics(
                     diags.extend(_check_table_widget(w, wpath, dfs))
                 elif wt == "kpi":
                     diags.extend(_check_kpi_widget(w, wpath, dfs))
+                elif wt == "stat_grid":
+                    diags.extend(_check_stat_grid_widget(w, wpath, dfs))
 
     if layout.get("kind") == "tabs":
         for ti, tab in enumerate(layout.get("tabs", []) or []):
@@ -3890,7 +4628,7 @@ def compile_dashboard(
     save_pngs: bool = False,
     png_dir: Optional[Union[str, Path]] = None,
     png_scale: int = 2,
-    strict: bool = False,
+    strict: bool = True,
 ) -> DashboardResult:
     """JSON-first entry point. Compile a manifest to a dashboard.
 
@@ -3912,14 +4650,21 @@ def compile_dashboard(
     time; the written manifest mirrors the input exactly (specs are NOT
     inlined into the manifest, they're resolved only for the HTML payload).
 
-    ``strict`` (default ``False``) raises :class:`ValueError` when any
+    ``strict`` (default ``True``) raises :class:`ValueError` when any
     error-severity diagnostic fires (size budget breach, dataset shape
-    mistake, missing column, etc.). The resilient default keeps the
-    inner-loop iteration model -- compile still produces HTML, broken
-    charts get placeholders, every diagnostic shows up on the result
-    -- so PRISM can fix everything in one round-trip. Refresh
-    pipelines and CI use ``strict=True`` to hard-fail before publishing
-    a broken dashboard.
+    mistake, missing column, KPI source that would render as ``--``,
+    etc.). This is the safe production behaviour: a broken headline
+    number is a broken dashboard, full stop. The opt-in
+    ``strict=False`` keeps the inner-loop iteration model -- compile
+    still produces HTML, broken charts get placeholders, every
+    diagnostic shows up on the result -- so PRISM can fix everything
+    in one round-trip rather than discovering one bug per recompile.
+
+    ``strict`` was flipped from ``False`` to ``True`` after the
+    discovery that production was shipping dashboards with KPI tiles
+    rendering ``--`` because the diagnostic layer was either silent
+    or non-blocking. The new default is "fail loud, fix it"; PRISM's
+    iteration runner explicitly opts into the resilient mode.
     """
     if isinstance(manifest, (str, Path)):
         base_dir: Optional[Path] = None
@@ -3983,6 +4728,17 @@ def compile_dashboard(
         manifest_path = sp / f"{dashboard_id}.json"
         html_path = sp / f"{dashboard_id}.html"
         base_dir = base_dir or Path(session_path)
+
+    # Compile-time resolve stat_grid sources into baked ``value``s
+    # BEFORE diagnostics + before manifest is persisted. stat_grid is
+    # server-rendered only (the JS dashboard runtime never resolves
+    # stat sources), so a stat with ``source`` set but no ``value``
+    # would silently render ``--`` in the browser unless we resolve
+    # it here. Sources that fail to resolve are left untouched and
+    # surface via ``stat_grid_source_unresolvable`` in diagnostics.
+    _resolve_stat_grid_sources(
+        manifest_dict, _materialize_datasets(manifest_dict)
+    )
 
     if manifest_path and write_json:
         save_manifest(manifest_dict, manifest_path)
@@ -4059,6 +4815,7 @@ __all__ = [
     "VALID_CHART_TYPES", "VALID_FILTER_OPS", "VALID_SYNC",
     "VALID_BRUSH_TYPES", "VALID_TABLE_FORMATS",
     "VALID_REFRESH_FREQUENCIES", "VALID_NOTE_KINDS",
+    "VALID_KPI_AGGREGATORS",
     "DATASET_ROWS_WARN", "DATASET_ROWS_ERROR",
     "DATASET_BYTES_WARN", "DATASET_BYTES_ERROR",
     "MANIFEST_BYTES_WARN", "MANIFEST_BYTES_ERROR",

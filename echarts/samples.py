@@ -144,6 +144,52 @@ def _scatter_multi():
                         title="P/E vs ROE by sector").option
 
 
+@_register("scatter_studio")
+def _scatter_studio():
+    import pandas as pd
+    from echart_studio import make_echart
+    from datetime import date, timedelta
+    random.seed(13)
+    n = 220
+    base = date(2024, 6, 1)
+    dates = [base + timedelta(days=i) for i in range(n)]
+    us_2y = [3.5 + sum(random.gauss(0, 0.04) for _ in range(i + 1))
+              for i in range(n)]
+    us_10y = [u + 0.4 + random.gauss(0, 0.05) for u in us_2y]
+    real_10y = [u - 2.0 + random.gauss(0, 0.10) for u in us_10y]
+    breakeven = [u - r for u, r in zip(us_10y, real_10y)]
+    spx_pe = [22 + 0.6 * (u - 4.0) + random.gauss(0, 0.6) for u in us_10y]
+    regime = [
+        "risk-on" if (i // 50) % 2 == 0 else "risk-off"
+        for i in range(n)
+    ]
+    df = pd.DataFrame({
+        "date":           dates,
+        "us_2y":          us_2y,
+        "us_10y":         us_10y,
+        "real_10y":       real_10y,
+        "breakeven_5y5y": breakeven,
+        "spx_pe":         spx_pe,
+        "regime":         regime,
+    })
+    return make_echart(df, "scatter_studio",
+                        mapping={
+                            "x_columns": ["us_2y", "us_10y", "real_10y",
+                                            "breakeven_5y5y"],
+                            "y_columns": ["spx_pe", "us_2y", "us_10y",
+                                            "breakeven_5y5y"],
+                            "color_columns": ["regime"],
+                            "order_by": "date",
+                            "x_default": "us_10y",
+                            "y_default": "spx_pe",
+                            "color_default": "regime",
+                            "label_column": "date",
+                            "x_transform_default": "raw",
+                            "y_transform_default": "raw",
+                        },
+                        title="Macro studio (X/Y picker)").option
+
+
 @_register("area")
 def _area():
     import pandas as pd
@@ -172,6 +218,43 @@ def _heatmap():
     return make_echart(df, "heatmap",
                         mapping={"x": "x", "y": "y", "value": "v"},
                         title="Correlation heatmap").option
+
+
+@_register("correlation_matrix")
+def _correlation_matrix():
+    import pandas as pd
+    from echart_studio import make_echart
+    from datetime import date, timedelta
+    random.seed(17)
+    n = 250
+    base = date(2025, 1, 1)
+    dates = [base + timedelta(days=i) for i in range(n)]
+    us_2y = [3.5 + sum(random.gauss(0, 0.04) for _ in range(i + 1)) for i in range(n)]
+    us_5y = [u + random.gauss(0, 0.05) + 0.6 for u in us_2y]
+    us_10y = [u5 + random.gauss(0, 0.05) + 0.4 for u5 in us_5y]
+    us_30y = [u10 + random.gauss(0, 0.05) + 0.2 for u10 in us_10y]
+    real_10y = [u10 - 2.0 + random.gauss(0, 0.10) for u10 in us_10y]
+    breakeven = [u10 - r10 for u10, r10 in zip(us_10y, real_10y)]
+    df = pd.DataFrame({
+        "date":     dates,
+        "us_2y":    us_2y,
+        "us_5y":    us_5y,
+        "us_10y":   us_10y,
+        "us_30y":   us_30y,
+        "real_10y": real_10y,
+        "breakeven_5y5y": breakeven,
+    })
+    return make_echart(df, "correlation_matrix",
+                        mapping={
+                            "columns": ["us_2y", "us_5y", "us_10y", "us_30y",
+                                          "real_10y", "breakeven_5y5y"],
+                            "method": "pearson",
+                            "transform": "pct_change",
+                            "order_by": "date",
+                            "show_values": True,
+                            "value_decimals": 2,
+                        },
+                        title="Rates correlation (% change)").option
 
 
 @_register("pie")

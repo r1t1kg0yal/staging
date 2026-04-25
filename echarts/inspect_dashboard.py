@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 inspect_dashboard -- Playwright-based runtime inspection harness for
-GS/viz/echarts dashboards.
+ai_development/dashboards dashboards.
 
 Purpose
 -------

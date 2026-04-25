@@ -142,6 +142,148 @@ def _scatter_with_trendlines_option():
     ).option
 
 
+# --- multi-axis time series (3 / 4 independent y-axes) -----------------------
+
+def _three_axis_line_option():
+    """Cross-asset line chart with 3 independent y-axes:
+    SPX (left, $) | UST 10Y (right, inverted, %) | DXY (left, outer)."""
+    random.seed(11)
+    n = 250
+    dates = pd.date_range("2024-01-01", periods=n, freq="B")
+    spx, ust, dxy = [5000.0], [4.2], [104.0]
+    for _ in range(n - 1):
+        spx.append(spx[-1] * (1 + random.gauss(0.0005, 0.011)))
+        ust.append(max(2.0, ust[-1] + random.gauss(0, 0.025)))
+        dxy.append(dxy[-1] + random.gauss(0, 0.30))
+    df = pd.DataFrame({"date": dates, "spx": spx, "ust": ust, "dxy": dxy})
+    return make_echart(
+        df,
+        "multi_line",
+        mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX",      "series": ["spx"],
+                  "format": "compact"},
+                {"side": "right", "title": "UST 10Y",  "series": ["ust"],
+                  "invert": True},
+                {"side": "left",  "title": "DXY",      "series": ["dxy"]},
+            ],
+        },
+        title="3-axis: SPX (compact $) | UST 10Y (inverted) | DXY",
+    ).option
+
+
+def _four_axis_line_option():
+    """Cross-asset line chart with 4 independent y-axes:
+    SPX (L), DXY (L outer), UST 10Y (R, inverted), WTI (R outer, $)."""
+    random.seed(22)
+    n = 250
+    dates = pd.date_range("2024-01-01", periods=n, freq="B")
+    spx, ust, dxy, wti = [5000.0], [4.2], [104.0], [82.0]
+    for _ in range(n - 1):
+        spx.append(spx[-1] * (1 + random.gauss(0.0005, 0.011)))
+        ust.append(max(2.0, ust[-1] + random.gauss(0, 0.025)))
+        dxy.append(dxy[-1] + random.gauss(0, 0.30))
+        wti.append(max(40, wti[-1] + random.gauss(0, 0.85)))
+    df = pd.DataFrame({"date": dates, "spx": spx, "ust": ust,
+                        "dxy": dxy, "wti": wti})
+    return make_echart(
+        df,
+        "multi_line",
+        mapping={
+            "x": "date", "y": ["spx", "ust", "dxy", "wti"],
+            "axes": [
+                {"side": "left",  "title": "SPX",     "series": ["spx"],
+                  "format": "compact"},
+                {"side": "right", "title": "UST 10Y", "series": ["ust"],
+                  "invert": True},
+                {"side": "left",  "title": "DXY",     "series": ["dxy"]},
+                {"side": "right", "title": "WTI",     "series": ["wti"],
+                  "format": "usd"},
+            ],
+        },
+        title="4-axis: SPX | DXY | UST (inverted) | WTI ($)",
+    ).option
+
+
+# --- heatmap showcase (cell labels + auto-contrast + color configuration) ----
+
+def _heatmap_default_option():
+    """Default heatmap: cell values printed with auto B/W contrast text."""
+    random.seed(11)
+    rows = []
+    for x in ("Tech", "Fin", "Health", "Energy", "Util", "Cons"):
+        for y in ("Q1", "Q2", "Q3", "Q4"):
+            rows.append({"x": x, "y": y, "v": random.randint(50, 200)})
+    df = pd.DataFrame(rows)
+    return make_echart(
+        df,
+        "heatmap",
+        mapping={"x": "x", "y": "y", "value": "v",
+                  "color_palette": "gs_blues",
+                  "value_decimals": 0},
+        title="Sector quarterly volumes (auto-contrast labels, gs_blues)",
+    ).option
+
+
+def _heatmap_diverging_auto_option():
+    """Heatmap with cross-zero data triggers auto-diverging palette."""
+    random.seed(42)
+    rows = []
+    for x in ("Equity", "Rates", "FX", "Credit", "Commod", "Vol"):
+        for y in ("1D", "1W", "1M", "3M", "YTD"):
+            rows.append({"x": x, "y": y, "v": random.randint(-30, 50)})
+    df = pd.DataFrame(rows)
+    return make_echart(
+        df,
+        "heatmap",
+        mapping={"x": "x", "y": "y", "value": "v",
+                  "color_scale": "auto",
+                  "value_decimals": 0},
+        title="Cross-asset returns (color_scale=auto, diverging at zero)",
+    ).option
+
+
+def _heatmap_custom_palette_option():
+    """Custom 3-stop palette via mapping.colors."""
+    random.seed(7)
+    rows = []
+    for x in ("Mon", "Tue", "Wed", "Thu", "Fri"):
+        for y in ("9am", "10am", "11am", "12pm", "1pm", "2pm", "3pm"):
+            rows.append({"x": x, "y": y, "v": round(random.uniform(0.1, 4.5), 1)})
+    df = pd.DataFrame(rows)
+    return make_echart(
+        df,
+        "heatmap",
+        mapping={"x": "x", "y": "y", "value": "v",
+                  "colors": ["#fff5e6", "#ff9933", "#cc3300"],
+                  "value_decimals": 1,
+                  "x_title": "Day", "y_title": "Hour"},
+        title="Trading volume heatmap (custom 3-stop palette)",
+    ).option
+
+
+def _calendar_heatmap_with_labels_option():
+    """Calendar heatmap with show_values=True for the larger-cell variant."""
+    import pandas as pd
+    random.seed(9)
+    dates = pd.date_range("2025-09-01", "2025-12-31")
+    df = pd.DataFrame({
+        "date": dates,
+        "v": [round(random.gauss(0.02, 1.4), 1) for _ in range(len(dates))],
+    })
+    return make_echart(
+        df,
+        "calendar_heatmap",
+        mapping={"date": "date", "value": "v", "year": "2025",
+                  "color_scale": "auto",
+                  "show_values": True,
+                  "value_label_size": 8,
+                  "value_decimals": 1},
+        title="Daily P&L with cell values (cross-zero, auto-diverging)",
+    ).option
+
+
 def _composite_4pack_option():
     """Single-artifact 4-pack composite. PNG renders all 4 sub-charts."""
     random.seed(55)
@@ -221,6 +363,22 @@ ITEMS: List[Tuple[str, str, str, Callable[[], Dict[str, Any]], int, int]] = [
       "advanced", _scatter_with_trendlines_option, 700, 420),
     ("33_4pack_grid", "make_4pack_grid composite (single PNG)",
       "advanced", _composite_4pack_option, 1200, 800),
+
+    # --- multi-axis time series (mapping.axes -> N independent y-axes) ---
+    ("34_3_axis_line", "multi_line + 3 independent y-axes (mapping.axes)",
+      "advanced", _three_axis_line_option, 1100, 420),
+    ("35_4_axis_line", "multi_line + 4 independent y-axes (mapping.axes)",
+      "advanced", _four_axis_line_option, 1200, 460),
+
+    # --- heatmap showcase (cell labels + auto-contrast + color config) ---
+    ("40_heatmap_default", "heatmap: default (auto-contrast text on gs_blues)",
+      "heatmap", _heatmap_default_option, 800, 420),
+    ("41_heatmap_diverging_auto", "heatmap: color_scale=auto on cross-zero data",
+      "heatmap", _heatmap_diverging_auto_option, 800, 420),
+    ("42_heatmap_custom_palette", "heatmap: custom 3-stop palette via mapping.colors",
+      "heatmap", _heatmap_custom_palette_option, 800, 420),
+    ("43_calendar_heatmap_labels", "calendar_heatmap: show_values=True with auto-contrast",
+      "heatmap", _calendar_heatmap_with_labels_option, 1100, 320),
 ]
 
 
@@ -313,6 +471,30 @@ def write_index(results: List[Dict[str, Any]], out_root: Path) -> Path:
                 f"<li><b>{r['label']}</b><br>"
                 f"<img src='{r['png']}' alt='{r['label']}' "
                 f"style='max-width:980px'></li>")
+        else:
+            rows.append(
+                f"<li><b>{r['label']}</b> -- FAILED: "
+                f"<code>{r.get('error', '')}</code></li>")
+    rows.append("</ul>")
+    rows.append("<hr>")
+    rows.append("<h2>Heatmap showcase (cell labels + auto-contrast + "
+                  "color configuration)</h2>")
+    rows.append("<p>Demonstrates the configurable heatmap features: cell "
+                  "values printed by default, black/white text contrast "
+                  "picked per cell from background luminance, and color "
+                  "stops configurable via "
+                  "<code>mapping.colors</code> / "
+                  "<code>mapping.color_palette</code> / "
+                  "<code>mapping.color_scale</code>.</p>")
+    rows.append("<ul>")
+    for r in results:
+        if r["kind"] != "heatmap":
+            continue
+        if r["ok"]:
+            rows.append(
+                f"<li><b>{r['label']}</b><br>"
+                f"<img src='{r['png']}' alt='{r['label']}' "
+                f"style='max-width:1100px'></li>")
         else:
             rows.append(
                 f"<li><b>{r['label']}</b> -- FAILED: "

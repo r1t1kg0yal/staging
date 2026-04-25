@@ -1,5 +1,5 @@
 """
-GS/viz/echarts -- self-contained ECharts producer + dashboard compiler.
+ai_development/dashboards -- self-contained ECharts producer + dashboard compiler.
 
 Public entry points:
 

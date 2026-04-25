@@ -1,65 +1,82 @@
 #!/usr/bin/env python3
 """
-demos -- tight MECE demo set for GS/viz/echarts.
+demos -- MECE dashboard demo set for ai_development/dashboards.
 
-Nine end-to-end scenarios, each with a distinct narrative and
-non-overlapping dominant feature. Every chart type, widget, filter
-type, and link mechanism in the stack is exercised at least once
-across the gallery.
+Fourteen end-to-end dashboard scenarios that collectively exercise
+every PRISM-facing capability of the dashboard system: 26 chart
+types, 8 widget kinds, 9 filter types, 4 brush types, 4 sync values,
+5 annotation types, 3 chart-widget variants (spec / ref / option),
+the persistence + diagnostics workflow, and the prose / markdown
+surfaces.
 
-    rates_monitor       Full rates monitor: US curve (overview / detail /
-                        macro-overlay tabs w/ brush cross-filter + dual-
-                        axis) PLUS 5 identical-shape global central-bank
-                        tabs (Fed / ECB / BoE / BoJ / EM). Stress-tests
-                        high-tab-count layouts.
-    cross_asset         Four-panel composite PNG (SPX/DXY/WTI/Gold) via
-                        make_4pack_grid -- the only non-manifest path in
-                        the gallery.
-    risk_regime         Correlation heatmap, VIX term by regime, factor-
-                        return boxplots, running drawdown with band.
-    fomc_monitor        Fed policy dashboard: gauge (cut prob), candlestick
-                        (FFR futures), radar (voter hawk-dove), calendar
-                        heatmap (decision history), strokeDash (actuals
-                        vs dots), dual-axis, metadata, header_actions.
-    global_flows        Cross-border flows: sankey + donut, treemap +
-                        sunburst, network graph, funnel, stat_grid.
-    equity_deep_dive    Single-name equity: candlestick + volume, earnings
-                        strokeDash, analyst bar_horizontal, scatter-
-                        trendline beta, bullet valuation, histogram
-                        returns, KPI info/popup, header_actions.
-    portfolio_analytics Multi-asset book: gauge (VaR), factor radar, pie
-                        allocation, stacked-area P&L, parallel_coords
-                        positions, histogram returns, stat_grid.
-    markets_wrap        Cross-asset end-of-day wrap -- 17-chart scrollable
-                        stress-test of the layout engine with click-emit
-                        filter, conditional table, metadata refresh.
-    screener_studio     Three-tab table/filter/drill-down toolbox: rich
-                        RV screen w/ conditional formatting + z-score
-                        colors, all 9 filter types on one dataset, bond
-                        universe screener with row_click.detail modal
-                        (stats / markdown / charts / sub-table sections).
+Note: the legacy `make_echart()` and composite (make_2pack_*,
+make_4pack_grid, etc.) helpers are NOT exercised here; PRISM ships
+one-off conversational charts via Altair `make_chart()`, not via
+this module. See README sections 1, 2, 5 for the scope.
+
+    rates_monitor       8-tab rates monitor: US curve (overview /
+                        detail / macro overlay) PLUS 5 identical-
+                        shape global central-bank tabs.
+    risk_regime         correlation_matrix on % changes (dedicated
+                        builder), VIX term by regime, factor
+                        scatter_multi vs MKT with per-group OLS,
+                        boxplots, drawdown with arrow / band /
+                        point annotations + lineX brush.
+    fomc_monitor        Fed policy: gauge (cut prob), candlestick
+                        (FFR futures), radar (voter hawk-dove),
+                        calendar heatmap, strokeDash dot plot,
+                        dual-axis, metadata, header_actions.
+    global_flows        Cross-border flows: sankey + donut,
+                        treemap + sunburst, network graph, funnel,
+                        stat_grid, hierarchical tree (org chart).
+    equity_deep_dive    Single-name tear sheet: candlestick + volume,
+                        EPS strokeDash, bar_horizontal, beta scatter-
+                        trendline, bullet, histogram, y_log toggle,
+                        KPI info/popup.
+    portfolio_analytics Multi-asset book: pinned KPI ribbon, VaR
+                        gauge, factor radar, allocation pie, stacked-
+                        area P&L, parallel_coords positions,
+                        histogram, stat_grid, lineY brush.
+    markets_wrap        Cross-asset EOD wrap: 17 charts, KPI ribbon,
+                        image widget (logo), divider widgets, click-
+                        emit-filter, conditional-formatted top movers
+                        table, legend sync, filter "*" wildcard.
+    screener_studio     Three-tab toolbox: rich RV screen w/
+                        conditional formatting + z-score colors, all
+                        9 filter types on one dataset, bond universe
+                        screener with row_click.detail rich modal.
     bond_carry_roll     Carry/roll scatter where every point is
-                        clickable: chart click_popup with rich detail
-                        sections (per-bond stats, issuer blurb, spread
-                        + price history filtered by CUSIP, recent
-                        events). Plus simple-mode click popups on a
-                        bar of top names and a sector summary.
-    news_wrap           Text-heavy news desk: summary banner, six
+                        clickable: chart click_popup rich modal
+                        (per-bond stats, issuer blurb, spread + price
+                        history filtered by CUSIP, recent events).
+    news_wrap           Intraday news desk: summary banner, six
                         semantic note kinds, sortable headlines table
                         with full-body markdown drilldown, per-asset
                         commentary, calendar + reading list.
     fomc_brief          Document-first FOMC dashboard: statement diff
                         narrative, minutes excerpts (blockquotes), Fed
-                        speakers table with row-click verbatim quote
+                        speakers table w/ row-click verbatim quote
                         modal + hawk-dove bar chart, dot plot panel.
     research_feed       Substack-style aggregator: featured + theme
-                        notes up top, curated reading list, full
-                        article feed with row-click drilldown surfacing
-                        each piece's full markdown body.
+                        notes, curated reading list, full article feed
+                        with row-click drilldown surfacing each piece's
+                        full markdown body.
+    macro_studio        Interactive bivariate analysis: scatter_studio
+                        centerpiece (full feature surface), correlation_
+                        matrix sidebar, 4-axis macro overlay
+                        (mapping.axes), log-scale credit chart,
+                        polygon brush.
+    dev_workflow        Lifecycle showcase: manifest_template +
+                        populate_template, validate_manifest,
+                        chart_data_diagnostics, strict=False mode,
+                        save_pngs=True. Three chart variants
+                        (spec / option / ref) and `raw` chart_type.
+                        KPI direct value + format=raw + controls-
+                        drawer opt-out flags. header_actions onclick.
 
 All data is synthetic and deterministic (SEED-controlled). Every demo
-follows the PRISM pattern: pull DataFrame(s), drop into a manifest, call
-compile_dashboard() or a composite. Literal numbers never appear in the
+follows the PRISM pattern: pull DataFrame(s), drop into a manifest,
+call `compile_dashboard()`. Literal numbers never appear in the
 manifest emitted by PRISM.
 
 Run
@@ -91,8 +108,13 @@ _here = Path(__file__).resolve().parent
 if str(_here) not in sys.path:
     sys.path.insert(0, str(_here))
 
-from echart_dashboard import compile_dashboard
-from composites import ChartSpec, make_4pack_grid
+from echart_dashboard import (
+    compile_dashboard,
+    manifest_template,
+    populate_template,
+    validate_manifest,
+    chart_data_diagnostics,
+)
 from rendering import save_dashboard_html_png
 
 
@@ -220,6 +242,91 @@ def pull_factor_returns() -> pd.DataFrame:
                       "SIZE": 2.5, "QUAL": 2.0, "LOWVOL": 1.8}[f]
             rows.append({"date": d, "factor": f,
                            "ret_pct": round(random.gauss(0.3, sigma), 2)})
+    return pd.DataFrame(rows)
+
+
+def pull_corr_panel(years: int = 3) -> pd.DataFrame:
+    """Wide-form panel of cross-asset daily prices for the
+    `correlation_matrix` chart_type (which computes its own correlation
+    after applying the per-column transform). Columns: date + 8 assets."""
+    random.seed(SEED + 70)
+    dates = pd.date_range(end=END_DATE, periods=252 * years, freq="B")
+    spx = 5100.0
+    ndx = 17800.0
+    us_10y = 4.31
+    us_2y = 4.05
+    dxy = 104.0
+    gold = 2320.0
+    wti = 82.0
+    btc = 65000.0
+    rows = []
+    for _ in dates:
+        s_shock = random.gauss(0, 1)
+        spx *= 1 + 0.0003 + 0.009 * s_shock
+        ndx *= 1 + 0.0004 + 0.011 * (0.85 * s_shock + 0.4 * random.gauss(0, 1))
+        us_10y = max(0.5, us_10y + 0.018 * (-0.20 * s_shock + random.gauss(0, 1)))
+        us_2y = max(0.5, us_2y + 0.018 * (0.72 * (us_10y - 4.31) / 0.018
+                                              + random.gauss(0, 1)))
+        dxy += 0.22 * (-0.30 * s_shock + random.gauss(0, 1))
+        gold *= 1 + 0.005 * (-0.45 * (dxy - 104.0) / 0.22 + random.gauss(0, 1))
+        wti += 0.75 * (0.20 * s_shock + random.gauss(0, 1))
+        btc *= 1 + 0.025 * (0.50 * s_shock + random.gauss(0, 1))
+    # Re-iterate with cached values to fill rows in chronological order
+    random.seed(SEED + 70)
+    spx = 5100.0
+    ndx = 17800.0
+    us_10y = 4.31
+    us_2y = 4.05
+    dxy = 104.0
+    gold = 2320.0
+    wti = 82.0
+    btc = 65000.0
+    rows = []
+    for d in dates:
+        s_shock = random.gauss(0, 1)
+        spx *= 1 + 0.0003 + 0.009 * s_shock
+        ndx *= 1 + 0.0004 + 0.011 * (0.85 * s_shock + 0.4 * random.gauss(0, 1))
+        us_10y = max(0.5, us_10y + 0.018 * (-0.20 * s_shock + random.gauss(0, 1)))
+        us_2y = max(0.5, us_2y + 0.013 * (0.72 * s_shock + random.gauss(0, 1)))
+        dxy += 0.22 * (-0.30 * s_shock + random.gauss(0, 1))
+        gold *= 1 + 0.0055 * (-0.45 * s_shock + random.gauss(0, 1))
+        wti += 0.75 * (0.20 * s_shock + random.gauss(0, 1))
+        btc *= 1 + 0.025 * (0.50 * s_shock + random.gauss(0, 1))
+        rows.append({
+            "date":      d,
+            "spx":       round(spx, 2),
+            "ndx":       round(ndx, 2),
+            "us_10y":    round(us_10y, 3),
+            "us_2y":     round(us_2y, 3),
+            "dxy":       round(dxy, 2),
+            "gold":      round(gold, 1),
+            "wti":       round(wti, 2),
+            "bitcoin":   round(btc, 0),
+        })
+    return pd.DataFrame(rows)
+
+
+def pull_factor_vs_mkt(n_months: int = 60) -> pd.DataFrame:
+    """Paired (market, factor) monthly returns -- one row per
+    factor x month -- with realistic per-factor betas to MKT.
+    Shape suits scatter_multi with `color: factor` + `trendlines: true`
+    so each factor gets its own OLS line."""
+    random.seed(SEED + 71)
+    factor_betas = {
+        "VAL":    (0.85, 2.4),
+        "MOM":    (1.05, 3.0),
+        "QUAL":   (0.55, 1.7),
+        "SIZE":   (0.95, 2.6),
+        "LOWVOL": (0.40, 1.5),
+    }
+    dates = pd.date_range(end=END_DATE, periods=n_months, freq="MS")
+    rows = []
+    for d in dates:
+        mkt = round(random.gauss(0.6, 4.0), 2)
+        for f, (beta, sigma) in factor_betas.items():
+            ret = round(beta * mkt + random.gauss(0, sigma), 2)
+            rows.append({"date": d, "factor": f,
+                          "mkt_pct": mkt, "factor_pct": ret})
     return pd.DataFrame(rows)
 
 
@@ -501,16 +608,16 @@ def build_rates_monitor(out_dir: Path) -> Dict[str, Any]:
         },
         "datasets": datasets,
         "filters": [
-            {"id": "dt_us", "type": "dateRange", "default": "1Y",
+            {"id": "us_range", "type": "dateRange", "default": "1Y",
               "targets": ["curve", "spread", "two_ten",
                            "fives30s", "real10y", "ism_10y"],
-              "field": "date", "label": "US lookback"},
-            {"id": "dt_cb", "type": "dateRange", "default": "2Y",
+              "field": "date", "label": "US initial range"},
+            {"id": "cb_range", "type": "dateRange", "default": "2Y",
               "targets": ["chart_rate_fed", "chart_rate_ecb",
                            "chart_rate_boe", "chart_rate_boj",
                            "chart_rate_em"],
               "scope": "global",
-              "field": "date", "label": "Global CB lookback"},
+              "field": "date", "label": "CB initial range"},
         ],
         "layout": {"kind": "tabs", "tabs": [
             {"id": "overview", "label": "US overview",
@@ -521,22 +628,22 @@ def build_rates_monitor(out_dir: Path) -> Dict[str, Any]:
                     {"widget": "kpi", "id": "k2y", "label": "2Y yield",
                       "source": "rates.latest.us_2y",
                       "sparkline_source": "rates.us_2y",
-                      "delta_source": "rates.us_2y",
+                      "delta_source": "rates.prev.us_2y",
                       "suffix": "%", "decimals": 2, "w": 3},
                     {"widget": "kpi", "id": "k10y", "label": "10Y yield",
                       "source": "rates.latest.us_10y",
                       "sparkline_source": "rates.us_10y",
-                      "delta_source": "rates.us_10y",
+                      "delta_source": "rates.prev.us_10y",
                       "suffix": "%", "decimals": 2, "w": 3},
                     {"widget": "kpi", "id": "k30y", "label": "30Y yield",
                       "source": "rates.latest.us_30y",
                       "sparkline_source": "rates.us_30y",
-                      "delta_source": "rates.us_30y",
+                      "delta_source": "rates.prev.us_30y",
                       "suffix": "%", "decimals": 2, "w": 3},
                     {"widget": "kpi", "id": "kspr", "label": "2s10s (bp)",
                       "source": "rates.latest.2s10s",
                       "sparkline_source": "rates.2s10s",
-                      "delta_source": "rates.2s10s",
+                      "delta_source": "rates.prev.2s10s",
                       "decimals": 1, "w": 3},
                 ],
                 [
@@ -725,89 +832,51 @@ def build_rates_monitor(out_dir: Path) -> Dict[str, Any]:
     return _result(r, thumb)
 
 
-def build_cross_asset(out_dir: Path) -> Dict[str, Any]:
-    """Four-panel composite (SPX/DXY/WTI/Gold) with event annotations.
-    Emits a single HTML + PNG artifact via make_4pack_grid."""
-    df = pull_cross_asset()
-    r = make_4pack_grid(
-        ChartSpec(df=df, chart_type="line",
-                    mapping={"x": "date", "y": "spx", "y_title": "SPX"},
-                    title="S&P 500",
-                    annotations=[{
-                        "type": "vline", "x": "2026-01-15",
-                        "label": "FY guidance",
-                        "color": "#1a365d", "style": "dashed"}]),
-        ChartSpec(df=df, chart_type="line",
-                    mapping={"x": "date", "y": "dxy", "y_title": "DXY"},
-                    title="US Dollar index"),
-        ChartSpec(df=df, chart_type="line",
-                    mapping={"x": "date", "y": "wti",
-                              "y_title": "WTI ($/bbl)"},
-                    title="WTI crude",
-                    annotations=[{
-                        "type": "band", "y1": 75, "y2": 85,
-                        "label": "Fair-value band",
-                        "color": "#7399C6", "opacity": 0.18}]),
-        ChartSpec(df=df, chart_type="line",
-                    mapping={"x": "date", "y": "gold",
-                              "y_title": "Gold ($/oz)"},
-                    title="Gold",
-                    annotations=[{
-                        "type": "point", "x": "2026-04-01", "y": 2500,
-                        "label": "All-time high",
-                        "color": "#dd6b20"}]),
-        title="Cross-asset snapshot",
-        subtitle="1Y daily close, synthetic",
-        session_path=str(out_dir),
-        chart_name="composite",
-    )
-    png_path: Optional[Path] = out_dir / "composite.png"
-    try:
-        r.save_png(png_path, width=1400, height=800, scale=2)
-    except Exception as e:
-        print(f"  [warn] PNG render failed: {e}")
-        png_path = Path(r.png_path) if r.png_path else None
-    return {
-        "title": "Cross-asset snapshot",
-        "description": ("Four major asset classes in one conversational "
-                         "composite (SPX, DXY, WTI, Gold) with event "
-                         "annotations."),
-        "kind": "composite",
-        "html": r.html_path,
-        "png": str(png_path) if png_path else None,
-        "manifest": None,
-        "success": r.success, "warnings": r.warnings,
-    }
-
-
 def build_risk_regime(out_dir: Path) -> Dict[str, Any]:
-    """Risk regime monitor: cross-asset correlation heatmap, VIX term
-    structure by regime, factor-return boxplots, running drawdown."""
-    df_corr = pull_correlation_matrix()
+    """Risk regime monitor: cross-asset correlation_matrix, VIX term
+    structure by regime, scatter_multi factor vs MKT, running drawdown."""
+    df_panel = pull_corr_panel()
     df_vix = pull_vix_term()
     df_fac = pull_factor_returns()
+    df_fvm = pull_factor_vs_mkt()
     df_dd = pull_drawdown()
 
     manifest = {
         "schema_version": 1,
         "id": "risk_regime",
         "title": "Risk regime monitor",
-        "description": ("Cross-asset correlation heatmap, VIX term "
-                         "structure across regimes, factor-return "
-                         "distributions, and running drawdown."),
+        "description": ("Cross-asset correlation_matrix on % changes, "
+                         "VIX term structure across regimes, factor "
+                         "scatter_multi vs MKT with per-group OLS, "
+                         "factor-return boxplots, and running drawdown "
+                         "with arrow + band annotations."),
         "theme": "gs_clean",
         "datasets": {
-            "corr": df_corr, "vix_term": df_vix,
-            "factors": df_fac, "drawdown": df_dd,
+            "corr_panel": df_panel,
+            "vix_term":  df_vix,
+            "factors":   df_fac,
+            "fvm":       df_fvm,
+            "drawdown":  df_dd,
         },
         "layout": {"rows": [
             [
                 {"widget": "chart", "id": "corr", "w": 6, "h_px": 420,
+                  "title": "Cross-asset correlation (% change)",
+                  "subtitle": ("Pearson r over the visible window; "
+                                "computed by the correlation_matrix "
+                                "builder from the wide-form panel."),
                   "spec": {
-                      "chart_type": "heatmap", "dataset": "corr",
-                      "mapping": {"x": "a", "y": "b", "value": "corr"},
-                      "title": "Rolling 6M cross-asset correlation",
-                      "palette": "gs_diverging"}},
+                      "chart_type": "correlation_matrix",
+                      "dataset": "corr_panel",
+                      "mapping": {
+                          "columns": ["spx", "ndx", "us_10y", "us_2y",
+                                       "dxy", "gold", "wti", "bitcoin"],
+                          "method":      "pearson",
+                          "transform":   "pct_change",
+                          "order_by":    "date",
+                          "min_periods": 30,
+                          "show_values": True,
+                          "value_decimals": 2}}},
                 {"widget": "chart", "id": "vix", "w": 6, "h_px": 420,
                   "spec": {
                       "chart_type": "multi_line", "dataset": "vix_term",
@@ -824,6 +893,22 @@ def build_risk_regime(out_dir: Path) -> Dict[str, Any]:
                       ]}},
             ],
             [
+                {"widget": "chart", "id": "fvm_scatter", "w": 6, "h_px": 380,
+                  "title": "Factor returns vs MKT (per-group OLS)",
+                  "subtitle": "scatter_multi with trendlines per factor.",
+                  "spec": {
+                      "chart_type": "scatter_multi", "dataset": "fvm",
+                      "mapping": {"x": "mkt_pct", "y": "factor_pct",
+                                    "color": "factor",
+                                    "trendlines": True,
+                                    "x_title": "MKT monthly return (%)",
+                                    "y_title": ("Factor monthly "
+                                                 "return (%)")},
+                      "annotations": [
+                          {"type": "hline", "y": 0, "color": "#aaa",
+                            "style": "dashed"},
+                          {"type": "vline", "x": 0, "color": "#aaa",
+                            "style": "dashed"}]}},
                 {"widget": "chart", "id": "factors", "w": 6, "h_px": 380,
                   "spec": {
                       "chart_type": "boxplot", "dataset": "factors",
@@ -834,24 +919,47 @@ def build_risk_regime(out_dir: Path) -> Dict[str, Any]:
                           {"type": "hline", "y": 0, "label": "",
                             "color": "#718096", "style": "dashed"},
                       ]}},
-                {"widget": "chart", "id": "drawdown", "w": 6, "h_px": 380,
+            ],
+            [
+                {"widget": "chart", "id": "drawdown", "w": 12, "h_px": 360,
                   "spec": {
                       "chart_type": "line", "dataset": "drawdown",
                       "mapping": {"x": "date", "y": "drawdown_pct",
                                     "y_title": "Drawdown (%)"},
                       "title": "Running drawdown",
+                      "subtitle": ("Band marks the bear-market zone; "
+                                    "arrow points from the trough to "
+                                    "the recovery."),
                       "annotations": [
                           {"type": "band", "y1": -20, "y2": -100,
                             "label": "Bear-market zone",
                             "color": "#c53030", "opacity": 0.08},
+                          {"type": "arrow",
+                            "x1": "2022-10-12", "y1": -23.5,
+                            "x2": "2023-08-01", "y2": -4.5,
+                            "label": "10mo recovery",
+                            "color": "#2E7D32",
+                            "head_size": 9},
+                          {"type": "point",
+                            "x": "2022-10-12", "y": -23.5,
+                            "label": "Trough",
+                            "color": "#B3261E",
+                            "font_size": 11},
                       ]}},
             ],
         ]},
+        "links": [
+            # Brush-cross-filter: drag a vertical band on the drawdown
+            # chart to filter the cross-asset panel. lineX brush
+            # exercises a brush type the gallery otherwise misses.
+            {"group": "dd_brush", "members": ["drawdown", "corr"],
+              "brush": {"type": "lineX", "xAxisIndex": 0}},
+        ],
     }
     r = compile_dashboard(manifest,
                            output_path=str(out_dir / "dashboard.html"))
     thumb = _thumbnail(r.html_path, out_dir / "thumbnail.png",
-                        width=1500, height=1100)
+                        width=1500, height=1500)
     return _result(r, thumb)
 
 
@@ -1038,9 +1146,10 @@ def build_fomc_monitor(out_dir: Path) -> Dict[str, Any]:
             "probs": df_probs,
         },
         "filters": [
-            {"id": "dt", "type": "dateRange", "default": "1Y",
+            {"id": "lookback", "type": "dateRange", "default": "1Y",
               "targets": ["ffr_chart", "fut_chart"],
-              "field": "date", "label": "Lookback"},
+              "field": "date", "label": "Initial range",
+              "scope": "global"},
         ],
         "layout": {"kind": "tabs", "tabs": [
             {"id": "overview", "label": "Overview",
@@ -1305,14 +1414,42 @@ def _pull_global_outbound_share() -> pd.DataFrame:
     return out[["region", "v"]].rename(columns={"v": "outbound"})
 
 
+def _pull_counterparty_tree() -> pd.DataFrame:
+    """Tiered hierarchy of counterparty types -> firms.
+    Shape suits the `tree` chart_type (mapping: name + parent)."""
+    rows = [
+        # Root.
+        {"name": "Universe",      "parent": None},
+        # Tiers.
+        {"name": "Banks",         "parent": "Universe"},
+        {"name": "Asset Mgrs",    "parent": "Universe"},
+        {"name": "Pensions",      "parent": "Universe"},
+        # Banks.
+        {"name": "GS",            "parent": "Banks"},
+        {"name": "JPM",           "parent": "Banks"},
+        {"name": "MS",            "parent": "Banks"},
+        {"name": "BAC",           "parent": "Banks"},
+        # Asset managers.
+        {"name": "BlackRock",     "parent": "Asset Mgrs"},
+        {"name": "Vanguard",      "parent": "Asset Mgrs"},
+        {"name": "State Street",  "parent": "Asset Mgrs"},
+        # Pensions.
+        {"name": "CalPERS",       "parent": "Pensions"},
+        {"name": "GPFG",          "parent": "Pensions"},
+        {"name": "ABP",           "parent": "Pensions"},
+    ]
+    return pd.DataFrame(rows)
+
+
 def build_global_flows(out_dir: Path) -> Dict[str, Any]:
     """Global flows dashboard: sankey + donut + treemap + sunburst + graph
-    + funnel + stat_grid."""
+    + tree + funnel + stat_grid."""
     df_flows = _pull_global_trade_flows()
     df_share = _pull_global_outbound_share()
     df_tree = _pull_global_asset_treemap()
     df_funnel = _pull_global_aum_funnel()
     df_net = _pull_global_bank_network()
+    df_cptree = _pull_counterparty_tree()
     total = int(df_flows["v"].sum())
     largest_bil = int(df_flows["v"].max())
 
@@ -1321,8 +1458,8 @@ def build_global_flows(out_dir: Path) -> Dict[str, Any]:
         "id": "global_flows",
         "title": "Global flows & allocation",
         "description": ("Cross-border trade flows, asset-class "
-                         "allocation, counterparty network, mandate "
-                         "conversion funnel."),
+                         "allocation, counterparty network + "
+                         "hierarchy, mandate conversion funnel."),
         "theme": "gs_clean",
         "palette": "gs_primary",
         "datasets": {
@@ -1331,6 +1468,7 @@ def build_global_flows(out_dir: Path) -> Dict[str, Any]:
             "tree":   df_tree,
             "funnel": df_funnel,
             "net":    df_net,
+            "cptree": df_cptree,
         },
         "layout": {"kind": "tabs", "tabs": [
             {"id": "flows", "label": "Flows",
@@ -1403,11 +1541,12 @@ def build_global_flows(out_dir: Path) -> Dict[str, Any]:
             ]},
             {"id": "network", "label": "Counterparty network",
               "description": ("Bank-asset-manager-pension exposure "
-                               "graph."),
+                               "graph (left) + hierarchical tree "
+                               "(right)."),
               "rows": [
                 [
                     {"widget": "chart", "id": "net_graph",
-                      "w": 12, "h_px": 520,
+                      "w": 8, "h_px": 520,
                       "spec": {
                           "chart_type": "graph", "dataset": "net",
                           "mapping": {"source": "src",
@@ -1416,6 +1555,15 @@ def build_global_flows(out_dir: Path) -> Dict[str, Any]:
                                         "node_category": "category"},
                           "title": ("Counterparty exposure network "
                                       "(drag nodes)")}},
+                    {"widget": "chart", "id": "cp_tree",
+                      "w": 4, "h_px": 520,
+                      "spec": {
+                          "chart_type": "tree", "dataset": "cptree",
+                          "mapping": {"name": "name",
+                                        "parent": "parent"},
+                          "title": "Counterparty hierarchy",
+                          "subtitle": ("Org-style view: tier -> firm. "
+                                         "Click a node to collapse.")}},
                 ],
             ]},
             {"id": "funnel", "label": "Mandate funnel",
@@ -1652,9 +1800,10 @@ def build_equity_deep_dive(out_dir: Path) -> Dict[str, Any]:
             "kpi":    df_kpi,
         },
         "filters": [
-            {"id": "dt", "type": "dateRange", "default": "1Y",
+            {"id": "price_range", "type": "dateRange", "default": "1Y",
               "targets": ["price_chart", "vol_chart"],
-              "field": "date", "label": "Price lookback"},
+              "field": "date", "label": "Initial price range",
+              "scope": "global"},
         ],
         "layout": {"kind": "tabs", "tabs": [
             {"id": "price", "label": "Price & volume",
@@ -1998,27 +2147,35 @@ def build_portfolio_analytics(out_dir: Path) -> Dict[str, Any]:
         ],
         "layout": {"kind": "grid", "cols": 12, "rows": [
             [
+                # `pinned: True` glues the KPI ribbon to the top of
+                # the viewport while the user scrolls through the
+                # rest of the dashboard. Exercises a widget knob the
+                # rest of the gallery doesn't reach.
                 {"widget": "kpi", "id": "k_aum", "label": "AUM",
                   "source": "kpi.latest.aum_mm",
                   "delta_source": "kpi.prev.aum_mm",
                   "sparkline_source": "kpi.aum_mm",
-                  "suffix": " mm", "decimals": 0, "w": 3},
+                  "suffix": " mm", "decimals": 0, "w": 3,
+                  "pinned": True},
                 {"widget": "kpi", "id": "k_pnl", "label": "MTD P&L",
                   "source": "kpi.latest.pnl_mtd_mm",
                   "delta_source": "kpi.prev.pnl_mtd_mm",
                   "sparkline_source": "kpi.pnl_mtd_mm",
                   "prefix": "$", "suffix": " mm",
-                  "decimals": 2, "w": 3},
+                  "decimals": 2, "w": 3,
+                  "pinned": True},
                 {"widget": "kpi", "id": "k_sh", "label": "Sharpe",
                   "source": "kpi.latest.sharpe",
                   "delta_source": "kpi.prev.sharpe",
                   "sparkline_source": "kpi.sharpe",
-                  "decimals": 2, "w": 3},
+                  "decimals": 2, "w": 3,
+                  "pinned": True},
                 {"widget": "kpi", "id": "k_var", "label": "1D 99% VaR",
                   "source": "kpi.latest.var_mm",
                   "delta_source": "kpi.prev.var_mm",
                   "sparkline_source": "kpi.var_mm",
-                  "suffix": " mm", "decimals": 2, "w": 3},
+                  "suffix": " mm", "decimals": 2, "w": 3,
+                  "pinned": True},
             ],
             [
                 {"widget": "stat_grid", "id": "summary", "w": 12,
@@ -2133,7 +2290,15 @@ def build_portfolio_analytics(out_dir: Path) -> Dict[str, Any]:
                       ]}},
             ],
         ]},
-        "links": [],
+        "links": [
+            # lineY brush exercises the y-band selection shape that
+            # rect / lineX / polygon don't cover. Drag a horizontal
+            # band on the histogram to mark a return range; the
+            # parallel_chart member echoes the selection.
+            {"group": "ret_brush",
+              "members": ["ret_hist", "parallel_chart"],
+              "brush": {"type": "lineY", "yAxisIndex": 0}},
+        ],
     }
 
     r = compile_dashboard(manifest,
@@ -2376,15 +2541,20 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
             "mov": df_mov, "chg": df_chg,
         },
         "filters": [
-            {"id": "dt", "type": "dateRange", "default": "1Y",
+            # Wildcard prefix targets exercise the "fx_*" / "cm_*"
+            # pattern that the rest of the gallery never reaches.
+            # Together they cover every time-series chart on the
+            # page without listing each widget id explicitly.
+            {"id": "lookback", "type": "dateRange", "default": "1Y",
               "targets": ["eq_indices", "rt_curve",
-                           "fx_majors", "cm_energy",
-                           "cm_metals"],
-              "field": "date", "label": "Lookback",
-              "description": ("Filters every time-series chart on "
-                                "this page to the selected lookback "
-                                "window. Does not affect the "
-                                "sector / top-movers panels.")},
+                           "fx_*", "cm_*"],
+              "field": "date", "label": "Initial range",
+              "scope": "global",
+              "description": ("Wildcard prefix targets (`fx_*`, "
+                                "`cm_*`) plus explicit ids for the "
+                                "remaining time-series tiles. Each "
+                                "chart can still be zoomed "
+                                "independently via its slider.")},
             {"id": "sector", "type": "select", "default": "",
               "all_value": "",
               "options": ["", "Technology", "Consumer Disc",
@@ -2402,6 +2572,30 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
               "targets": ["movers_table"]},
         ],
         "layout": {"kind": "grid", "cols": 12, "rows": [
+            # Top banner: image widget (GS Markets logo as inline
+            # SVG data URL) + a markdown title strip beside it.
+            [
+                {"widget": "image", "id": "logo", "w": 3,
+                  "src": (
+                      "data:image/svg+xml;base64,"
+                      "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdm"
+                      "ciIHZpZXdCb3g9IjAgMCAyMjAgNjAiIHdpZHRoPSIyMjAiIGh"
+                      "laWdodD0iNjAiPjxyZWN0IHdpZHRoPSIyMjAiIGhlaWdodD0i"
+                      "NjAiIGZpbGw9IiMwMDJGNkMiLz48dGV4dCB4PSIxMTAiIHk9I"
+                      "jQyIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiIgZm9udC1zaX"
+                      "plPSIzMCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWR"
+                      "kbGUiIGZvbnQtd2VpZ2h0PSI3MDAiPkdTIE1hcmtldHM8L3Rl"
+                      "eHQ+PC9zdmc+"
+                  ),
+                  "alt": "GS Markets",
+                  "link": "https://example.com/markets"},
+                {"widget": "markdown", "id": "banner", "w": 9,
+                  "content": ("# Cross-asset end-of-day wrap\n\n"
+                                "*Equities, rates, FX, commodities -- "
+                                "one scrollable page. Heat-mapped top "
+                                "movers at the bottom.*")},
+            ],
+            [{"widget": "divider", "id": "div_kpi"}],
             [
                 {"widget": "kpi", "id": "k_spx", "w": 2,
                   "label": "S&P 500",
@@ -2440,6 +2634,7 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
                   "sparkline_source": "kpi.vix",
                   "decimals": 2},
             ],
+            [{"widget": "divider", "id": "div_eq"}],
             [
                 {"widget": "markdown", "id": "sec_eq", "w": 12,
                   "content": "## Equities"},
@@ -2485,6 +2680,7 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
                                     "legend_position": "none"},
                       "title": "S&P 500 sectors YTD"}},
             ],
+            [{"widget": "divider", "id": "div_rt"}],
             [
                 {"widget": "markdown", "id": "sec_rt", "w": 12,
                   "content": "## Rates"},
@@ -2516,6 +2712,7 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
                             "style": "dashed", "label": ""},
                       ]}},
             ],
+            [{"widget": "divider", "id": "div_fx"}],
             [
                 {"widget": "markdown", "id": "sec_fx", "w": 12,
                   "content": "## FX"},
@@ -2552,6 +2749,7 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
                       "title": "EUR vs GBP",
                       "legend_position": "top"}},
             ],
+            [{"widget": "divider", "id": "div_cm"}],
             [
                 {"widget": "markdown", "id": "sec_cm", "w": 12,
                   "content": "## Commodities"},
@@ -2595,6 +2793,7 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
                                     "legend_position": "none"},
                       "title": "Wheat"}},
             ],
+            [{"widget": "divider", "id": "div_tab"}],
             [
                 {"widget": "markdown", "id": "sec_tab", "w": 12,
                   "content": "## Top movers"},
@@ -2646,10 +2845,13 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
             ],
         ]},
         "links": [
+            # legend sync exercises a sync value the rest of the
+            # gallery misses (axis / tooltip / dataZoom are common;
+            # legend stays in sync as the user toggles series).
             {"group": "sync_wrap",
               "members": ["eq_indices", "rt_curve",
                            "fx_majors", "cm_energy", "cm_metals"],
-              "sync": ["axis", "tooltip", "dataZoom"]},
+              "sync": ["axis", "tooltip", "dataZoom", "legend"]},
         ],
     }
     r = compile_dashboard(manifest,
@@ -2732,6 +2934,111 @@ def _pull_bond_main() -> pd.DataFrame:
             "current_yield_pct": round(current_yield, 3),
         })
     return pd.DataFrame(rows)
+
+
+def _bond_main_field_provenance() -> Dict[str, Dict[str, Any]]:
+    """Per-column lineage for the bond universe dataset. Illustrative
+    rather than real (the demo is synthetic) but mirrors the canonical
+    shape PRISM emits in production: GS market_data coordinates for
+    valuation columns, an internal bond reference table for static
+    descriptors, computed columns for derived quantities. Drives the
+    "Sources" footer on every click popup -- both the explicit ones
+    in this demo and the auto-default popups (top_total bar, sector
+    summary chart) where no click_popup is declared."""
+    md = "GS Market Data"
+    ref = "GS Bond Reference Master"
+    return {
+        "cusip":       {"system": "csv", "symbol": "bond_master:cusip",
+                         "source_label": ref,
+                         "display_name": "CUSIP"},
+        "issuer":      {"system": "csv", "symbol": "bond_master:issuer",
+                         "source_label": ref,
+                         "display_name": "Issuer"},
+        "sector":      {"system": "csv", "symbol": "bond_master:sector",
+                         "source_label": ref, "display_name": "Sector"},
+        "rating":      {"system": "csv", "symbol": "bond_master:rating",
+                         "source_label": ref, "display_name": "Composite rating"},
+        "coupon_pct":  {"system": "csv", "symbol": "bond_master:coupon",
+                         "source_label": ref, "display_name": "Coupon",
+                         "units": "percent"},
+        "maturity":    {"system": "csv", "symbol": "bond_master:maturity",
+                         "source_label": ref, "display_name": "Maturity"},
+        "years_to_maturity": {"system": "computed",
+                                 "recipe": "(maturity - as_of) / 365.25",
+                                 "computed_from": ["maturity"],
+                                 "display_name": "Years to maturity",
+                                 "units": "years"},
+        "price":       {"system": "market_data",
+                         "symbol": "FI_Corp_<cusip>_CleanPrice",
+                         "tsdb_symbol": "fi.corp.<cusip>.clean_px",
+                         "source_label": md,
+                         "display_name": "Clean price"},
+        "ytm_pct":     {"system": "market_data",
+                         "symbol": "FI_Corp_<cusip>_YTM",
+                         "tsdb_symbol": "fi.corp.<cusip>.ytm",
+                         "source_label": md,
+                         "display_name": "YTM",
+                         "units": "percent"},
+        "spread_bp":   {"system": "market_data",
+                         "symbol": "FI_Corp_<cusip>_Spread",
+                         "tsdb_symbol": "fi.corp.<cusip>.oas",
+                         "source_label": md,
+                         "display_name": "OAS to UST",
+                         "units": "bp"},
+        "duration_yrs": {"system": "computed",
+                          "recipe": "years_to_maturity / (1 + ytm/100) * 0.92",
+                          "computed_from": ["years_to_maturity", "ytm_pct"],
+                          "display_name": "Modified duration",
+                          "units": "years"},
+        "current_yield_pct": {"system": "computed",
+                                "recipe": "coupon_pct / price * 100",
+                                "computed_from": ["coupon_pct", "price"],
+                                "display_name": "Current yield",
+                                "units": "percent"},
+        "carry_bp":    {"system": "computed",
+                         "recipe": "(ytm_pct - financing_rate) * 100",
+                         "computed_from": ["ytm_pct"],
+                         "display_name": "Carry",
+                         "units": "bp"},
+        "roll_bp":     {"system": "computed",
+                         "recipe": "approx rolldown along the curve",
+                         "computed_from": ["duration_yrs", "spread_bp"],
+                         "display_name": "Roll",
+                         "units": "bp"},
+        "total_bp":    {"system": "computed",
+                         "recipe": "carry_bp + roll_bp",
+                         "computed_from": ["carry_bp", "roll_bp"],
+                         "display_name": "Total expected return",
+                         "units": "bp"},
+        "financing_bp": {"system": "market_data",
+                          "symbol": "FI_USD_1M_FundingRate",
+                          "tsdb_symbol": "fi.usd.fund.1m",
+                          "source_label": md,
+                          "display_name": "1M financing rate",
+                          "units": "bp"},
+        "blurb":       {"system": "csv", "symbol": "issuer_blurbs:blurb",
+                         "source_label": "GS Research issuer notes"},
+    }
+
+
+def _bond_hist_field_provenance() -> Dict[str, Dict[str, Any]]:
+    """Provenance for the bond_hist dataset (price + spread time
+    series filtered per CUSIP in click-popup detail charts)."""
+    md = "GS Market Data"
+    return {
+        "date":      {"system": "index", "symbol": "date",
+                       "display_name": "Date"},
+        "cusip":     {"system": "csv", "symbol": "bond_master:cusip",
+                       "source_label": "GS Bond Reference Master"},
+        "price":     {"system": "market_data",
+                       "symbol": "FI_Corp_<cusip>_CleanPrice_EOD",
+                       "tsdb_symbol": "fi.corp.<cusip>.clean_px.eod",
+                       "source_label": md, "units": "USD"},
+        "spread_bp": {"system": "market_data",
+                       "symbol": "FI_Corp_<cusip>_OAS_EOD",
+                       "tsdb_symbol": "fi.corp.<cusip>.oas.eod",
+                       "source_label": md, "units": "bp"},
+    }
 
 
 def _pull_bond_price_history() -> pd.DataFrame:
@@ -2971,8 +3278,8 @@ def build_screener_studio(out_dir: Path) -> Dict[str, Any]:
               "placeholder": "e.g. 10Y, vol, spread",
               "targets": ["rv_table"]},
             # Tab 2 (auto-scoped to filter_library: all 9 filter types)
-            {"id": "fs_dt", "type": "dateRange", "default": "6M",
-              "field": "date", "label": "Lookback",
+            {"id": "fs_lookback", "type": "dateRange", "default": "6M",
+              "field": "date", "label": "Initial range",
               "targets": ["vol_by_sector", "count_by_rating",
                            "rows_table"]},
             {"id": "fs_region", "type": "select", "default": "",
@@ -3532,12 +3839,107 @@ def build_bond_carry_roll(out_dir: Path) -> Dict[str, Any]:
                 "Consumer, Healthcare, Utilities, Media, REIT)."),
         },
 
+        # Datasets carry per-column provenance so every click popup
+        # (explicit OR auto-default) gets a Sources footer for free.
+        # For one bond (Tesla) we override a couple of cells to show
+        # how `row_provenance` swaps the system/source per row -- in
+        # production this is the pattern when an entity-keyed table
+        # mixes vendors (one bond from market_data, another from
+        # Bloomberg, a third from a static CSV).
         "datasets": {
-            "bonds": main_with_blurb,
-            "sectors": sectors,
-            "top_total": top_total,
-            "bond_hist": hist,
-            "bond_events": events,
+            "bonds": {
+                "source": main_with_blurb,
+                "field_provenance": _bond_main_field_provenance(),
+                "row_provenance_field": "cusip",
+                "row_provenance": {
+                    "TSLA-2030": {
+                        "price":     {"system": "bloomberg",
+                                       "symbol": "TSLA 5.000 6/15/30 Corp",
+                                       "bloomberg_ticker": "TSLA 5 30",
+                                       "source_label": "Bloomberg"},
+                        "ytm_pct":   {"system": "bloomberg",
+                                       "symbol": "TSLA 5.000 6/15/30 Corp YTM",
+                                       "source_label": "Bloomberg"},
+                        "spread_bp": {"system": "bloomberg",
+                                       "symbol": "TSLA 5.000 6/15/30 Corp OAS",
+                                       "source_label": "Bloomberg"},
+                    },
+                },
+            },
+            "sectors": {
+                "source": sectors,
+                "field_provenance": {
+                    "sector": {"system": "csv",
+                                "symbol": "bond_master:sector",
+                                "source_label": "GS Bond Reference Master",
+                                "display_name": "Sector"},
+                    "avg_carry_bp": {"system": "computed",
+                                       "recipe": "mean(carry_bp) by sector",
+                                       "computed_from": ["bonds.carry_bp"],
+                                       "display_name": "Avg carry",
+                                       "units": "bp"},
+                    "avg_roll_bp":  {"system": "computed",
+                                       "recipe": "mean(roll_bp) by sector",
+                                       "computed_from": ["bonds.roll_bp"],
+                                       "display_name": "Avg roll",
+                                       "units": "bp"},
+                    "avg_total_bp": {"system": "computed",
+                                       "recipe": "avg_carry_bp + avg_roll_bp",
+                                       "computed_from":
+                                           ["sectors.avg_carry_bp",
+                                            "sectors.avg_roll_bp"],
+                                       "display_name": "Avg total",
+                                       "units": "bp"},
+                    "avg_duration": {"system": "computed",
+                                       "recipe": "mean(duration_yrs) by sector",
+                                       "computed_from":
+                                           ["bonds.duration_yrs"],
+                                       "display_name": "Avg duration",
+                                       "units": "years"},
+                    "avg_spread_bp": {"system": "computed",
+                                        "recipe": "mean(spread_bp) by sector",
+                                        "computed_from": ["bonds.spread_bp"],
+                                        "display_name": "Avg OAS",
+                                        "units": "bp"},
+                    "avg_ytm_pct":  {"system": "computed",
+                                       "recipe": "mean(ytm_pct) by sector",
+                                       "computed_from": ["bonds.ytm_pct"],
+                                       "display_name": "Avg YTM",
+                                       "units": "percent"},
+                    "n_bonds":      {"system": "computed",
+                                       "recipe": "count(cusip) by sector",
+                                       "computed_from": ["bonds.cusip"],
+                                       "display_name": "Bonds in sector"},
+                },
+            },
+            "top_total": {
+                "source": top_total,
+                "field_provenance": _bond_main_field_provenance(),
+            },
+            "bond_hist": {
+                "source": hist,
+                "field_provenance": _bond_hist_field_provenance(),
+            },
+            "bond_events": {
+                "source": events,
+                "field_provenance": {
+                    "date":     {"system": "csv",
+                                  "symbol": "bond_events:date",
+                                  "source_label": "GS Research event log"},
+                    "issuer":   {"system": "csv",
+                                  "symbol": "bond_master:issuer",
+                                  "source_label":
+                                      "GS Bond Reference Master"},
+                    "event":    {"system": "csv",
+                                  "symbol": "bond_events:event",
+                                  "source_label":
+                                      "GS Research event log"},
+                    "reaction": {"system": "csv",
+                                  "symbol": "bond_events:reaction",
+                                  "source_label":
+                                      "GS Research event log"},
+                },
+            },
         },
 
         "filters": [
@@ -5605,6 +6007,838 @@ def build_research_feed(out_dir: Path) -> Dict[str, Any]:
 
 
 # =============================================================================
+# DEMO: macro_studio  (interactive bivariate analysis)
+# =============================================================================
+#
+# Centerpiece: `scatter_studio` chart with the full feature surface --
+# author whitelists X / Y / color / size columns, viewer picks
+# combinations at runtime, per-axis transforms, regression toggle,
+# window slicer, outlier filter, stats strip.
+#
+# Also exercises:
+#   - `correlation_matrix` builder w/ a different transform than
+#     risk_regime (raw levels) so both views are represented.
+#   - `mapping.axes` 4-axis time-series chart (3+ axes API the
+#     legacy 2-axis demo never reaches).
+#   - `y_log` log-scale toggle on a credit spread chart.
+#   - `polygon` brush type on the studio scatter.
+
+
+def _pull_macro_panel(years: int = 5) -> pd.DataFrame:
+    """Wide-form macro panel for scatter_studio + correlation_matrix +
+    mapping.axes. One row per business day, plain-English columns,
+    plus a categorical `regime` for the color dropdown."""
+    random.seed(SEED + 80)
+    n = 252 * years
+    dates = pd.date_range(end=END_DATE, periods=n, freq="B")
+    us_2y, us_10y, real_10y, be_5y5y = 4.05, 4.31, 1.85, 2.42
+    ig_oas, hy_oas = 110.0, 360.0
+    vix = 16.0
+    spx = 5100.0
+    dxy = 104.0
+    rows = []
+    for i, d in enumerate(dates):
+        # Stylised regime path: Hiking -> Hold -> Cutting -> Easing
+        if i < n * 0.30:
+            regime = "Hiking"
+            us_2y += random.gauss(0.005, 0.020)
+            spx_drift, ig_drift = -0.0001, 0.18
+        elif i < n * 0.55:
+            regime = "Hold"
+            us_2y += random.gauss(0.0, 0.014)
+            spx_drift, ig_drift = 0.0004, 0.05
+        elif i < n * 0.80:
+            regime = "Cutting"
+            us_2y += random.gauss(-0.005, 0.018)
+            spx_drift, ig_drift = 0.0006, -0.10
+        else:
+            regime = "Easing"
+            us_2y += random.gauss(-0.004, 0.020)
+            spx_drift, ig_drift = 0.0008, -0.15
+        us_2y = max(0.50, us_2y)
+        us_10y = max(0.80, us_10y + random.gauss(0, 0.016))
+        be_5y5y = max(0.5, be_5y5y + random.gauss(0, 0.012))
+        real_10y = max(-0.5, us_10y - be_5y5y)
+        ig_oas = max(60, ig_oas + ig_drift + random.gauss(0, 1.2))
+        hy_oas = max(220, hy_oas + 2.5 * ig_drift + random.gauss(0, 4.0))
+        vix = max(9, vix + random.gauss(0, 0.85)
+                   + (3.0 if regime == "Hiking" else 0.0)
+                   + (-1.2 if regime == "Easing" else 0.0))
+        spx *= 1 + spx_drift + random.gauss(0, 0.0095)
+        dxy += random.gauss(0, 0.20)
+        rows.append({
+            "date":         d,
+            "us_2y":        round(us_2y, 3),
+            "us_10y":       round(us_10y, 3),
+            "real_10y":     round(real_10y, 3),
+            "breakeven_5y5y": round(be_5y5y, 3),
+            "ig_oas_bp":    round(ig_oas, 1),
+            "hy_oas_bp":    round(hy_oas, 1),
+            "vix":          round(vix, 2),
+            "spx":          round(spx, 2),
+            "dxy":          round(dxy, 2),
+            "regime":       regime,
+        })
+    return pd.DataFrame(rows)
+
+
+def build_macro_studio(out_dir: Path) -> Dict[str, Any]:
+    """Macro studio: scatter_studio + correlation_matrix + multi-axis
+    time series + log-scale credit spread chart."""
+    df_panel = _pull_macro_panel()
+
+    manifest = {
+        "schema_version": 1,
+        "id": "macro_studio",
+        "title": "Macro studio (interactive)",
+        "description": ("Exploratory bivariate analysis: pick any X / "
+                         "Y / color / size from the whitelist, apply "
+                         "per-axis transforms, fit OLS per group, and "
+                         "read off the stats strip beneath the canvas. "
+                         "Plus a 4-axis macro overlay and a log-scale "
+                         "credit chart with polygon brush."),
+        "theme": "gs_clean",
+        "palette": "gs_primary",
+        "metadata": {
+            "data_as_of": "2026-04-22T16:00:00Z",
+            "generated_at": "2026-04-22T16:05:00Z",
+            "sources": ["GS Market Data", "Synthetic"],
+            "tags": ["macro", "interactive", "studio"],
+            "summary": {
+                "title": "Studio mode",
+                "body": (
+                    "Use the **chart controls drawer** "
+                    "(`\u22EE` button on each chart tile) to flip X / "
+                    "Y, change transform, toggle the regression line, "
+                    "and slice the visible window.\n\n"
+                    "1. **Levels vs levels**: pick `us_10y` (X) and "
+                    "`vix` (Y) -- baseline negative tilt, wide cloud.\n"
+                    "2. **% change vs % change**: switch both "
+                    "transforms to `pct_change` -- structure tightens.\n"
+                    "3. **Per-regime fit**: set color to `regime`, "
+                    "regression to `ols_per_group` -- different fits "
+                    "by Hiking / Hold / Cutting / Easing."),
+            },
+            "methodology": (
+                "## Studio whitelist\n\n"
+                "All numeric columns of the macro panel are exposed "
+                "as X / Y choices. Color is restricted to `regime`. "
+                "Window slicer ranges from full history down to "
+                "1-year. Per-axis transforms include raw / log / "
+                "change / pct_change / yoy_pct / zscore / "
+                "rolling_zscore_252 / rank_pct.\n\n"
+                "## Stats strip\n\n"
+                "* `n` -- count after window + outlier filter\n"
+                "* `r` -- Pearson correlation (with significance "
+                "stars)\n"
+                "* `R^2` -- coefficient of determination\n"
+                "* `beta`, `alpha`, `RMSE`, `p-value`\n\n"
+                "With `OLS per color`, per-group `r` / `R^2` / "
+                "`beta` / `n` is also listed."
+            ),
+        },
+        "datasets": {"macro": df_panel},
+        "filters": [
+            {"id": "studio_window", "type": "dateRange", "default": "2Y",
+              "field": "date", "label": "Initial range",
+              "scope": "global",
+              "targets": ["spread_log", "macro_axes"],
+              "description": ("Sets the visible window on the credit "
+                                "and multi-axis charts. The studio's "
+                                "own slider is on the controls drawer.")},
+        ],
+        "layout": {"kind": "tabs", "cols": 12, "tabs": [
+            # --- Tab 1: Studio + correlation matrix --------------------
+            {"id": "studio", "label": "Bivariate studio",
+              "description": ("Pick any X / Y from the dropdowns; "
+                                "the OLS line and stats strip "
+                                "recompute live."),
+              "rows": [
+                  [
+                      {"widget": "chart", "id": "studio_chart",
+                        "w": 8, "h_px": 520,
+                        "title": "Macro pairs (interactive)",
+                        "subtitle": ("Use the controls drawer "
+                                       "(\u22EE) to switch X / Y / "
+                                       "color / transform / "
+                                       "regression / window."),
+                        "footer": ("Stars: *** p<0.001, ** p<0.01, "
+                                    "* p<0.05, \u00B7 p<0.10. "
+                                    "P-value uses normal-approx; "
+                                    "display only."),
+                        "spec": {
+                            "chart_type": "scatter_studio",
+                            "dataset": "macro",
+                            "mapping": {
+                                "x_columns":     [
+                                    "us_2y", "us_10y", "real_10y",
+                                    "breakeven_5y5y", "ig_oas_bp",
+                                    "hy_oas_bp", "vix", "dxy"],
+                                "y_columns":     [
+                                    "spx", "vix", "ig_oas_bp",
+                                    "hy_oas_bp", "breakeven_5y5y",
+                                    "real_10y", "us_10y"],
+                                "color_columns": ["regime"],
+                                "order_by":      "date",
+                                "x_default":     "us_10y",
+                                "y_default":     "vix",
+                                "color_default": "regime",
+                                "label_column":  "date"},
+                            "studio": {
+                                "transforms": [
+                                    "raw", "log", "change",
+                                    "pct_change", "yoy_pct",
+                                    "zscore", "rolling_zscore_252",
+                                    "rank_pct"],
+                                "regression": ["off", "ols",
+                                                "ols_per_group"],
+                                "regression_default": "ols",
+                                "windows": ["all", "252d", "504d",
+                                              "5y"],
+                                "window_default": "all",
+                                "outliers": ["off", "iqr_3", "z_4"],
+                                "outlier_default": "off",
+                                "show_stats": True}}},
+                      {"widget": "chart", "id": "corr_levels",
+                        "w": 4, "h_px": 520,
+                        "title": "Macro correlation",
+                        "subtitle": "% change, 252-day rolling pairs.",
+                        "spec": {
+                            "chart_type": "correlation_matrix",
+                            "dataset": "macro",
+                            "mapping": {
+                                "columns": [
+                                    "us_2y", "us_10y", "real_10y",
+                                    "breakeven_5y5y", "ig_oas_bp",
+                                    "vix", "spx", "dxy"],
+                                "method":      "pearson",
+                                "transform":   "pct_change",
+                                "order_by":    "date",
+                                "min_periods": 60,
+                                "show_values": True,
+                                "value_decimals": 2}}},
+                  ],
+                  [{"widget": "note", "id": "studio_thesis", "w": 12,
+                     "kind": "insight",
+                     "title": "Reading the studio",
+                     "body": (
+                         "*r* is the headline number on the strip; the "
+                         "stars summarise significance. Beware: a tight "
+                         "fit on **levels** can vanish entirely on "
+                         "**% change** -- common for trending series. "
+                         "The right-hand correlation matrix runs the "
+                         "same `pct_change` transform across the panel "
+                         "for a quick sanity-check on what the studio "
+                         "should be reproducing for any given pair.")}],
+              ]},
+            # --- Tab 2: Multi-axis time series + log scale -------------
+            {"id": "axes", "label": "Multi-axis overlay",
+              "description": ("Four independent y-axes on one chart "
+                                "via `mapping.axes`; log-scale credit "
+                                "panel underneath."),
+              "rows": [
+                  [{"widget": "chart", "id": "macro_axes",
+                     "w": 12, "h_px": 460,
+                     "title": "SPX / UST10Y / DXY / VIX overlay",
+                     "subtitle": ("Each series renders on its own "
+                                    "axis with its own scale and "
+                                    "color-coded ticks."),
+                     "spec": {
+                         "chart_type": "multi_line",
+                         "dataset": "macro",
+                         "mapping": {
+                             "x": "date",
+                             "y": ["spx", "us_10y", "dxy", "vix"],
+                             "axes": [
+                                 {"side": "left",  "title": "SPX",
+                                   "series": ["spx"],
+                                   "format": "compact"},
+                                 {"side": "right", "title": "UST 10Y",
+                                   "series": ["us_10y"],
+                                   "format": "percent",
+                                   "invert": True},
+                                 {"side": "left",  "title": "DXY",
+                                   "series": ["dxy"]},
+                                 {"side": "right", "title": "VIX",
+                                   "series": ["vix"]},
+                             ],
+                             "axis_offset_step": 80,
+                             "axis_color_coding": True,
+                         },
+                         "annotations": [
+                             {"type": "vline", "x": "2024-04-15",
+                               "axis": 0,
+                               "label": "Hiking peak",
+                               "color": "#999",
+                               "style": "dashed"},
+                             {"type": "hline", "y": 30, "axis": 3,
+                               "label": "Stress",
+                               "color": "#c53030",
+                               "style": "dashed"},
+                         ],
+                     }}],
+                  [{"widget": "chart", "id": "spread_log",
+                     "w": 12, "h_px": 380,
+                     "title": "IG vs HY OAS (log scale)",
+                     "subtitle": ("Y-axis log10 -- compresses the "
+                                    "HY range without flattening "
+                                    "IG."),
+                     "spec": {
+                         "chart_type": "multi_line",
+                         "dataset": "macro",
+                         "mapping": {
+                             "x": "date",
+                             "y": ["ig_oas_bp", "hy_oas_bp"],
+                             "y_log": True,
+                             "y_title": "OAS (bp, log scale)",
+                             "series_labels": {
+                                 "ig_oas_bp": "IG",
+                                 "hy_oas_bp": "HY"}}}}],
+              ]},
+        ]},
+        "links": [
+            # Polygon brush exercises a brush type the gallery
+            # otherwise misses. Drag a freeform shape on the studio
+            # scatter to filter the multi-axis chart to that subset.
+            {"group": "studio_brush",
+              "members": ["studio_chart", "macro_axes"],
+              "brush": {"type": "polygon"}},
+        ],
+    }
+    r = compile_dashboard(manifest,
+                           output_path=str(out_dir / "dashboard.html"))
+    thumb = _thumbnail(r.html_path, out_dir / "thumbnail.png",
+                        width=1500, height=1500)
+    return _result(r, thumb)
+
+
+# =============================================================================
+# DEMO: dev_workflow  (lifecycle / diagnostics / chart variants)
+# =============================================================================
+#
+# Showcases the developer-facing surface that no other demo touches:
+#   - `manifest_template` + `populate_template` (template-then-fill)
+#   - `validate_manifest`           (structural validator output)
+#   - `chart_data_diagnostics`      (data-binding lint output)
+#   - `compile_dashboard(strict=False)` iteration mode (would-be errors
+#     surface as warnings + `(no data)` placeholders)
+#   - `save_pngs=True` per-widget PNG export
+#   - chart `option` variant (raw ECharts option passthrough)
+#   - chart `ref` variant (external JSON spec on disk)
+#   - `header_actions` w/ `onclick` JS hook
+#   - KPI direct `value` + direct `delta_pct` + `format="raw"`
+#   - opt-out flags: `chart_zoom`, `chart_controls`, `table_controls`,
+#     `kpi_controls`, `keep_title`
+
+
+def _format_validate_errors(errs: List[str]) -> str:
+    if not errs:
+        return "*(none -- manifest is structurally valid)*"
+    lines = ["| # | Path / message |", "|---|---|"]
+    for i, e in enumerate(errs, 1):
+        lines.append(f"| {i} | `{e}` |")
+    return "\n".join(lines)
+
+
+def _format_diagnostics(diags: List[Any]) -> str:
+    if not diags:
+        return "*(none -- no data-binding issues)*"
+    lines = [
+        "| Severity | Code | Widget | Message |",
+        "|---|---|---|---|",
+    ]
+    for d in diags:
+        sev = getattr(d, "severity", "?")
+        code = getattr(d, "code", "?")
+        wid = getattr(d, "widget_id", "") or "-"
+        msg = getattr(d, "message", "")
+        msg = msg.replace("|", "\\|").replace("\n", " ")
+        lines.append(f"| {sev} | `{code}` | `{wid}` | {msg} |")
+    return "\n".join(lines)
+
+
+def build_dev_workflow(out_dir: Path) -> Dict[str, Any]:
+    """Lifecycle / diagnostics / chart-variant showcase. Runs
+    `validate_manifest`, `chart_data_diagnostics`, and the
+    `manifest_template` / `populate_template` round-trip on
+    deliberately-problematic manifests; renders the captured output
+    into markdown widgets so the diagnostic surface is visible
+    without having to read the console."""
+    df_rates = pull_rates_panel()
+
+    # 1. manifest_template / populate_template round-trip ---------------
+    seed_manifest = {
+        "schema_version": 1,
+        "id": "dev_seed",
+        "title": "Seed",
+        "datasets": {"rates": df_rates},
+        "layout": {"rows": [[
+            {"widget": "chart", "id": "curve",
+              "spec": {"chart_type": "multi_line", "dataset": "rates",
+                        "mapping": {"x": "date",
+                                     "y": ["us_2y", "us_10y"]}}}]]},
+    }
+    template = manifest_template(seed_manifest)
+    template_columns = list(
+        (template.get("datasets", {}).get("rates", {})
+                  .get("source", []) or [[]])[0]
+    )
+    populated = populate_template(template, {"rates": df_rates})
+    pop_entry = populated.get("datasets", {}).get("rates")
+    # populate_template returns the DataFrame as-is; compile_dashboard
+    # normalises DataFrames into list-of-lists at compile time.
+    if hasattr(pop_entry, "shape"):
+        populated_rows = int(pop_entry.shape[0])
+    elif isinstance(pop_entry, dict):
+        src = pop_entry.get("source", [])
+        populated_rows = max(0, len(src) - 1)
+    else:
+        populated_rows = 0
+    template_md = (
+        "## `manifest_template` -> `populate_template`\n\n"
+        f"**Step 1:** `manifest_template(seed)` strips data rows from "
+        f"every dataset, keeping only the header row. The template's "
+        f"`datasets.rates.source` now has 1 row (the header) with "
+        f"columns: `{template_columns}`.\n\n"
+        "Templates are pure JSON -- safe to persist alongside the "
+        "compiled dashboard, diff in source control, hand-edit, and "
+        "re-feed each refresh.\n\n"
+        f"**Step 2:** `populate_template(template, {{'rates': "
+        f"df_rates}})` re-injects fresh data. The populated "
+        f"`datasets.rates` slot now holds a DataFrame with "
+        f"**{populated_rows} rows**; `compile_dashboard` normalises "
+        f"DataFrames to list-of-lists at compile time.\n\n"
+        "Pass `require_all_slots=True` to fail loudly when the "
+        "template declares a dataset slot the call doesn't fill."
+    )
+
+    # 2. validate_manifest on a deliberately broken manifest -----------
+    bad_manifest = {
+        "schema_version": 1,
+        "id": "dev_broken",
+        "title": "Deliberately broken",
+        "datasets": {"rates": df_rates},
+        "filters": [
+            {"id": "x", "type": "select"},  # missing options
+            {"id": "x", "type": "dateRange",  # duplicate id
+              "default": "1Y", "field": "date"},
+        ],
+        "layout": {"rows": [[
+            {"widget": "chart", "id": "c",  # ok
+              "spec": {"chart_type": "multi_line",
+                        "dataset": "missing_dataset",  # bad ref
+                        "mapping": {"x": "date", "y": ["us_2y"]}}},
+            {"widget": "chart", "id": "c",  # duplicate widget id
+              "spec": {"chart_type": "frobnicator",  # bad type
+                        "dataset": "rates",
+                        "mapping": {"x": "date"}}},
+        ]]},
+    }
+    ok, errs = validate_manifest(bad_manifest)
+    validate_md = (
+        "## `validate_manifest`\n\n"
+        f"Status: **{'OK' if ok else 'FAILED'}** "
+        f"-- {len(errs)} error(s).\n\n"
+        "The validator checks structure (types, ids, references, "
+        "required keys). It is the cheapest pass; PRISM should call "
+        "it before compiling when iterating on a manifest.\n\n"
+        + _format_validate_errors(errs)
+    )
+
+    # 3. chart_data_diagnostics on a borderline manifest ---------------
+    df_empty = pd.DataFrame({"date": [], "us_10y": []})
+    diag_manifest = {
+        "schema_version": 1,
+        "id": "dev_diag",
+        "title": "Diagnostic surface",
+        "datasets": {
+            "rates": df_rates,
+            "empty": df_empty,
+        },
+        "layout": {"rows": [[
+            {"widget": "chart", "id": "good",
+              "spec": {"chart_type": "multi_line", "dataset": "rates",
+                        "mapping": {"x": "date",
+                                     "y": ["us_2y", "us_10y"]}}},
+            {"widget": "chart", "id": "empty_chart",
+              "spec": {"chart_type": "line", "dataset": "empty",
+                        "mapping": {"x": "date", "y": "us_10y"}}},
+            {"widget": "chart", "id": "missing_col",
+              "spec": {"chart_type": "line", "dataset": "rates",
+                        "mapping": {"x": "date",
+                                     "y": "us_99y"}}},
+            {"widget": "kpi", "id": "k_typo",
+              "label": "Bad KPI",
+              "source": "rates.latest.us_99y"},
+        ]]},
+    }
+    diags = chart_data_diagnostics(diag_manifest)
+    diag_md = (
+        "## `chart_data_diagnostics`\n\n"
+        f"Returned **{len(diags)}** diagnostic(s) on a 4-widget "
+        "manifest with one healthy chart + an empty dataset + a "
+        "missing column + a KPI source typo. The diagnostic codes are "
+        "stable -- pattern-match on `code` to drive automated "
+        "repair.\n\n"
+        + _format_diagnostics(diags)
+    )
+
+    # 4. compile_dashboard(strict=False) -- iteration mode --------------
+    iter_md = (
+        "## `compile_dashboard(strict=False)`\n\n"
+        "Default mode (`strict=True`) raises `ValueError` listing "
+        "every error-severity diagnostic before any HTML is "
+        "produced. Refresh pipelines + CI rely on that contract -- a "
+        "broken headline is a broken dashboard.\n\n"
+        "Pass `strict=False` to keep going: errored charts get a "
+        "`(no data)` placeholder, KPI tiles render `--`, and the "
+        "full diagnostic list is returned on `result.diagnostics`. "
+        "Useful inside an iterative LLM round-trip when you want to "
+        "fix everything in one pass."
+    )
+
+    # 5. save_pngs (per-widget PNG export) ------------------------------
+    pngs_md = (
+        "## `compile_dashboard(save_pngs=True, png_scale=2)`\n\n"
+        "Pass `save_pngs=True` to also drive headless Chrome over "
+        "every chart widget after compile, writing one "
+        "`{widget_id}.png` per chart into `<out>/{id}_pngs/`. PRISM "
+        "ships these into report decks and report e-mails."
+    )
+
+    # 6. raw ECharts option for the `option` and `raw` chart variants ---
+    raw_option_dict = {
+        "title": {"text": "Hand-rolled option (passthrough)",
+                   "left": "center"},
+        "tooltip": {"trigger": "item"},
+        "legend": {"orient": "vertical", "left": "left", "top": "bottom"},
+        "series": [{
+            "name": "Tier",
+            "type": "pie",
+            "radius": ["35%", "65%"],
+            "data": [
+                {"value": 35, "name": "Producer"},
+                {"value": 28, "name": "Consumer"},
+                {"value": 22, "name": "Refiner"},
+                {"value": 15, "name": "Other"}],
+        }],
+    }
+    # Persist a small ref JSON alongside the dashboard so the `ref`
+    # variant exercises the file-loading path. Compiler resolves
+    # paths relative to the loaded manifest's parent dir.
+    ref_dir = out_dir / "echarts"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    ref_path = ref_dir / "ref_chart.json"
+    ref_option_dict = {
+        "chart_type": "raw",
+        "option": {
+            "title": {"text": "Loaded from echarts/ref_chart.json"},
+            "tooltip": {"trigger": "axis"},
+            "xAxis": {"type": "category",
+                       "data": ["Q1", "Q2", "Q3", "Q4"]},
+            "yAxis": {"type": "value", "name": "Score"},
+            "series": [{"type": "bar", "name": "Score",
+                          "data": [3, 5, 7, 9],
+                          "itemStyle": {"color": "#002F6C"}}],
+        },
+    }
+    ref_path.write_text(json.dumps(ref_option_dict, indent=2),
+                          encoding="utf-8")
+
+    manifest = {
+        "schema_version": 1,
+        "id": "dev_workflow",
+        "title": "Dev workflow & diagnostics",
+        "description": ("Lifecycle showcase: manifest_template + "
+                         "populate_template, validate_manifest, "
+                         "chart_data_diagnostics, strict=False mode, "
+                         "save_pngs=True, the three chart-widget "
+                         "variants (spec / ref / option), the `raw` "
+                         "chart_type, header_actions onclick, and the "
+                         "controls-drawer opt-out flags."),
+        "theme": "gs_clean",
+        "palette": "gs_primary",
+        "metadata": {
+            "data_as_of": "2026-04-22T16:00:00Z",
+            "generated_at": "2026-04-22T16:05:00Z",
+            "sources": ["Synthetic"],
+            "tags": ["developer", "diagnostics", "lifecycle"],
+            "summary": (
+                "Read the four sections in order: template -> "
+                "validate -> diagnostics -> compile modes. The "
+                "Variants and Knobs tabs document the chart-widget "
+                "shapes and the per-tile opt-out flags."
+            ),
+            "methodology": (
+                "Each markdown panel below was generated **at compile "
+                "time** by calling the corresponding helper "
+                "(`manifest_template`, `populate_template`, "
+                "`validate_manifest`, `chart_data_diagnostics`) "
+                "against an in-memory deliberately-imperfect "
+                "manifest, formatting the result, and embedding it "
+                "into a `widget: markdown` block. The `kerberos` + "
+                "`dashboard_id` slots are left empty so the Refresh "
+                "button stays hidden -- this dashboard documents "
+                "the persistence story rather than participating in "
+                "it."
+            ),
+            # Endpoint overrides demonstrate the override knobs even
+            # though refresh is disabled (no kerberos set).
+            "api_url": "/api/dev/refresh/",
+            "status_url": "/api/dev/refresh/status/",
+        },
+        "header_actions": [
+            {"label": "Run validator (console)",
+              "onclick": "window.console.log('validator hook fired')",
+              "icon": "\u2713",
+              "title": "Hook for a JS-side validator wired by host"},
+            {"label": "Open repo",
+              "href": "https://example.com/dev-workflow",
+              "primary": False,
+              "title": "Linkout"},
+        ],
+        "datasets": {
+            "rates": df_rates,
+        },
+        "layout": {"kind": "tabs", "cols": 12, "tabs": [
+            # --- Tab 1: Template + populate ----------------------------
+            {"id": "lifecycle", "label": "Template + populate",
+              "description": ("Strip data -> persistent JSON -> "
+                                "re-fill on each refresh."),
+              "rows": [
+                  [{"widget": "markdown", "id": "md_template",
+                     "w": 12, "content": template_md}],
+              ]},
+            # --- Tab 2: Validate -------------------------------------
+            {"id": "validate", "label": "validate_manifest",
+              "description": ("Structural validator output on a "
+                                "deliberately-broken manifest."),
+              "rows": [
+                  [{"widget": "markdown", "id": "md_validate",
+                     "w": 12, "content": validate_md}],
+              ]},
+            # --- Tab 3: Diagnostics ----------------------------------
+            {"id": "diagnostics", "label": "chart_data_diagnostics",
+              "description": ("Data-binding lint output: empty "
+                                "datasets, missing columns, KPI "
+                                "source typos."),
+              "rows": [
+                  [{"widget": "markdown", "id": "md_diagnostics",
+                     "w": 12, "content": diag_md}],
+                  [{"widget": "markdown", "id": "md_iter",
+                     "w": 6, "content": iter_md},
+                   {"widget": "markdown", "id": "md_pngs",
+                     "w": 6, "content": pngs_md}],
+              ]},
+            # --- Tab 4: Chart variants (spec / option / ref / raw) ----
+            {"id": "variants", "label": "Chart variants",
+              "description": ("Three ways to declare a chart "
+                                "widget: `spec`, `option`, `ref`."),
+              "rows": [
+                  [
+                      # Standard `spec` variant -- the LLM-friendly path.
+                      {"widget": "chart", "id": "v_spec",
+                        "w": 6, "h_px": 320,
+                        "title": "Variant 1: spec",
+                        "subtitle": ("chart_type + dataset + "
+                                       "mapping. PRISM-preferred."),
+                        "spec": {
+                            "chart_type": "multi_line",
+                            "dataset": "rates",
+                            "mapping": {"x": "date",
+                                         "y": ["us_2y", "us_10y"],
+                                         "y_title": "Yield (%)"}}},
+                      # Raw passthrough via top-level `option`.
+                      {"widget": "chart", "id": "v_option",
+                        "w": 6, "h_px": 320,
+                        "title": "Variant 2: option",
+                        "subtitle": ("Hand-rolled ECharts option "
+                                       "dict on the widget."),
+                        "option": raw_option_dict},
+                  ],
+                  [
+                      # Reference path -- spec read from external JSON.
+                      {"widget": "chart", "id": "v_ref",
+                        "w": 12, "h_px": 320,
+                        "title": "Variant 3: ref",
+                        "subtitle": ("Spec loaded from "
+                                       "echarts/ref_chart.json. "
+                                       "The compiler resolves paths "
+                                       "relative to the manifest's "
+                                       "parent directory."),
+                        "ref": "echarts/ref_chart.json"},
+                  ],
+                  [
+                      # Markdown summarising the three variants.
+                      {"widget": "markdown", "id": "md_variants",
+                        "w": 12,
+                        "content": (
+                            "## Three chart-widget variants\n\n"
+                            "| Variant | When | Use |\n"
+                            "|---|---|---|\n"
+                            "| `spec` | Standard, LLM-friendly | "
+                            "chart_type + dataset + mapping; data "
+                            "lives in manifest. **PRISM-preferred.** |\n"
+                            "| `option` | Raw passthrough | Hand-"
+                            "crafted ECharts option dict on the "
+                            "widget; bypasses the builder. Useful "
+                            "for one-off chart types not in the "
+                            "VALID_CHART_TYPES set. |\n"
+                            "| `ref` | External JSON | File path "
+                            "(string) to a pre-emitted spec. "
+                            "Resolved relative to the manifest "
+                            "directory. |\n\n"
+                            "All three render through the same "
+                            "tile chrome (title, subtitle, info, "
+                            "popup, action_buttons, controls "
+                            "drawer). The `option` and `ref` "
+                            "variants skip the builder dispatch "
+                            "and the `chart_type` validator -- "
+                            "they're for cases when the "
+                            "VALID_CHART_TYPES set doesn't fit."
+                        )},
+                  ],
+              ]},
+            # --- Tab 5: Knob opt-outs -------------------------------
+            {"id": "knobs", "label": "Knob opt-outs",
+              "description": ("KPI value override + format=raw + "
+                                "controls-drawer opt-out flags + "
+                                "header_actions onclick."),
+              "rows": [
+                  [
+                      # KPI direct value (no dotted source) +
+                      # format=raw so the runtime doesn't insert
+                      # commas / abbreviations.
+                      {"widget": "kpi", "id": "kv_direct", "w": 3,
+                        "label": "Direct value",
+                        "value": 12345.6789,
+                        "format": "raw",
+                        "kpi_controls": False,
+                        "info": ("KPI with `value=` direct override "
+                                  "(no dotted source) and "
+                                  "`format='raw'` -- runtime "
+                                  "displays the number unmodified.")},
+                      # KPI direct value + direct delta_pct.
+                      {"widget": "kpi", "id": "kv_delta", "w": 3,
+                        "label": "Direct delta_pct",
+                        "value": 4.55,
+                        "delta_pct": 0.32,
+                        "delta_label": "vs 4.50",
+                        "suffix": "%",
+                        "info": ("`delta_pct` set directly without "
+                                  "a delta_source.")},
+                      # KPI compact format.
+                      {"widget": "kpi", "id": "kv_compact", "w": 3,
+                        "label": "format='compact'",
+                        "value": 2820000.0,
+                        "format": "compact",
+                        "info": "2.82M via compact formatter."},
+                      # KPI comma format.
+                      {"widget": "kpi", "id": "kv_comma", "w": 3,
+                        "label": "format='comma'",
+                        "value": 2820,
+                        "format": "comma",
+                        "info": "2,820 via comma formatter."},
+                  ],
+                  [
+                      # Sparkline-style chart with controls drawer
+                      # AND zoom slider suppressed.
+                      {"widget": "chart", "id": "no_controls",
+                        "w": 6, "h_px": 200,
+                        "title": "chart_zoom + chart_controls = false",
+                        "subtitle": ("Slider + controls drawer "
+                                       "suppressed for tight tile."),
+                        "spec": {
+                            "chart_type": "line", "dataset": "rates",
+                            "mapping": {"x": "date", "y": "us_10y",
+                                         "y_title": "10Y"},
+                            "chart_zoom": False,
+                            "chart_controls": False}},
+                      # Chart with `keep_title=True` so internal title
+                      # stays alongside the tile title.
+                      {"widget": "chart", "id": "keep_title", "w": 6,
+                        "h_px": 200,
+                        "title": "keep_title=True",
+                        "subtitle": ("Spec keeps its own internal "
+                                       "title."),
+                        "spec": {
+                            "chart_type": "line", "dataset": "rates",
+                            "mapping": {"x": "date", "y": "us_2y"},
+                            "title": "Internal title (kept)",
+                            "keep_title": True}},
+                  ],
+                  [
+                      # Static table widget with controls drawer
+                      # disabled. Compact reference view of the rates
+                      # dataset.
+                      {"widget": "table", "id": "tbl_static",
+                        "w": 12,
+                        "title": "table_controls = false",
+                        "subtitle": ("Static reference table; the "
+                                       "controls drawer is "
+                                       "suppressed."),
+                        "dataset_ref": "rates",
+                        "table_controls": False,
+                        "max_rows": 10,
+                        "row_height": "compact",
+                        "searchable": False,
+                        "sortable": False,
+                        "downloadable": False,
+                        "columns": [
+                            {"field": "date", "label": "Date"},
+                            {"field": "us_2y", "label": "2Y",
+                              "format": "number:3"},
+                            {"field": "us_5y", "label": "5Y",
+                              "format": "number:3"},
+                            {"field": "us_10y", "label": "10Y",
+                              "format": "number:3"},
+                            {"field": "us_30y", "label": "30Y",
+                              "format": "number:3"},
+                        ]},
+                  ],
+                  [
+                      # Markdown summarising what the runtime now does
+                      # differently because of the opt-out flags.
+                      {"widget": "markdown", "id": "md_optouts",
+                        "w": 12,
+                        "content": (
+                            "## Per-tile opt-outs\n\n"
+                            "* `chart_zoom: False` -- suppresses the "
+                            "auto-injected dataZoom slider on time "
+                            "axes (use for sparkline-sized tiles).\n"
+                            "* `chart_controls: False` -- hides the "
+                            "`\u22EE` controls drawer button.\n"
+                            "* `table_controls: False` -- same, for "
+                            "table widgets.\n"
+                            "* `kpi_controls: False` -- same, for "
+                            "KPI widgets (set on the KPI above).\n"
+                            "* `keep_title: True` -- prevents the "
+                            "compiler from auto-stripping the "
+                            "ECharts internal title (the tile chrome "
+                            "normally renders the title above)."
+                        )},
+                  ],
+              ]},
+        ]},
+        "links": [],
+    }
+
+    # `save_pngs=True` exercised at compile time so the artifact
+    # folder includes a `<id>_pngs/` directory the gallery can point
+    # at. PNG generation requires Chrome; if unavailable, the call
+    # still produces HTML / JSON.
+    r = compile_dashboard(
+        manifest,
+        output_path=str(out_dir / "dashboard.html"),
+        save_pngs=True,
+        png_scale=1,
+    )
+    thumb = _thumbnail(r.html_path, out_dir / "thumbnail.png",
+                        width=1500, height=1500)
+    return _result(r, thumb)
+
+
+# =============================================================================
 # DEMO REGISTRY + SHARED HELPERS
 # =============================================================================
 
@@ -5620,21 +6854,14 @@ DEMO_REGISTRY: Dict[str, Dict[str, Any]] = {
         "kind": "dashboard",
         "build": build_rates_monitor,
     },
-    "cross_asset": {
-        "title": "Cross-asset snapshot (composite)",
-        "description": ("Four major asset classes (SPX / DXY / WTI / "
-                         "Gold) in one make_4pack_grid composite with "
-                         "event annotations. The only non-manifest "
-                         "path in the gallery -- pure PNG artifact."),
-        "kind": "composite",
-        "build": build_cross_asset,
-    },
     "risk_regime": {
         "title": "Risk regime monitor",
-        "description": ("Cross-asset correlation heatmap, VIX term "
-                         "structure across regimes, factor-return "
-                         "boxplots, and running drawdown with a "
-                         "bear-market band."),
+        "description": ("Cross-asset correlation_matrix on % changes "
+                         "(dedicated builder), VIX term structure "
+                         "across regimes, factor scatter_multi vs MKT "
+                         "with per-group OLS, factor boxplots, running "
+                         "drawdown with arrow / band annotations and "
+                         "lineX brush cross-filter."),
         "kind": "dashboard",
         "build": build_risk_regime,
     },
@@ -5652,7 +6879,8 @@ DEMO_REGISTRY: Dict[str, Dict[str, Any]] = {
         "title": "Global flows & allocation",
         "description": ("Cross-border trade sankey + outbound donut, "
                          "treemap + sunburst allocation, counterparty "
-                         "graph network, mandate funnel, stat_grid."),
+                         "graph network + hierarchical tree, mandate "
+                         "funnel, stat_grid."),
         "kind": "dashboard",
         "build": build_global_flows,
     },
@@ -5668,21 +6896,25 @@ DEMO_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "portfolio_analytics": {
         "title": "Portfolio analytics",
-        "description": ("Multi-asset portfolio: VaR gauge, factor radar, "
-                         "allocation pie, stacked-area P&L, parallel-"
-                         "coords positions, return-distribution "
-                         "histogram, stat_grid."),
+        "description": ("Multi-asset portfolio: pinned KPI ribbon, "
+                         "VaR gauge, factor radar, allocation pie, "
+                         "stacked-area P&L, parallel-coords "
+                         "positions, return-distribution histogram, "
+                         "stat_grid, lineY brush."),
         "kind": "dashboard",
         "build": build_portfolio_analytics,
     },
     "markets_wrap": {
         "title": "Cross-asset end-of-day wrap",
-        "description": ("One big scrollable cross-asset wrap: KPI "
-                         "ribbon, equities / rates / FX / commodities "
-                         "sections, dual-axis + bar_horizontal charts, "
-                         "click-emit-filter, top-movers table with "
-                         "z-score colour scale. Stress-tests layout "
-                         "w/ 17 charts."),
+        "description": ("One big scrollable cross-asset wrap: image "
+                         "banner, KPI ribbon, equities / rates / FX / "
+                         "commodities sections separated by dividers, "
+                         "dual-axis + bar_horizontal charts, click-"
+                         "emit-filter, top-movers table with z-score "
+                         "colour scale. Stress-tests layout with 17 "
+                         "charts. Filter `fx_*` / `cm_*` wildcard "
+                         "prefixes and `legend` sync across the "
+                         "asset-class panels."),
         "kind": "dashboard",
         "build": build_markets_wrap,
     },
@@ -5739,6 +6971,29 @@ DEMO_REGISTRY: Dict[str, Dict[str, Any]] = {
                          "full markdown body in a side panel."),
         "kind": "dashboard",
         "build": build_research_feed,
+    },
+    "macro_studio": {
+        "title": "Macro studio (interactive bivariate)",
+        "description": ("scatter_studio centerpiece: pick X / Y / "
+                         "color / size from author whitelists, "
+                         "per-axis transforms, OLS regression, stats "
+                         "strip. Plus correlation_matrix sidebar, "
+                         "4-axis macro overlay (mapping.axes), "
+                         "log-scale credit chart, polygon brush."),
+        "kind": "dashboard",
+        "build": build_macro_studio,
+    },
+    "dev_workflow": {
+        "title": "Dev workflow & diagnostics",
+        "description": ("Lifecycle showcase: manifest_template + "
+                         "populate_template, validate_manifest, "
+                         "chart_data_diagnostics, strict=False mode, "
+                         "save_pngs=True. Three chart-widget "
+                         "variants (spec / option / ref). KPI direct "
+                         "value + format=raw + controls-drawer "
+                         "opt-out flags. header_actions onclick."),
+        "kind": "dashboard",
+        "build": build_dev_workflow,
     },
 }
 
@@ -5865,7 +7120,7 @@ def _gallery_html(results: List[Dict[str, Any]], out_root: Path) -> str:
 </header>
 <div class="wrap">
   <div class="summary">
-    <div class="pill">Engine: ECharts (GS/viz/echarts)</div>
+    <div class="pill">Engine: ECharts (ai_development/dashboards)</div>
     <div class="pill">Theme: gs_clean</div>
     <div class="pill">Palettes: gs_primary / gs_blues / gs_diverging</div>
     <div class="pill">{total} demos / {ok_count} OK</div>
@@ -5875,7 +7130,7 @@ def _gallery_html(results: List[Dict[str, Any]], out_root: Path) -> str:
   </div>
 </div>
 <footer>
-  GS/viz/echarts demos &middot; run via <code>python demos.py --all</code>
+  ai_development/dashboards demos &middot; run via <code>python demos.py --all</code>
 </footer>
 </body>
 </html>

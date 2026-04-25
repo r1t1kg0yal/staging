@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
 import tempfile
 import time
@@ -1212,6 +1213,636 @@ class TestDualAxis(unittest.TestCase):
 
 
 # =============================================================================
+# MULTI-AXIS (N y-axes via mapping.axes)
+# =============================================================================
+#
+# The mapping.axes API lets authors define any number of independent
+# y-axes (each with its own scale, side, inversion, log toggle, range
+# bounds, format) and assign each series to exactly one axis.
+# Backward-compat with dual_axis_series / invert_y / invert_right_axis
+# is preserved.
+
+class TestMultiAxis(unittest.TestCase):
+    def _df_4(self):
+        return pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=10, freq="D"),
+            "spx": list(range(5000, 5010)),
+            "ust": [4.2 + i * 0.01 for i in range(10)],
+            "dxy": [104.0 + i * 0.05 for i in range(10)],
+            "wti": [82.0 + i * 0.30 for i in range(10)],
+        })
+
+    def test_3_axis_basic(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "left",  "title": "DXY", "series": ["dxy"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(len(ya), 3)
+        self.assertEqual(ya[0]["position"], "left")
+        self.assertEqual(ya[1]["position"], "right")
+        self.assertEqual(ya[2]["position"], "left")
+        # 3rd axis (2nd on the LEFT side) auto-stacks to one offset_step
+        # (default 80 px) from the inner axis. Earlier 60 px crammed
+        # the inner axis name into the outer axis tick-label region.
+        self.assertEqual(ya[0]["offset"], 0)
+        self.assertEqual(ya[1]["offset"], 0)
+        self.assertEqual(ya[2]["offset"], 80)
+
+    def test_4_axis_two_each_side(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy", "wti"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "left",  "title": "DXY", "series": ["dxy"]},
+                {"side": "right", "title": "WTI", "series": ["wti"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(len(ya), 4)
+        self.assertEqual(ya[2]["offset"], 80)
+        self.assertEqual(ya[3]["offset"], 80)
+
+    def test_axis_offset_step_override(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axis_offset_step": 100,
+            "axes": [
+                {"side": "left", "title": "SPX", "series": ["spx"]},
+                {"side": "left", "title": "UST", "series": ["ust"]},
+                {"side": "left", "title": "DXY", "series": ["dxy"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(ya[1]["offset"], 100)
+        self.assertEqual(ya[2]["offset"], 200)
+
+    def test_series_to_axis_assignment(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "left",  "title": "DXY", "series": ["dxy"]},
+            ],
+        })
+        s_by_name = {s["name"]: s for s in r.option["series"]}
+        # axis index 0 is implicit; only > 0 sets yAxisIndex
+        self.assertNotIn("yAxisIndex", s_by_name["spx"])
+        self.assertEqual(s_by_name["ust"]["yAxisIndex"], 1)
+        self.assertEqual(s_by_name["dxy"]["yAxisIndex"], 2)
+
+    def test_invert_per_axis(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"],
+                  "invert": True},
+                {"side": "left",  "title": "DXY", "series": ["dxy"],
+                  "invert": True},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertFalse(ya[0]["inverse"])
+        self.assertTrue(ya[1]["inverse"])
+        self.assertTrue(ya[2]["inverse"])
+
+    def test_log_per_axis(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"],
+                  "log": True},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(ya[0]["type"], "value")
+        self.assertEqual(ya[1]["type"], "log")
+
+    def test_min_max_per_axis(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"],
+                  "min": 4900, "max": 5100},
+                {"side": "right", "title": "UST", "series": ["ust"],
+                  "min": 0, "max": 10},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(ya[0]["min"], 4900)
+        self.assertEqual(ya[0]["max"], 5100)
+        self.assertEqual(ya[1]["min"], 0)
+        self.assertEqual(ya[1]["max"], 10)
+
+    def test_format_preset_attaches_formatter(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"],
+                  "format": "compact"},
+                {"side": "right", "title": "UST", "series": ["ust"],
+                  "format": "bp"},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertIn("formatter", ya[0]["axisLabel"])
+        self.assertIn("function", ya[0]["axisLabel"]["formatter"])
+        self.assertIn("bp", ya[1]["axisLabel"]["formatter"])
+
+    def test_split_line_only_on_first_axis(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "left",  "title": "DXY", "series": ["dxy"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        # Axes 1 and 2 should hide their split lines; axis 0 keeps default.
+        self.assertNotIn("splitLine", ya[0])
+        self.assertEqual(ya[1].get("splitLine", {}).get("show"), False)
+        self.assertEqual(ya[2].get("splitLine", {}).get("show"), False)
+
+    def test_grid_left_clears_offset_axes(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "left",  "title": "DXY", "series": ["dxy"]},
+            ],
+        })
+        # 2nd left axis at offset=60 must be cleared by grid.left.
+        self.assertGreaterEqual(r.option["grid"]["left"], 60 + 50)
+
+    def test_grid_right_clears_offset_axes(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy", "wti"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "left",  "title": "DXY", "series": ["dxy"]},
+                {"side": "right", "title": "WTI", "series": ["wti"]},
+            ],
+        })
+        self.assertGreaterEqual(r.option["grid"]["right"], 60 + 50)
+
+    def test_explicit_offset_overrides_auto(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "left",  "title": "UST", "series": ["ust"],
+                  "offset": 90},  # explicit override
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(ya[1]["offset"], 90)
+
+    def test_unassigned_series_lands_on_axis_0(self):
+        # If author defines axes but forgets to assign one of the series,
+        # the resolver sweeps unassigned names onto axis 0 rather than
+        # silently dropping them.
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                # dxy not assigned -> axis 0
+            ],
+        })
+        s_by_name = {s["name"]: s for s in r.option["series"]}
+        self.assertNotIn("yAxisIndex", s_by_name["dxy"])
+
+    def test_duplicate_series_assignment_raises(self):
+        df = self._df_4()
+        with self.assertRaises(ValueError):
+            make_echart(df, "multi_line", mapping={
+                "x": "date", "y": ["spx", "ust"],
+                "axes": [
+                    {"side": "left",  "title": "L", "series": ["spx"]},
+                    {"side": "right", "title": "R", "series": ["spx"]},
+                ],
+            })
+
+    def test_invalid_side_raises(self):
+        df = self._df_4()
+        with self.assertRaises(ValueError):
+            make_echart(df, "multi_line", mapping={
+                "x": "date", "y": ["spx"],
+                "axes": [{"side": "middle", "series": ["spx"]}],
+            })
+
+    def test_axes_not_a_list_raises(self):
+        df = self._df_4()
+        with self.assertRaises(ValueError):
+            make_echart(df, "multi_line", mapping={
+                "x": "date", "y": ["spx"],
+                "axes": [{"side": "left", "series": "spx"}, "not a dict"],
+            })
+
+    def test_backward_compat_dual_axis_series_still_works(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "y_title": "SPX", "y_title_right": "UST",
+            "dual_axis_series": ["ust"],
+            "invert_right_axis": True,
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(len(ya), 2)
+        self.assertEqual(ya[0]["name"], "SPX")
+        self.assertEqual(ya[1]["name"], "UST")
+        self.assertTrue(ya[1]["inverse"])
+        s_by_name = {s["name"]: s for s in r.option["series"]}
+        self.assertEqual(s_by_name["ust"]["yAxisIndex"], 1)
+
+    def test_axes_takes_precedence_over_dual_axis_series(self):
+        # When both legacy and canonical APIs are present, mapping.axes
+        # is the source of truth.
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "dual_axis_series": ["ust"],  # legacy: ignored
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "right", "title": "DXY", "series": ["dxy"]},
+            ],
+        })
+        self.assertEqual(len(r.option["yAxis"]), 3)
+        s_by_name = {s["name"]: s for s in r.option["series"]}
+        self.assertEqual(s_by_name["dxy"]["yAxisIndex"], 2)
+
+    def test_single_axis_preserves_dict_shape(self):
+        # Single-axis charts keep yAxis as a dict (not a list) so legacy
+        # callers that index into yAxis directly don't break.
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axes": [{"side": "left", "title": "Both",
+                       "series": ["spx", "ust"]}],
+        })
+        self.assertIsInstance(r.option["yAxis"], dict)
+
+    def test_color_long_form_with_axes(self):
+        # axes works with long-form (mapping.color) too: each color
+        # group's series can be assigned to its own axis.
+        rows = []
+        for d in pd.date_range("2024-01-01", periods=10, freq="D"):
+            rows.append({"date": d, "g": "A", "v": 100 + d.day})
+            rows.append({"date": d, "g": "B", "v": 5 + d.day * 0.1})
+        df = pd.DataFrame(rows)
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": "v", "color": "g",
+            "axes": [
+                {"side": "left",  "title": "A scale", "series": ["A"]},
+                {"side": "right", "title": "B scale", "series": ["B"],
+                  "invert": True},
+            ],
+        })
+        self.assertEqual(len(r.option["yAxis"]), 2)
+        s_by_name = {s["name"]: s for s in r.option["series"]}
+        self.assertEqual(s_by_name["B"]["yAxisIndex"], 1)
+        self.assertTrue(r.option["yAxis"][1]["inverse"])
+
+    def test_hline_annotation_targets_axis_index(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "left",  "title": "DXY", "series": ["dxy"]},
+            ],
+            "annotations": [
+                {"type": "hline", "y": 4.5, "axis": 1,
+                  "label": "UST ceiling"},
+                {"type": "hline", "y": 110, "axis": 2,
+                  "label": "DXY support"},
+            ],
+        })
+        ml = r.option["series"][0]["markLine"]["data"]
+        # Pull each markLine entry by yAxisIndex.
+        self.assertEqual(
+            sum(1 for d in ml if d.get("yAxisIndex") == 1), 1
+        )
+        self.assertEqual(
+            sum(1 for d in ml if d.get("yAxisIndex") == 2), 1
+        )
+
+    def test_hline_annotation_legacy_right_string(self):
+        df = self._df_4()
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "dual_axis_series": ["ust"],
+            "annotations": [
+                {"type": "hline", "y": 4.5, "axis": "right",
+                  "label": "ceiling"},
+            ],
+        })
+        ml = r.option["series"][0]["markLine"]["data"]
+        self.assertEqual(
+            sum(1 for d in ml if d.get("yAxisIndex") == 1), 1
+        )
+
+
+class TestDynamicAxisLayout(unittest.TestCase):
+    """The dynamic layout pass sizes each axis's nameGap to clear its
+    own tick labels, and (for multi-axis charts) widens offset_step
+    when the inner axis labels are too wide for the default 80 px to
+    keep the rotated name out of the outer axis's label region.
+
+    These tests lock in the BEHAVIOR (no overlap) rather than specific
+    pixel values, which would break whenever the heuristic changes.
+    """
+
+    def test_single_value_axis_namegap_clears_wide_labels(self):
+        # Single-axis bar chart with raw 9-digit values needs a much
+        # wider nameGap than the legacy 56 px floor or the y_title
+        # ("Volume") would overlap the "100,000,000" tick labels.
+        df = pd.DataFrame({
+            "ticker": ["AAPL", "MSFT", "NVDA"],
+            "volume": [100_000_000, 200_000_000, 300_000_000],
+        })
+        r = make_echart(df, "bar", mapping={
+            "x": "ticker", "y": "volume",
+            "y_title": "Volume (sh)",
+        })
+        ya = r.option["yAxis"]
+        # 9-digit raw integers render ~63 px wide at fontSize 12.
+        # nameGap must clear that plus the rotated title bounding box.
+        self.assertGreater(ya["nameGap"], 56,
+                            "nameGap should grow past the 56 px floor "
+                            "to clear 9-digit value labels")
+
+    def test_single_value_axis_namegap_floor_for_narrow_labels(self):
+        # Narrow labels (single digits) shouldn't bloat the layout --
+        # nameGap stays at the 56 px floor.
+        df = pd.DataFrame({
+            "letter": list("ABCDE"),
+            "score":  [1, 2, 3, 4, 5],
+        })
+        r = make_echart(df, "bar", mapping={
+            "x": "letter", "y": "score",
+            "y_title": "Score",
+        })
+        self.assertEqual(r.option["yAxis"]["nameGap"], 56)
+
+    def test_multi_axis_namegap_does_not_double_count_offset(self):
+        # Pre-fix bug: nameGap was set to ``40 + offset`` so an outer
+        # axis at offset=80 ended up with its name 200 px from the
+        # inner edge (offset 80 + nameGap 120). nameGap is measured
+        # FROM the axis line, not the inner edge -- the offset already
+        # shifts everything. We expect a tight per-axis nameGap that
+        # depends only on that axis's label width.
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=5, freq="D"),
+            "a": [1, 2, 3, 4, 5],
+            "b": [10, 20, 30, 40, 50],
+        })
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["a", "b"],
+            "axes": [
+                {"side": "left", "title": "A", "series": ["a"]},
+                {"side": "left", "title": "B", "series": ["b"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        # Inner axis (offset=0) and outer axis (offset>=80) carry
+        # narrow labels (1-2 chars), so both get the 40 px floor.
+        # The legacy ``40 + offset`` formula would have given 120 for
+        # the outer axis.
+        self.assertLessEqual(ya[0]["nameGap"], 60,
+                              "Inner axis nameGap shouldn't exceed "
+                              "the floor for narrow labels")
+        self.assertLessEqual(ya[1]["nameGap"], 60,
+                              "Outer axis nameGap should be sized by "
+                              "ITS labels, not inner axis's offset")
+
+    def test_multi_axis_step_widens_for_wide_inner_labels(self):
+        # When the INNER axis carries wide percent labels (e.g.
+        # "470.0%"), the offset_step must widen past the 80 px default
+        # so the rotated inner-axis name doesn't bleed into the outer
+        # axis's tick labels.
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=10, freq="D"),
+            "rate": [4.30 + i * 0.05 for i in range(10)],
+            "vol":  [800 + i * 50 for i in range(10)],
+        })
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["rate", "vol"],
+            "axes": [
+                {"side": "right", "title": "Rate", "series": ["rate"],
+                  "format": "percent"},
+                {"side": "right", "title": "Vol", "series": ["vol"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        # Inner "Rate" axis has labels like "470.0%" (~45 px),
+        # nameGap = 45 + 26 = 71. Step = nameGap + half_thick + 14 = 94.
+        self.assertGreater(ya[1]["offset"], 80,
+                            "Outer axis should sit further out than "
+                            "the default 80 px when inner labels are "
+                            "wide enough to push the inner name "
+                            "into the outer label region")
+
+    def test_explicit_offset_still_honored(self):
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=5, freq="D"),
+            "a": [1, 2, 3, 4, 5],
+            "b": [10, 20, 30, 40, 50],
+        })
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["a", "b"],
+            "axes": [
+                {"side": "left", "title": "A", "series": ["a"]},
+                {"side": "left", "title": "B", "series": ["b"],
+                  "offset": 150},
+            ],
+        })
+        # Author pinned offset=150: dynamic layout must NOT override.
+        self.assertEqual(r.option["yAxis"][1]["offset"], 150)
+
+    def test_user_axis_offset_step_floors_dynamic_step(self):
+        # Author-supplied axis_offset_step acts as a floor: the
+        # dynamic step takes max(user_step, computed). Even with
+        # narrow labels the user's value wins.
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=5, freq="D"),
+            "a": [1, 2, 3, 4, 5],
+            "b": [10, 20, 30, 40, 50],
+            "c": [100, 200, 300, 400, 500],
+        })
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["a", "b", "c"],
+            "axis_offset_step": 120,
+            "axes": [
+                {"side": "left", "title": "A", "series": ["a"]},
+                {"side": "left", "title": "B", "series": ["b"]},
+                {"side": "left", "title": "C", "series": ["c"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(ya[1]["offset"], 120)
+        self.assertEqual(ya[2]["offset"], 240)
+
+    def test_grid_margins_clear_widest_axis_labels(self):
+        # Multi-axis charts size grid.left / grid.right large enough
+        # that every offset axis (line + labels + name) fits inside
+        # the canvas. Wide inner labels should propagate to wider
+        # margins, not just wider offsets.
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=10, freq="D"),
+            "rate": [4.30 + i * 0.05 for i in range(10)],
+            "vol":  [800 + i * 50 for i in range(10)],
+        })
+        r = make_echart(df, "multi_line", mapping={
+            "x": "date", "y": ["rate", "vol"],
+            "axes": [
+                {"side": "right", "title": "Rate", "series": ["rate"],
+                  "format": "percent"},
+                {"side": "right", "title": "Vol", "series": ["vol"]},
+            ],
+        })
+        # The outer axis sits past offset=80; with its own nameGap
+        # plus the rotated title pad, grid.right needs to be well
+        # above the legacy 90-ish px reservation.
+        self.assertGreater(r.option["grid"]["right"], 120)
+
+
+class TestMultiAxisColorCoding(unittest.TestCase):
+    """Single-series axes auto-tint their axis line, tick labels, and
+    rotated name to match the series' palette color so the chart reads
+    like a Bloomberg-style overlay where each line and its scale share
+    a color. Only kicks in for >=2 axes; single-axis charts stay
+    neutral. Multi-series axes don't auto-pick (which color of the N
+    would be ambiguous) but author can pin via ``axes[i].color``.
+    """
+
+    def _df(self):
+        return pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=10, freq="D"),
+            "spx": list(range(5000, 5010)),
+            "ust": [4.2 + i * 0.01 for i in range(10)],
+            "dxy": [104.0 + i * 0.05 for i in range(10)],
+        })
+
+    def test_single_series_axes_inherit_palette_color(self):
+        r = make_echart(self._df(), "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+                {"side": "left",  "title": "DXY", "series": ["dxy"]},
+            ],
+        })
+        palette = r.option["color"]
+        ya = r.option["yAxis"]
+        # Each axis matches the series' palette color (series order).
+        for i in range(3):
+            self.assertEqual(ya[i]["axisLine"]["lineStyle"]["color"],
+                              palette[i])
+            self.assertEqual(ya[i]["axisLabel"]["color"], palette[i])
+            self.assertEqual(ya[i]["nameTextStyle"]["color"], palette[i])
+
+    def test_explicit_color_overrides_palette(self):
+        r = make_echart(self._df(), "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"],
+                  "color": "#ff0000"},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        self.assertEqual(ya[0]["axisLabel"]["color"], "#ff0000")
+        self.assertEqual(ya[0]["nameTextStyle"]["color"], "#ff0000")
+
+    def test_multi_series_axis_skips_auto_color(self):
+        r = make_echart(self._df(), "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust", "dxy"],
+            "axes": [
+                # Two series share this axis -> no auto-pick.
+                {"side": "left",  "title": "Both", "series": ["spx", "ust"]},
+                {"side": "right", "title": "DXY",  "series": ["dxy"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        # Multi-series axis: no color tint applied.
+        self.assertNotIn("axisLine", ya[0])
+        # Single-series axis: tint applied.
+        palette = r.option["color"]
+        # dxy is the 3rd series in series_names order so it inherits color[2].
+        self.assertEqual(ya[1]["axisLabel"]["color"], palette[2])
+
+    def test_color_coding_disabled_globally(self):
+        r = make_echart(self._df(), "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axis_color_coding": False,
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"]},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        for ax in ya:
+            self.assertNotIn("axisLine", ax)
+            self.assertNotIn("color",
+                              ax.get("axisLabel") or {})
+
+    def test_color_false_per_axis_opts_out(self):
+        r = make_echart(self._df(), "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axes": [
+                {"side": "left",  "title": "SPX", "series": ["spx"],
+                  "color": False},
+                {"side": "right", "title": "UST", "series": ["ust"]},
+            ],
+        })
+        ya = r.option["yAxis"]
+        # Axis 0: color: False -> stays neutral
+        self.assertNotIn("axisLine", ya[0])
+        # Axis 1: still auto-color-coded
+        palette = r.option["color"]
+        self.assertEqual(ya[1]["axisLabel"]["color"], palette[1])
+
+    def test_single_axis_chart_stays_neutral(self):
+        # A single-axis chart shouldn't pick a color from the palette --
+        # the line itself carries the hue; the axis would be redundant
+        # and mismatch when there are multiple lines on the one axis.
+        r = make_echart(self._df(), "multi_line", mapping={
+            "x": "date", "y": ["spx", "ust"],
+            "axes": [{"side": "left", "title": "Both",
+                       "series": ["spx", "ust"]}],
+        })
+        ax = r.option["yAxis"]
+        self.assertNotIn("axisLine", ax)
+
+
+# =============================================================================
 # STACK / STROKEDASH / TRENDLINE
 # =============================================================================
 
@@ -1293,6 +1924,408 @@ class TestNewBuilders(unittest.TestCase):
                                     "color_by": "z"})
         self.assertEqual(r.option["series"][0]["type"], "custom")
         self.assertEqual(len(r.option["series"][0]["data"]), 2)
+
+
+# =============================================================================
+# CORRELATION_MATRIX BUILDER (Phase 1: exploratory analytics)
+# =============================================================================
+
+class TestCorrelationMatrix(unittest.TestCase):
+    """Builder produces an N x N heatmap with values in [-1, 1] and the
+    diverging palette pinned to that range. Tests cover the math
+    (perfect-correlation diagonal, perfect-anticorr off-diagonal),
+    transform pre-processing, NaN tolerance, and Spearman ranks.
+    """
+
+    def _df_2col(self):
+        return pd.DataFrame({"a": [1.0, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                              "b": [2.0, 4, 6, 8, 10, 12, 14, 16, 18, 20]})
+
+    def test_n_cells_equals_n_squared(self):
+        df = self._df_2col()
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"]})
+        self.assertEqual(len(r.option["series"][0]["data"]), 4)
+
+    def test_diagonal_is_1(self):
+        df = self._df_2col()
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"]})
+        cells = r.option["series"][0]["data"]
+        # Diagonal is (i, n-1-i) for i in 0..n-1
+        n = 2
+        diag_vals = []
+        for c in cells:
+            v = c["value"]
+            if v[0] + v[1] == n - 1:  # diagonal
+                diag_vals.append(v[2])
+        self.assertEqual(len(diag_vals), 2)
+        for v in diag_vals:
+            self.assertAlmostEqual(v, 1.0, places=6)
+
+    def test_perfect_correlation_off_diagonal_is_1(self):
+        # b = 2 * a + 0 -> r = 1
+        df = self._df_2col()
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"]})
+        cells = r.option["series"][0]["data"]
+        off = [c["value"][2] for c in cells
+                if c["value"][0] + c["value"][1] != 1]
+        for v in off:
+            self.assertAlmostEqual(v, 1.0, places=6)
+
+    def test_perfect_anticorrelation(self):
+        df = pd.DataFrame({"a": [1, 2, 3, 4, 5],
+                            "b": [-1, -2, -3, -4, -5]})
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"]})
+        cells = r.option["series"][0]["data"]
+        off = [c["value"][2] for c in cells
+                if c["value"][0] != c["value"][1]
+                and not (c["value"][0] + c["value"][1] == 1)]
+        # In a 2x2 matrix the diagonal is positions (0,1) and (1,0);
+        # off-diagonals are (0,0) and (1,1) per the reversed-y layout.
+        # Pull the symmetric pair where columns differ -> should be -1.
+        anti = [c["value"][2] for c in cells
+                 if (c["value"][0], c["value"][1]) in ((0, 0), (1, 1))]
+        for v in anti:
+            self.assertAlmostEqual(v, -1.0, places=6)
+
+    def test_visualmap_pinned_to_pm1(self):
+        df = self._df_2col()
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"]})
+        vm = r.option["visualMap"][0]
+        self.assertEqual(vm["min"], -1)
+        self.assertEqual(vm["max"], 1)
+        self.assertGreaterEqual(len(vm["inRange"]["color"]), 3)
+
+    def test_min_periods_drops_thin_overlap(self):
+        df = pd.DataFrame({
+            "a": [1.0, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "b": [None, None, None, None, None, None, None, None, 1, 2],
+        })
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"], "min_periods": 5})
+        cells = r.option["series"][0]["data"]
+        # Off-diagonal cell should be None (insufficient overlap).
+        off = [c["value"][2] for c in cells
+                if (c["value"][0], c["value"][1]) in ((0, 0), (1, 1))]
+        for v in off:
+            self.assertIsNone(v)
+
+    def test_pct_change_transform_requires_order_by(self):
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=5),
+            "a": [1.0, 2, 3, 4, 5],
+            "b": [10.0, 20, 30, 40, 50],
+        })
+        # No order_by + no datetime -> should raise.
+        with self.assertRaises(ValueError):
+            make_echart(pd.DataFrame({"a": [1.0, 2, 3, 4],
+                                        "b": [4.0, 3, 2, 1]}),
+                          "correlation_matrix",
+                          mapping={"columns": ["a", "b"],
+                                    "transform": "pct_change"})
+        # With explicit order_by it works.
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"],
+                                    "transform": "pct_change",
+                                    "order_by": "date"})
+        self.assertEqual(r.option["series"][0]["type"], "heatmap")
+
+    def test_spearman_handles_monotonic_nonlinear(self):
+        # y = exp(x): Pearson < 1, Spearman = 1.
+        import math
+        xs = [1, 2, 3, 4, 5, 6, 7, 8]
+        ys = [math.exp(x) for x in xs]
+        df = pd.DataFrame({"a": xs, "b": ys})
+        r_pearson = make_echart(df, "correlation_matrix",
+                                  mapping={"columns": ["a", "b"]})
+        r_spearman = make_echart(df, "correlation_matrix",
+                                   mapping={"columns": ["a", "b"],
+                                             "method": "spearman"})
+
+        def _off(opt):
+            for c in opt["series"][0]["data"]:
+                v = c["value"]
+                if (v[0], v[1]) in ((0, 0), (1, 1)):
+                    return v[2]
+            return None
+        rp = _off(r_pearson.option)
+        rs = _off(r_spearman.option)
+        self.assertLess(rp, 0.99999)
+        self.assertAlmostEqual(rs, 1.0, places=6)
+
+    def test_columns_required(self):
+        df = self._df_2col()
+        with self.assertRaises(ValueError):
+            make_echart(df, "correlation_matrix", mapping={})
+        with self.assertRaises(ValueError):
+            make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a"]})
+
+    def test_label_formatter_present_when_show_values(self):
+        df = self._df_2col()
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"], "show_values": True})
+        label = r.option["series"][0]["label"]
+        self.assertTrue(label["show"])
+        self.assertIn("toFixed", label["formatter"])
+        r2 = make_echart(df, "correlation_matrix",
+                           mapping={"columns": ["a", "b"], "show_values": False})
+        self.assertFalse(r2.option["series"][0]["label"]["show"])
+
+
+class TestComputeTransform(unittest.TestCase):
+    """The shared per-column transform helper backs both
+    correlation_matrix (compile-time) and scatter_studio (runtime).
+    Verify each transform name produces the expected column.
+    """
+
+    def setUp(self):
+        from echart_studio import _compute_transform
+        self._t = _compute_transform
+
+    def test_raw_passthrough(self):
+        out = self._t([1, 2, 3], None, "raw")
+        self.assertEqual(out, [1.0, 2.0, 3.0])
+
+    def test_log_drops_nonpositive(self):
+        out = self._t([1, 0, -2, 4], None, "log")
+        import math
+        self.assertAlmostEqual(out[0], 0.0)
+        self.assertIsNone(out[1])
+        self.assertIsNone(out[2])
+        self.assertAlmostEqual(out[3], math.log(4))
+
+    def test_pct_change(self):
+        out = self._t([100, 110, 121, 0], None, "pct_change")
+        self.assertIsNone(out[0])
+        self.assertAlmostEqual(out[1], 10.0)
+        self.assertAlmostEqual(out[2], 10.0)
+        # division-by-zero step -> None
+        # Followed by None at index 3 because b == 0 ... actually i=3,
+        # b = values[2] = 121 so this is fine; a=0, b=121 -> -100%
+        # Re-check: pct_change(0, 121) == (0-121)/121 = -100
+        self.assertAlmostEqual(out[3], -100.0)
+
+    def test_change(self):
+        out = self._t([1, 3, 6], None, "change")
+        self.assertIsNone(out[0])
+        self.assertEqual(out[1:], [2.0, 3.0])
+
+    def test_zscore(self):
+        # Standard normal-ish: mean 0, stdev ~1
+        from echart_studio import _compute_transform
+        vals = [-2, -1, 0, 1, 2]
+        out = _compute_transform(vals, None, "zscore")
+        # Sample-stdev = sqrt(10/4) = sqrt(2.5)
+        import math
+        s = math.sqrt(2.5)
+        self.assertAlmostEqual(out[0], -2 / s, places=6)
+        self.assertAlmostEqual(out[2], 0.0, places=6)
+        self.assertAlmostEqual(out[4],  2 / s, places=6)
+
+    def test_rank_pct(self):
+        out = self._t([10, 30, 20, 40], None, "rank_pct")
+        # Sorted: 10 -> 0, 20 -> 33.3, 30 -> 66.7, 40 -> 100
+        self.assertAlmostEqual(out[0], 0.0, places=2)
+        self.assertAlmostEqual(out[1], 66.6666, places=2)
+        self.assertAlmostEqual(out[2], 33.3333, places=2)
+        self.assertAlmostEqual(out[3], 100.0, places=2)
+
+    def test_yoy_pct(self):
+        from datetime import date, timedelta
+        base = date(2023, 1, 1)
+        dates = [base + timedelta(days=i * 30) for i in range(15)]
+        # 15 monthly points; row 12 (year+1) vs row 0 should be defined.
+        vals = [100.0 + i for i in range(15)]
+        out = self._t(vals, dates, "yoy_pct")
+        self.assertIsNone(out[0])
+        # The year-ago lookup uses ~365d; with 30-day spacing, row 12
+        # is 360d from row 0 (one step short) -> falls back to row -1
+        # candidate (none qualifies). row 13 is 390d -> qualifies.
+        # Just verify SOME row late in the series is defined.
+        late_defined = [v for v in out[12:] if v is not None]
+        self.assertGreater(len(late_defined), 0)
+
+
+class TestRegressionStats(unittest.TestCase):
+    def test_perfect_fit(self):
+        from echart_studio import _compute_regression_stats
+        xs = [1, 2, 3, 4, 5]
+        ys = [2, 4, 6, 8, 10]
+        s = _compute_regression_stats(xs, ys)
+        self.assertEqual(s["n"], 5)
+        self.assertAlmostEqual(s["slope"], 2.0)
+        self.assertAlmostEqual(s["intercept"], 0.0)
+        self.assertAlmostEqual(s["r"], 1.0)
+        self.assertAlmostEqual(s["r2"], 1.0)
+        # RMSE should be exactly 0 for perfect fit
+        self.assertLess(s["rmse"], 1e-9)
+
+    def test_zero_variance_x(self):
+        from echart_studio import _compute_regression_stats
+        s = _compute_regression_stats([5, 5, 5, 5], [1, 2, 3, 4])
+        self.assertEqual(s["degenerate"], "x_zero_variance")
+
+    def test_too_few_points(self):
+        from echart_studio import _compute_regression_stats
+        self.assertIsNone(_compute_regression_stats([1], [2]))
+        self.assertIsNone(_compute_regression_stats([], []))
+
+    def test_drops_nan_pairs(self):
+        from echart_studio import _compute_regression_stats
+        s = _compute_regression_stats(
+            [1, 2, 3, None, 5],
+            [2, 4, 6, 8, None],
+        )
+        self.assertEqual(s["n"], 3)
+
+
+class TestScatterStudio(unittest.TestCase):
+    """Phase 2 builder: produces a scatter option from defaults AND
+    embeds the studio config block ``opt['_studio']`` so the runtime
+    drawer can wire dropdowns / recompute on user input.
+    """
+
+    def _df(self):
+        from datetime import date, timedelta
+        random.seed(91)
+        n = 60
+        base = date(2025, 1, 1)
+        return pd.DataFrame({
+            "date":   [base + timedelta(days=i) for i in range(n)],
+            "us_2y":  [3.5 + i * 0.01 + random.gauss(0, 0.04) for i in range(n)],
+            "us_10y": [4.0 + i * 0.012 + random.gauss(0, 0.04) for i in range(n)],
+            "spx":    [4500 + i * 5 + random.gauss(0, 30) for i in range(n)],
+            "regime": [["risk-on", "risk-off"][i % 2] for i in range(n)],
+        })
+
+    def test_basic_render(self):
+        df = self._df()
+        r = make_echart(df, "scatter_studio", mapping={
+            "x_columns": ["us_2y", "us_10y"],
+            "y_columns": ["spx", "us_10y"],
+            "order_by": "date",
+        })
+        self.assertEqual(r.option["series"][0]["type"], "scatter")
+        # Should contain the embedded studio config
+        self.assertIn("_studio", r.option)
+        cfg = r.option["_studio"]
+        self.assertEqual(cfg["x_columns"], ["us_2y", "us_10y"])
+        self.assertEqual(cfg["y_columns"], ["spx", "us_10y"])
+        # Defaults picked from whitelists
+        self.assertIn(cfg["x_default"], cfg["x_columns"])
+        self.assertIn(cfg["y_default"], cfg["y_columns"])
+
+    def test_color_grouping_emits_one_series_per_group(self):
+        df = self._df()
+        r = make_echart(df, "scatter_studio", mapping={
+            "x_columns": ["us_10y"], "y_columns": ["spx"],
+            "color_columns": ["regime"],
+            "color_default": "regime",
+            "order_by": "date",
+        })
+        # Two regimes -> two scatter series
+        scat_series = [s for s in r.option["series"]
+                        if s.get("type") == "scatter"]
+        self.assertEqual(len(scat_series), 2)
+        self.assertSetEqual(
+            set(s["name"] for s in scat_series),
+            {"risk-on", "risk-off"},
+        )
+
+    def test_default_y_avoids_x(self):
+        # When x and y_columns share an obvious overlap, the y_default
+        # picker should prefer something OTHER than x_default so the
+        # initial chart isn't a degenerate diagonal.
+        df = self._df()
+        r = make_echart(df, "scatter_studio", mapping={
+            "x_columns": ["us_2y", "us_10y", "spx"],
+            "y_columns": ["us_2y", "us_10y", "spx"],
+            "x_default": "us_10y",
+            "order_by": "date",
+        })
+        cfg = r.option["_studio"]
+        self.assertNotEqual(cfg["x_default"], cfg["y_default"])
+
+    def test_transform_default_in_axis_name(self):
+        df = self._df()
+        r = make_echart(df, "scatter_studio", mapping={
+            "x_columns": ["us_10y"], "y_columns": ["spx"],
+            "order_by": "date",
+            "y_transform_default": "pct_change",
+        })
+        # The y axis name should include the transform suffix
+        self.assertIn("%", r.option["yAxis"]["name"])
+
+    def test_x_default_must_be_in_whitelist(self):
+        # When x_default is not in x_columns, the resolver picks the
+        # first whitelist entry (no error).
+        df = self._df()
+        r = make_echart(df, "scatter_studio", mapping={
+            "x_columns": ["us_2y", "us_10y"],
+            "y_columns": ["spx"],
+            "x_default": "wat",   # not in x_columns
+            "order_by": "date",
+        })
+        self.assertEqual(r.option["_studio"]["x_default"], "us_2y")
+
+    def test_order_by_must_exist_in_dataset(self):
+        df = self._df()
+        with self.assertRaises(ValueError):
+            make_echart(df, "scatter_studio", mapping={
+                "x_columns": ["us_10y"], "y_columns": ["spx"],
+                "order_by": "nope",
+            })
+
+    def test_unknown_column_in_whitelist_raises(self):
+        df = self._df()
+        with self.assertRaises(ValueError):
+            make_echart(df, "scatter_studio", mapping={
+                "x_columns": ["us_10y", "phantom"],
+                "y_columns": ["spx"],
+                "order_by": "date",
+            })
+
+    def test_studio_in_safe_for_rewire(self):
+        # Auto-wire path: scatter_studio should be marked safe for
+        # rewire so that filters chain to it (dataset_ref auto-set).
+        from echart_dashboard import compile_dashboard
+        df = self._df()
+        manifest = {
+            "schema_version": 1, "id": "studio_test", "title": "t",
+            "datasets": {"d": df},
+            "layout": {"rows": [
+                [{"widget": "chart", "id": "c1", "w": 12, "h_px": 320,
+                   "spec": {"chart_type": "scatter_studio",
+                              "dataset": "d",
+                              "mapping": {
+                                  "x_columns": ["us_10y"],
+                                  "y_columns": ["spx"],
+                                  "order_by": "date",
+                              }}}]
+            ]},
+            "filters": [
+                {"id": "regime", "type": "select", "label": "Regime",
+                  "field": "regime", "options": ["risk-on", "risk-off"],
+                  "default": "risk-on", "targets": ["c1"]}
+            ],
+        }
+        out = Path(tempfile.mkdtemp(prefix="studio_rewire_test_"))
+        result = compile_dashboard(manifest, session_path=out,
+                                       write_html=False, write_json=True)
+        if not result.success:
+            # Surface the diagnostic codes so failures are diagnosable.
+            codes = [d.code for d in (result.diagnostics or [])]
+            self.fail(f"compile_dashboard failed: codes={codes}")
+        # The compiled manifest should now have dataset_ref="d" on c1
+        # (added by _augment_manifest because scatter_studio is safe
+        # for rewire).
+        compiled_widget = result.manifest["layout"]["rows"][0][0]
+        self.assertEqual(compiled_widget.get("dataset_ref"), "d")
 
 
 # =============================================================================
@@ -1636,6 +2669,228 @@ class TestLongLabelLayout(unittest.TestCase):
         # `interval` should not have been added either since the user
         # explicitly opted out via their own `rotate`.
         self.assertNotIn("interval", opt["xAxis"]["axisLabel"])
+
+
+# =============================================================================
+# HEATMAP CELL LABELS + AUTO-CONTRAST + COLOR CONFIGURATION
+# =============================================================================
+#
+# The heatmap builder (and calendar_heatmap / correlation_matrix) print
+# cell values by default and pick black/white text per cell based on
+# the cell's resolved color luminance. The text-color picker uses
+# ECharts rich-text styles (label.rich.l = dark text, label.rich.d =
+# light text) and a JS formatter that wraps each value in {l|...} or
+# {d|...} based on the cell color -- ECharts heatmap doesn't evaluate
+# label.color as a callback so rich text is the supported path.
+#
+# Color stops are configurable via mapping.colors (raw list),
+# mapping.color_palette (palette name), or mapping.color_scale
+# (sequential / diverging / auto). The visualMap range can be pinned
+# via mapping.value_min / mapping.value_max.
+
+class TestHeatmapLabels(unittest.TestCase):
+    def _df(self):
+        return pd.DataFrame({
+            "x": list("AABBCC"),
+            "y": list("121212"),
+            "v": [10, 30, 50, 70, 90, 110],
+        })
+
+    def test_default_shows_values_with_auto_contrast(self):
+        r = make_echart(self._df(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v"})
+        label = r.option["series"][0]["label"]
+        self.assertTrue(label["show"])
+        self.assertIn("formatter", label)
+        # Auto-contrast goes through rich-text styles -- a {l|...}/{d|...}
+        # wrapper plus rich.l (dark text) / rich.d (light text).
+        self.assertIn("rich", label)
+        self.assertEqual(label["rich"]["l"]["color"], "#111")
+        self.assertEqual(label["rich"]["d"]["color"], "#fff")
+        self.assertIn("'{'+s+'|'", label["formatter"])
+
+    def test_show_values_false_drops_formatter(self):
+        r = make_echart(self._df(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "show_values": False})
+        label = r.option["series"][0]["label"]
+        self.assertFalse(label["show"])
+        self.assertNotIn("formatter", label)
+        self.assertNotIn("rich", label)
+
+    def test_value_label_color_explicit_disables_rich(self):
+        r = make_echart(self._df(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "value_label_color": "#ff0000"})
+        label = r.option["series"][0]["label"]
+        self.assertEqual(label.get("color"), "#ff0000")
+        self.assertNotIn("rich", label)
+        # Plain formatter (no {l|...}/{d|...} wrapping).
+        self.assertIn("toFixed", label["formatter"])
+        self.assertNotIn("'{'+s+'|'", label["formatter"])
+
+    def test_value_label_color_false_disables_color_and_rich(self):
+        r = make_echart(self._df(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "value_label_color": False})
+        label = r.option["series"][0]["label"]
+        self.assertNotIn("color", label)
+        self.assertNotIn("rich", label)
+
+    def test_custom_value_formatter_passes_through(self):
+        custom = "function(p){return 'X';}"
+        r = make_echart(self._df(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "value_formatter": custom})
+        self.assertEqual(
+            r.option["series"][0]["label"]["formatter"], custom
+        )
+
+    def test_value_decimals_threads_into_formatter(self):
+        r = make_echart(self._df(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "value_decimals": 3})
+        self.assertIn("toFixed(3)",
+                       r.option["series"][0]["label"]["formatter"])
+
+    def test_cell_data_uses_value_dict_form(self):
+        r = make_echart(self._df(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v"})
+        cells = r.option["series"][0]["data"]
+        self.assertIsInstance(cells[0], dict)
+        self.assertIn("value", cells[0])
+        self.assertEqual(len(cells[0]["value"]), 3)
+
+
+class TestHeatmapColorConfig(unittest.TestCase):
+    def _df_pos(self):
+        return pd.DataFrame({
+            "x": list("AABB"), "y": list("1212"),
+            "v": [10, 20, 30, 40],
+        })
+
+    def _df_cross_zero(self):
+        return pd.DataFrame({
+            "x": list("AABB"), "y": list("1212"),
+            "v": [-5, -2, 8, 12],
+        })
+
+    def test_explicit_colors_override_palette(self):
+        r = make_echart(self._df_pos(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "colors": ["#000", "#888", "#fff"]})
+        self.assertEqual(
+            r.option["visualMap"][0]["inRange"]["color"],
+            ["#000", "#888", "#fff"],
+        )
+
+    def test_color_palette_by_name(self):
+        r = make_echart(self._df_pos(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "color_palette": "gs_diverging"})
+        cols = r.option["visualMap"][0]["inRange"]["color"]
+        self.assertGreaterEqual(len(cols), 3)
+
+    def test_color_palette_unknown_falls_back(self):
+        # Unknown palette name should not raise -- builder falls back
+        # to the ctx default rather than crash.
+        r = make_echart(self._df_pos(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "color_palette": "no_such_palette"})
+        self.assertGreaterEqual(
+            len(r.option["visualMap"][0]["inRange"]["color"]), 2
+        )
+
+    def test_color_scale_auto_picks_diverging_when_cross_zero(self):
+        r = make_echart(self._df_cross_zero(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "color_scale": "auto"})
+        vm = r.option["visualMap"][0]
+        # Auto + cross-zero pads symmetrically around 0.
+        self.assertEqual(vm["min"], -vm["max"])
+        # And uses a diverging palette (>= 3 stops).
+        self.assertGreaterEqual(len(vm["inRange"]["color"]), 3)
+
+    def test_color_scale_auto_keeps_data_range_for_all_positive(self):
+        r = make_echart(self._df_pos(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "color_scale": "auto"})
+        vm = r.option["visualMap"][0]
+        # All-positive data shouldn't trigger the symmetric padding.
+        self.assertGreater(vm["min"], 0)
+
+    def test_value_min_max_pin_visualmap(self):
+        r = make_echart(self._df_pos(), "heatmap",
+                          mapping={"x": "x", "y": "y", "value": "v",
+                                    "value_min": 0, "value_max": 100})
+        vm = r.option["visualMap"][0]
+        self.assertEqual(vm["min"], 0)
+        self.assertEqual(vm["max"], 100)
+
+
+class TestHeatmapCorrelationMatrixContrast(unittest.TestCase):
+    def test_correlation_matrix_uses_rich_text_auto_contrast(self):
+        df = pd.DataFrame({"a": [1.0, 2, 3, 4, 5],
+                            "b": [5, 4, 3, 2, 1]})
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"]})
+        label = r.option["series"][0]["label"]
+        self.assertTrue(label["show"])
+        self.assertIn("rich", label)
+        self.assertIn("'{'+s+'|'", label["formatter"])
+
+    def test_correlation_matrix_custom_colors(self):
+        df = pd.DataFrame({"a": [1.0, 2, 3], "b": [3, 2, 1]})
+        r = make_echart(df, "correlation_matrix",
+                          mapping={"columns": ["a", "b"],
+                                    "colors": ["#ff0000", "#ffffff", "#0000ff"]})
+        self.assertEqual(
+            r.option["visualMap"][0]["inRange"]["color"],
+            ["#ff0000", "#ffffff", "#0000ff"],
+        )
+
+
+class TestCalendarHeatmapConfig(unittest.TestCase):
+    def _df(self):
+        return pd.DataFrame({
+            "date": pd.date_range("2025-01-01", periods=10),
+            "v": [-3, -1, 0, 2, 4, 6, 8, 10, 12, 14],
+        })
+
+    def test_default_hides_values(self):
+        # Calendar cells are typically too small for inline labels, so
+        # show_values defaults to False (but is still configurable).
+        r = make_echart(self._df(), "calendar_heatmap",
+                          mapping={"date": "date", "value": "v"})
+        self.assertFalse(r.option["series"][0]["label"]["show"])
+
+    def test_show_values_true_uses_value_idx_1(self):
+        # Calendar data is [date, value] (idx 1) -- formatter must
+        # extract the right index.
+        r = make_echart(self._df(), "calendar_heatmap",
+                          mapping={"date": "date", "value": "v",
+                                    "show_values": True})
+        f = r.option["series"][0]["label"]["formatter"]
+        # Looks up element 1 (the value), not element 2 (which would
+        # be the regular-heatmap convention).
+        self.assertIn("d.value[1]", f)
+        self.assertIn("d[1]", f)
+
+    def test_custom_colors(self):
+        r = make_echart(self._df(), "calendar_heatmap",
+                          mapping={"date": "date", "value": "v",
+                                    "colors": ["#fff", "#000"]})
+        self.assertEqual(
+            r.option["visualMap"][0]["inRange"]["color"], ["#fff", "#000"]
+        )
+
+    def test_color_scale_auto_anchors_at_zero(self):
+        r = make_echart(self._df(), "calendar_heatmap",
+                          mapping={"date": "date", "value": "v",
+                                    "color_scale": "auto"})
+        vm = r.option["visualMap"][0]
+        # Cross-zero data + auto -> symmetric range.
+        self.assertEqual(vm["min"], -vm["max"])
 
 
 # =============================================================================
@@ -2072,7 +3327,8 @@ class TestChartDataDiagnostics(unittest.TestCase):
         m = self._wrap(
             datasets={"d": pd.DataFrame({"a": [1, 2]})},
             layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
-                                "label": "x", "source": "unknown.a"}]]})
+                                "label": "x",
+                                "source": "unknown.latest.a"}]]})
         diags = chart_data_diagnostics(m)
         self.assertIn("kpi_source_dataset_unknown", self._codes(diags))
 
@@ -2080,7 +3336,8 @@ class TestChartDataDiagnostics(unittest.TestCase):
         m = self._wrap(
             datasets={"d": pd.DataFrame({"a": [1, 2]})},
             layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
-                                "label": "x", "source": "d.b"}]]})
+                                "label": "x",
+                                "source": "d.latest.missing_col"}]]})
         diags = chart_data_diagnostics(m)
         self.assertIn("kpi_source_column_missing", self._codes(diags))
 
@@ -2092,12 +3349,96 @@ class TestChartDataDiagnostics(unittest.TestCase):
         diags = chart_data_diagnostics(m)
         self.assertIn("kpi_source_malformed", self._codes(diags))
 
+    def test_kpi_source_two_part_is_malformed(self):
+        """A 2-part source (the legacy ``dataset.column`` format) is
+        rejected because the JS runtime expects 3 parts
+        ``dataset.aggregator.column`` and would silently return null
+        otherwise (rendering '--')."""
+        m = self._wrap(
+            datasets={"d": pd.DataFrame({"a": [1, 2]})},
+            layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                                "label": "x", "source": "d.a"}]]})
+        diags = chart_data_diagnostics(m)
+        self.assertIn("kpi_source_malformed", self._codes(diags))
+
+    def test_kpi_source_aggregator_unknown(self):
+        m = self._wrap(
+            datasets={"d": pd.DataFrame({"a": [1, 2]})},
+            layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                                "label": "x",
+                                "source": "d.median.a"}]]})
+        diags = chart_data_diagnostics(m)
+        self.assertIn("kpi_source_aggregator_unknown",
+                       self._codes(diags))
+
+    def test_kpi_no_value_no_source_fires(self):
+        """KPI with neither value nor source would render '--' at
+        runtime; validator catches this as an error."""
+        m = self._wrap(
+            datasets={"d": pd.DataFrame({"a": [1, 2]})},
+            layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                                "label": "x"}]]})
+        diags = chart_data_diagnostics(m)
+        self.assertIn("kpi_no_value_no_source", self._codes(diags))
+
+    def test_kpi_value_set_no_diag(self):
+        m = self._wrap(
+            datasets={"d": pd.DataFrame({"a": [1, 2]})},
+            layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                                "label": "x", "value": 42}]]})
+        diags = chart_data_diagnostics(m)
+        self.assertNotIn("kpi_no_value_no_source", self._codes(diags))
+
+    def test_kpi_value_placeholder_dashes(self):
+        """value='--' renders verbatim. Flag explicitly so authors
+        don't ship the literal string."""
+        m = self._wrap(
+            datasets={"d": pd.DataFrame({"a": [1, 2]})},
+            layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                                "label": "x", "value": "--"}]]})
+        diags = chart_data_diagnostics(m)
+        self.assertIn("kpi_value_is_placeholder", self._codes(diags))
+
+    def test_kpi_source_no_numeric_values(self):
+        """All-string column resolves to null in JS; flag as error."""
+        m = self._wrap(
+            datasets={"d": pd.DataFrame({"a": ["foo", "bar"]})},
+            layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                                "label": "x",
+                                "source": "d.latest.a"}]]})
+        diags = chart_data_diagnostics(m)
+        self.assertIn("kpi_source_no_numeric_values",
+                       self._codes(diags))
+
+    def test_kpi_source_all_nan_fires_no_numeric_values(self):
+        """All-NaN column produces the same runtime symptom as
+        all-string; we collapse both into ``kpi_source_no_numeric_values``."""
+        m = self._wrap(
+            datasets={"d": pd.DataFrame({"a": [None, None]})},
+            layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                                "label": "x",
+                                "source": "d.latest.a"}]]})
+        diags = chart_data_diagnostics(m)
+        self.assertIn("kpi_source_no_numeric_values",
+                       self._codes(diags))
+
+    def test_kpi_clean_source_no_diag(self):
+        """Sanity: a well-formed KPI fires no diagnostic."""
+        m = self._wrap(
+            datasets={"d": pd.DataFrame({"a": [1.0, 2.0, 3.0]})},
+            layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                                "label": "x",
+                                "source": "d.latest.a"}]]})
+        diags = chart_data_diagnostics(m)
+        kpi_codes = [c for c in self._codes(diags) if c.startswith("kpi_")]
+        self.assertEqual(kpi_codes, [], kpi_codes)
+
     def test_kpi_delta_source_propagates_to_diag(self):
         m = self._wrap(
             datasets={"d": pd.DataFrame({"a": [1, 2]})},
             layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
-                                "label": "x", "source": "d.a",
-                                "delta_source": "d.missing_col"}]]})
+                                "label": "x", "source": "d.latest.a",
+                                "delta_source": "d.prev.missing_col"}]]})
         diags = chart_data_diagnostics(m)
         # Same code, but path/context must mention delta_source
         miss = [d for d in diags if d.code == "kpi_source_column_missing"]
@@ -2143,7 +3484,10 @@ class TestChartDataDiagnostics(unittest.TestCase):
                                 "spec": {"chart_type": "line", "dataset": "d",
                                           "mapping": {"x": "x",
                                                       "y": "y"}}}]]})
-        r = compile_dashboard(m)
+        # strict=False: this manifest has an error-severity diagnostic
+        # (column all-NaN) but we want to verify diagnostics survive
+        # the compile, not that they fail the compile.
+        r = compile_dashboard(m, strict=False)
         self.assertTrue(r.success, r.error_message)
         self.assertIsNotNone(r.html)
         self.assertGreater(len(r.diagnostics), 0)
@@ -2154,7 +3498,8 @@ class TestChartDataDiagnostics(unittest.TestCase):
 
     def test_compile_recovers_from_chart_build_failure(self):
         """Spec that throws at build time gets a placeholder + a
-        chart_build_failed diagnostic; sibling charts still compile."""
+        chart_build_failed diagnostic; sibling charts still compile.
+        Iteration mode (strict=False) so PRISM can see all failures."""
         m = self._wrap(
             datasets={"d": pd.DataFrame({"x": [1, 2], "y": [3, 4]}),
                        "f": pd.DataFrame({"r": ["US"], "v": [1]})},
@@ -2166,7 +3511,7 @@ class TestChartDataDiagnostics(unittest.TestCase):
                  "spec": {"chart_type": "pie", "dataset": "f",
                           "mapping": {}}},  # missing category+value
             ]]})
-        r = compile_dashboard(m)
+        r = compile_dashboard(m, strict=False)
         self.assertTrue(r.success)
         self.assertIsNotNone(r.html)
         codes = [d.code for d in r.diagnostics]
@@ -2227,7 +3572,8 @@ class TestDatasetShapeDiagnostics(unittest.TestCase):
                                           "dataset": "rates",
                                           "mapping": {"x": "date",
                                                       "y": "us_10y"}}}]]})
-        r = compile_dashboard(m, write_html=False, write_json=False)
+        r = compile_dashboard(m, write_html=False, write_json=False,
+                                strict=False)
         codes = [d.code for d in r.diagnostics]
         self.assertIn("dataset_dti_no_date_column", codes)
         diag = next(d for d in r.diagnostics
@@ -2264,7 +3610,8 @@ class TestDatasetShapeDiagnostics(unittest.TestCase):
                                           "dataset": "rates",
                                           "mapping": {"x": "date",
                                                       "y": "us_10y"}}}]]})
-        r = compile_dashboard(m, write_html=False, write_json=False)
+        r = compile_dashboard(m, write_html=False, write_json=False,
+                                strict=False)
         codes = [d.code for d in r.diagnostics]
         self.assertIn("dataset_passed_as_tuple", codes)
         diag = next(d for d in r.diagnostics
@@ -2284,7 +3631,8 @@ class TestDatasetShapeDiagnostics(unittest.TestCase):
                                           "dataset": "foo",
                                           "mapping": {"x": "date",
                                                       "y": "A_x"}}}]]})
-        r = compile_dashboard(m, write_html=False, write_json=False)
+        r = compile_dashboard(m, write_html=False, write_json=False,
+                                strict=False)
         codes = [d.code for d in r.diagnostics]
         self.assertIn("dataset_columns_multiindex", codes)
         diag = next(d for d in r.diagnostics
@@ -2438,7 +3786,8 @@ class TestDatasetSizeDiagnostics(unittest.TestCase):
             "us_10y": [4.0 + i / 1e7 for i in range(n)],
         })
         m = self._wrap({"rates": df}, {"rows": self._line_chart("rates")})
-        r = compile_dashboard(m, write_html=False, write_json=False)
+        r = compile_dashboard(m, write_html=False, write_json=False,
+                                strict=False)
         codes = [d.code for d in r.diagnostics]
         self.assertIn("dataset_rows_error", codes)
         diag = next(d for d in r.diagnostics
@@ -2472,7 +3821,8 @@ class TestDatasetSizeDiagnostics(unittest.TestCase):
                           "dataset_ref": "bonds",
                           "columns": [{"field": "issuer"},
                                        {"field": "spread"}]}]]})
-        r = compile_dashboard(m, write_html=False, write_json=False)
+        r = compile_dashboard(m, write_html=False, write_json=False,
+                                strict=False)
         codes = [d.code for d in r.diagnostics]
         self.assertIn("table_rows_error", codes)
 
@@ -2487,7 +3837,8 @@ class TestDatasetSizeDiagnostics(unittest.TestCase):
             "v": [1.234567 + i / 1e6 for i in range(n)],
         })
         m = self._wrap({"d": df}, {"rows": self._line_chart("d", y="v")})
-        r = compile_dashboard(m, write_html=False, write_json=False)
+        r = compile_dashboard(m, write_html=False, write_json=False,
+                                strict=False)
         codes = [d.code for d in r.diagnostics]
         self.assertIn("manifest_bytes_error", codes)
         diag = next(d for d in r.diagnostics
@@ -2525,6 +3876,707 @@ class TestDatasetSizeDiagnostics(unittest.TestCase):
         self.assertTrue(r.success)
         self.assertIn("dataset_rows_warning",
                        [d.code for d in r.diagnostics])
+
+    def test_strict_is_default(self):
+        """``strict=True`` is the default. A manifest with an
+        error-severity diagnostic must raise even when caller didn't
+        pass ``strict=`` explicitly. The opposite default would let
+        production dashboards ship broken (this regressed once: see
+        TestKPIResolutionAgreement)."""
+        from echart_dashboard import DATASET_ROWS_ERROR
+        n = DATASET_ROWS_ERROR + 100
+        df = pd.DataFrame({
+            "date": pd.date_range("2000-01-01", periods=n, freq="min"),
+            "us_10y": [4.0] * n,
+        })
+        m = self._wrap({"rates": df}, {"rows": self._line_chart("rates")})
+        with self.assertRaises(ValueError):
+            compile_dashboard(m, write_html=False, write_json=False)
+
+
+# =============================================================================
+# STAT_GRID DIAGNOSTICS  (cells without value/source -> '--')
+# =============================================================================
+
+class TestStatGridDiagnostics(unittest.TestCase):
+    """``stat_grid`` is server-rendered: stats with neither ``value``
+    nor ``source`` ship literal ``--`` to production. Compile-time
+    resolution + diagnostics close that hole.
+    """
+
+    def _wrap(self, datasets, layout):
+        return {"schema_version": 1, "id": "t", "title": "t",
+                 "datasets": datasets, "layout": layout}
+
+    def _wrap_stat_grid(self, datasets, stats):
+        return self._wrap(
+            datasets,
+            {"rows": [[{"widget": "stat_grid", "id": "sg", "w": 12,
+                          "title": "x", "stats": stats}]]},
+        )
+
+    def _codes(self, diags):
+        return [d.code for d in diags]
+
+    def test_stat_no_value_no_source_fires(self):
+        m = self._wrap_stat_grid(
+            {"d": pd.DataFrame({"a": [1, 2]})},
+            [{"label": "X"}],
+        )
+        diags = chart_data_diagnostics(m)
+        self.assertIn("stat_grid_no_value_no_source", self._codes(diags))
+
+    def test_stat_value_set_no_diag(self):
+        m = self._wrap_stat_grid(
+            {"d": pd.DataFrame({"a": [1, 2]})},
+            [{"label": "X", "value": 42}],
+        )
+        diags = chart_data_diagnostics(m)
+        self.assertNotIn("stat_grid_no_value_no_source",
+                          self._codes(diags))
+
+    def test_stat_value_placeholder_dashes(self):
+        m = self._wrap_stat_grid(
+            {"d": pd.DataFrame({"a": [1, 2]})},
+            [{"label": "X", "value": "--"}],
+        )
+        diags = chart_data_diagnostics(m)
+        self.assertIn("stat_grid_value_is_placeholder",
+                       self._codes(diags))
+
+    def test_stat_source_unresolvable_dataset_unknown(self):
+        m = self._wrap_stat_grid(
+            {"d": pd.DataFrame({"a": [1, 2]})},
+            [{"label": "X", "source": "missing.latest.a"}],
+        )
+        diags = chart_data_diagnostics(m)
+        self.assertIn("stat_grid_source_unresolvable",
+                       self._codes(diags))
+
+    def test_stat_source_unresolvable_no_numeric(self):
+        m = self._wrap_stat_grid(
+            {"d": pd.DataFrame({"a": ["foo", "bar"]})},
+            [{"label": "X", "source": "d.latest.a"}],
+        )
+        diags = chart_data_diagnostics(m)
+        self.assertIn("stat_grid_source_unresolvable",
+                       self._codes(diags))
+
+    def test_stat_source_resolves_at_compile_time(self):
+        """A valid stat_grid source is RESOLVED to a concrete value
+        in the manifest at compile time so the static HTML renders
+        the real number, not '--'."""
+        m = self._wrap_stat_grid(
+            {"d": pd.DataFrame({"a": [1.0, 2.0, 3.0]})},
+            [{"label": "X", "source": "d.latest.a", "decimals": 1}],
+        )
+        r = compile_dashboard(m, write_html=False, write_json=False)
+        self.assertTrue(r.success)
+        # The stat now carries a baked value
+        stat = r.manifest["layout"]["rows"][0][0]["stats"][0]
+        self.assertIn("value", stat)
+        self.assertEqual(stat["value"], "3.0")
+
+    def test_stat_source_with_format_options(self):
+        m = self._wrap_stat_grid(
+            {"d": pd.DataFrame({"a": [0.123, 0.456]})},
+            [{"label": "X", "source": "d.latest.a",
+               "format": "percent", "decimals": 1}],
+        )
+        r = compile_dashboard(m, write_html=False, write_json=False)
+        self.assertTrue(r.success)
+        stat = r.manifest["layout"]["rows"][0][0]["stats"][0]
+        self.assertEqual(stat["value"], "45.6%")
+
+
+# =============================================================================
+# KPI RESOLUTION AGREEMENT  (Python mirror == JS resolveAgg + resolveSource)
+# =============================================================================
+
+class TestKPIResolutionAgreement(unittest.TestCase):
+    """The Python ``_resolve_kpi_value`` is a literal mirror of the
+    JS ``resolveAgg`` + ``resolveSource`` pair in rendering.py. If
+    they diverge, KPI diagnostics either false-alarm (block valid
+    dashboards) or miss real bugs (let '--' ship). These tests pin
+    the contract.
+    """
+
+    def _df(self):
+        return {"d": pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0],
+                                       "y": [None, 5.0, None, 6.0],
+                                       "s": ["a", "b", "c", "d"]})}
+
+    def _resolve(self, src):
+        from echart_dashboard import _resolve_kpi_value, \
+            _materialize_datasets
+        manifest = {"datasets": self._df()}
+        dfs = _materialize_datasets(manifest)
+        return _resolve_kpi_value(src, dfs)
+
+    def test_latest_returns_last_numeric(self):
+        v, err = self._resolve("d.latest.x")
+        self.assertEqual(v, 4.0); self.assertIsNone(err)
+
+    def test_first_returns_first_numeric(self):
+        v, err = self._resolve("d.first.x")
+        self.assertEqual(v, 1.0); self.assertIsNone(err)
+
+    def test_sum_returns_sum_of_numerics(self):
+        v, err = self._resolve("d.sum.x")
+        self.assertEqual(v, 10.0); self.assertIsNone(err)
+
+    def test_mean_returns_mean(self):
+        v, err = self._resolve("d.mean.x")
+        self.assertEqual(v, 2.5); self.assertIsNone(err)
+
+    def test_min_returns_min(self):
+        v, err = self._resolve("d.min.x")
+        self.assertEqual(v, 1.0); self.assertIsNone(err)
+
+    def test_max_returns_max(self):
+        v, err = self._resolve("d.max.x")
+        self.assertEqual(v, 4.0); self.assertIsNone(err)
+
+    def test_count_returns_count_of_numerics(self):
+        # Column 'y' has [None, 5, None, 6] -> count=2 (matches JS,
+        # which filters typeof v === 'number' first)
+        v, err = self._resolve("d.count.y")
+        self.assertEqual(v, 2); self.assertIsNone(err)
+
+    def test_prev_returns_second_to_last(self):
+        v, err = self._resolve("d.prev.x")
+        self.assertEqual(v, 3.0); self.assertIsNone(err)
+
+    def test_prev_falls_back_to_last_when_only_one(self):
+        from echart_dashboard import _resolve_kpi_value
+        manifest = {"datasets": {"d": pd.DataFrame({"x": [9.0]})}}
+        from echart_dashboard import _materialize_datasets
+        dfs = _materialize_datasets(manifest)
+        v, err = _resolve_kpi_value("d.prev.x", dfs)
+        # JS does the same: prev with <2 values returns the last value
+        self.assertEqual(v, 9.0); self.assertIsNone(err)
+
+    def test_unknown_aggregator_returns_error(self):
+        v, err = self._resolve("d.median.x")
+        self.assertIsNone(v)
+        self.assertIn("aggregator", err)
+
+    def test_two_part_source_is_malformed(self):
+        v, err = self._resolve("d.x")
+        self.assertIsNone(v)
+        self.assertIn("3+ parts", err)
+
+    def test_unknown_dataset(self):
+        v, err = self._resolve("ghost.latest.x")
+        self.assertIsNone(v)
+        self.assertIn("not declared", err)
+
+    def test_unknown_column(self):
+        v, err = self._resolve("d.latest.zzz")
+        self.assertIsNone(v)
+        self.assertIn("not in dataset", err)
+
+    def test_string_only_column_no_numeric_values(self):
+        v, err = self._resolve("d.latest.s")
+        self.assertIsNone(v)
+        self.assertIn("no numeric values", err)
+
+    def test_aggregator_set_matches_js(self):
+        """The Python aggregator allow-list must EXACTLY match the
+        JS ``resolveAgg`` switch in rendering.py. Drift = silent
+        '--' renders for dashboards that use a JS-only aggregator."""
+        from echart_dashboard import VALID_KPI_AGGREGATORS
+        # Pin the set; if you add an aggregator to one side, you
+        # must add it to the other (and update this test).
+        self.assertEqual(
+            VALID_KPI_AGGREGATORS,
+            {"latest", "first", "sum", "mean", "min", "max",
+             "count", "prev"})
+
+
+# =============================================================================
+# CHART-TYPE-AWARE NUMERIC + COLUMN-REF MAPPING RULES
+# =============================================================================
+
+class TestChartTypeMappingRules(unittest.TestCase):
+    """For some chart types the same mapping key carries different
+    semantics. ``y`` is numeric for line/bar/scatter but categorical
+    for ``bar_horizontal`` (the bar runs along x, the row label is
+    on y). ``mapping.name`` is a column ref for tree/treemap but a
+    label for gauge/bullet. Pin the chart-type-aware rules.
+    """
+
+    def _wrap(self, datasets, w):
+        return {"schema_version": 1, "id": "t", "title": "t",
+                 "datasets": datasets,
+                 "layout": {"rows": [[w]]}}
+
+    def _codes(self, m):
+        return [d.code for d in chart_data_diagnostics(m)]
+
+    def test_bar_horizontal_y_categorical_no_numeric_diag(self):
+        df = pd.DataFrame({"issuer": ["A", "B", "C"],
+                              "size": [10.0, 20.0, 30.0]})
+        m = self._wrap({"d": df}, {
+            "widget": "chart", "id": "c", "w": 12,
+            "spec": {"chart_type": "bar_horizontal", "dataset": "d",
+                       "mapping": {"x": "size", "y": "issuer"}},
+        })
+        self.assertNotIn("chart_mapping_column_non_numeric",
+                          self._codes(m))
+
+    def test_bar_horizontal_x_must_be_numeric(self):
+        df = pd.DataFrame({"issuer": ["A", "B"], "size": ["a", "b"]})
+        m = self._wrap({"d": df}, {
+            "widget": "chart", "id": "c", "w": 12,
+            "spec": {"chart_type": "bar_horizontal", "dataset": "d",
+                       "mapping": {"x": "size", "y": "issuer"}},
+        })
+        self.assertIn("chart_mapping_column_non_numeric",
+                       self._codes(m))
+
+    def test_heatmap_axes_categorical_no_numeric_diag(self):
+        df = pd.DataFrame({"a": ["X", "Y"], "b": ["P", "Q"],
+                              "v": [1.0, 2.0]})
+        m = self._wrap({"d": df}, {
+            "widget": "chart", "id": "c", "w": 12,
+            "spec": {"chart_type": "heatmap", "dataset": "d",
+                       "mapping": {"x": "a", "y": "b", "value": "v"}},
+        })
+        self.assertNotIn("chart_mapping_column_non_numeric",
+                          self._codes(m))
+
+    def test_heatmap_value_must_be_numeric(self):
+        df = pd.DataFrame({"a": ["X"], "b": ["P"], "v": ["junk"]})
+        m = self._wrap({"d": df}, {
+            "widget": "chart", "id": "c", "w": 12,
+            "spec": {"chart_type": "heatmap", "dataset": "d",
+                       "mapping": {"x": "a", "y": "b", "value": "v"}},
+        })
+        self.assertIn("chart_mapping_column_non_numeric",
+                       self._codes(m))
+
+    def test_gauge_name_is_label_not_column_ref(self):
+        """``mapping.name`` is the gauge label string for chart_type
+        'gauge'. Don't try to look it up as a dataset column."""
+        df = pd.DataFrame({"prob": [68]})
+        m = self._wrap({"d": df}, {
+            "widget": "chart", "id": "c", "w": 12,
+            "spec": {"chart_type": "gauge", "dataset": "d",
+                       "mapping": {"value": "prob",
+                                     "name": "Cut probability",
+                                     "min": 0, "max": 100}},
+        })
+        self.assertNotIn("chart_mapping_column_missing",
+                          self._codes(m))
+
+    def test_bullet_required_keys_y_x_low_high(self):
+        """``bullet`` requires y / x / x_low / x_high (rates-RV style),
+        NOT 'value'. Test the compile-time check matches the builder."""
+        df = pd.DataFrame({"metric": ["p/e", "p/b"],
+                              "current": [22.0, 3.0],
+                              "low_5y": [15.0, 2.0],
+                              "high_5y": [28.0, 4.0]})
+        m = self._wrap({"d": df}, {
+            "widget": "chart", "id": "c", "w": 12,
+            "spec": {"chart_type": "bullet", "dataset": "d",
+                       "mapping": {"y": "metric", "x": "current",
+                                     "x_low": "low_5y",
+                                     "x_high": "high_5y"}},
+        })
+        self.assertEqual([], self._codes(m))
+
+    def test_bullet_missing_required_keys_fires(self):
+        df = pd.DataFrame({"metric": ["a"], "v": [1.0]})
+        m = self._wrap({"d": df}, {
+            "widget": "chart", "id": "c", "w": 12,
+            "spec": {"chart_type": "bullet", "dataset": "d",
+                       "mapping": {"y": "metric"}},
+        })
+        # x, x_low, x_high all missing -> required_missing fires
+        self.assertIn("chart_mapping_required_missing", self._codes(m))
+
+
+# =============================================================================
+# ALL DEMOS COMPILE STRICT  (production-readiness guard)
+# =============================================================================
+
+class TestAllDemosCompileStrict(unittest.TestCase):
+    """Every demo build function in ``demos.py`` must compile cleanly
+    with ``strict=True``. If any demo fires an error-severity
+    diagnostic, this test fails -- which means production-quality
+    PRISM dashboards (which mirror the demos) are also broken.
+
+    This is the single most important regression guard for the
+    dashboard system. If this test fails, fix the demo OR fix the
+    validator (false positive).
+    """
+
+    def test_every_demo_passes_strict_compile(self):
+        import demos
+        import inspect
+        from pathlib import Path
+
+        real_compile = demos.compile_dashboard
+        captured: Dict[str, Dict[str, Any]] = {}
+
+        def make_capture(name):
+            def capture(manifest, *args, **kwargs):
+                captured[name] = manifest
+                return real_compile(manifest, *args, **kwargs)
+            return capture
+
+        demo_fns = [(nm, fn) for nm, fn in
+                    inspect.getmembers(demos, callable)
+                    if nm.startswith("build_")
+                    and not nm.startswith("build_compound")]
+        # ``build_cross_asset`` doesn't go through compile_dashboard
+        # (it uses make_4pack_grid). Skip it here; covered separately
+        # in TestComposites.
+        demo_fns = [(nm, fn) for nm, fn in demo_fns
+                    if nm != "build_cross_asset"]
+
+        failures: List[str] = []
+        for name, fn in demo_fns:
+            demos.compile_dashboard = make_capture(name)
+            with tempfile.TemporaryDirectory() as td:
+                try:
+                    fn(Path(td))
+                except Exception:
+                    pass
+            if name not in captured:
+                failures.append(f"{name}: did not call compile_dashboard")
+                continue
+            try:
+                real_compile(captured[name], write_html=False,
+                              write_json=False, strict=True)
+            except ValueError as e:
+                # Trim to just the codes for a tight failure message
+                msg = str(e)
+                head = msg.split("\n")[0]
+                failures.append(f"{name}: {head}")
+
+        demos.compile_dashboard = real_compile
+
+        self.assertEqual(failures, [],
+            "Demo dashboards failing strict compile:\n  " +
+            "\n  ".join(failures))
+
+
+# =============================================================================
+# NO LIVE PLACEHOLDERS  (HTML scan: no '--' / '(no data)' on good demos)
+# =============================================================================
+
+class TestNoUnresolvedPlaceholders(unittest.TestCase):
+    """Compile every demo and assert the produced HTML has no live
+    KPI '--' values for source-bound widgets, and no '(no data)'
+    chart placeholders. Server-side initial '--' is fine (the JS
+    overwrites it from the dataset); we check that the FINAL state
+    a user would see has no broken placeholders.
+    """
+
+    def _run(self, build_fn, demo_name):
+        import demos
+        from pathlib import Path
+
+        real_compile = demos.compile_dashboard
+        captured = {}
+
+        def capture(manifest, *args, **kwargs):
+            captured[demo_name] = manifest
+            return real_compile(manifest, *args, **kwargs)
+
+        demos.compile_dashboard = capture
+        with tempfile.TemporaryDirectory() as td:
+            try:
+                build_fn(Path(td))
+            except Exception:
+                pass
+        demos.compile_dashboard = real_compile
+        return captured.get(demo_name)
+
+    def test_all_demo_kpis_resolve_or_have_value(self):
+        """For every KPI in every demo, either ``value`` is set OR
+        the source resolves to a number. If neither, the tile would
+        render '--' in production.
+        """
+        import demos
+        import inspect
+        from echart_dashboard import (_resolve_kpi_value,
+                                            _materialize_datasets)
+
+        demo_fns = [(nm, fn) for nm, fn in
+                    inspect.getmembers(demos, callable)
+                    if nm.startswith("build_")
+                    and not nm.startswith("build_compound")
+                    and nm != "build_cross_asset"]
+
+        broken: List[str] = []
+        for name, fn in demo_fns:
+            m = self._run(fn, name)
+            if m is None:
+                continue
+            dfs = _materialize_datasets(m)
+            layout = m.get("layout") or {}
+
+            def walk(rows):
+                for row in rows or []:
+                    for w in row or []:
+                        if not isinstance(w, dict):
+                            continue
+                        if w.get("widget") != "kpi":
+                            continue
+                        kid = w.get("id")
+                        if w.get("value") is not None:
+                            continue
+                        src = w.get("source")
+                        if not src:
+                            broken.append(f"{name}.{kid}: no value, no source")
+                            continue
+                        v, err = _resolve_kpi_value(src, dfs)
+                        if v is None:
+                            broken.append(
+                                f"{name}.{kid}: source={src} -> {err}")
+
+            if layout.get("kind") == "tabs":
+                for tab in layout.get("tabs", []) or []:
+                    walk(tab.get("rows", []))
+            else:
+                walk(layout.get("rows", []))
+
+        self.assertEqual(broken, [],
+            "KPI tiles that would render '--' in production:\n  " +
+            "\n  ".join(broken))
+
+    def test_all_demo_stat_grids_have_values(self):
+        """Every stat_grid stat has a baked ``value`` after compile,
+        so the static HTML renders real numbers (not '--')."""
+        import demos
+        import inspect
+        from pathlib import Path
+
+        demo_fns = [(nm, fn) for nm, fn in
+                    inspect.getmembers(demos, callable)
+                    if nm.startswith("build_")
+                    and not nm.startswith("build_compound")
+                    and nm != "build_cross_asset"]
+
+        broken: List[str] = []
+        for name, fn in demo_fns:
+            m = self._run(fn, name)
+            if m is None:
+                continue
+            try:
+                r = compile_dashboard(m, write_html=False,
+                                         write_json=False, strict=True)
+            except ValueError:
+                continue  # caught by TestAllDemosCompileStrict
+            layout = r.manifest.get("layout") or {}
+
+            def walk(rows):
+                for row in rows or []:
+                    for w in row or []:
+                        if not isinstance(w, dict):
+                            continue
+                        if w.get("widget") != "stat_grid":
+                            continue
+                        sgid = w.get("id")
+                        for si, st in enumerate(w.get("stats") or []):
+                            if not isinstance(st, dict):
+                                continue
+                            v = st.get("value")
+                            if v is None:
+                                broken.append(
+                                    f"{name}.{sgid}.stats[{si}]: "
+                                    f"no resolved value")
+                                continue
+                            # Reject explicit placeholder strings
+                            if isinstance(v, str) and \
+                                    v.strip() in ("--", "—", "n/a"):
+                                broken.append(
+                                    f"{name}.{sgid}.stats[{si}]: "
+                                    f"value is placeholder {v!r}")
+
+            if layout.get("kind") == "tabs":
+                for tab in layout.get("tabs", []) or []:
+                    walk(tab.get("rows", []))
+            else:
+                walk(layout.get("rows", []))
+
+        self.assertEqual(broken, [],
+            "stat_grid cells with broken values:\n  " +
+            "\n  ".join(broken))
+
+    def test_no_no_data_chart_placeholders_in_demos(self):
+        """``chart_build_failed`` substitutes a '(no data)' chart on
+        compile failure. None of the demos should hit that path."""
+        import demos
+        import inspect
+        from pathlib import Path
+
+        demo_fns = [(nm, fn) for nm, fn in
+                    inspect.getmembers(demos, callable)
+                    if nm.startswith("build_")
+                    and not nm.startswith("build_compound")
+                    and nm != "build_cross_asset"]
+
+        offenders: List[str] = []
+        for name, fn in demo_fns:
+            m = self._run(fn, name)
+            if m is None:
+                continue
+            try:
+                r = compile_dashboard(m, write_html=False,
+                                         write_json=False, strict=True)
+            except ValueError:
+                continue  # already covered
+            for d in r.diagnostics:
+                if d.code == "chart_build_failed":
+                    offenders.append(f"{name}.{d.widget_id}: {d.message}")
+        self.assertEqual(offenders, [],
+            "Demo charts falling back to placeholder:\n  " +
+            "\n  ".join(offenders))
+
+
+# =============================================================================
+# DIAGNOSTIC CONTRACT  (every code has positive + negative tests)
+# =============================================================================
+
+class TestDiagnosticContract(unittest.TestCase):
+    """For each diagnostic code, pair a minimal manifest that fires
+    it (positive) with a minimal manifest that doesn't (negative).
+    Catches both regressions (positive stops firing) and false-
+    positives (negative starts firing).
+    """
+
+    def _wrap(self, datasets, layout, filters=None):
+        m = {"schema_version": 1, "id": "t", "title": "t",
+              "datasets": datasets, "layout": layout}
+        if filters is not None:
+            m["filters"] = filters
+        return m
+
+    def _diag_codes(self, m):
+        return {d.code for d in chart_data_diagnostics(m)}
+
+    # Each entry: (code, bad_manifest_factory, good_manifest_factory)
+    # Negative variant must fire NO error-severity codes that overlap
+    # with the named code; this catches both regressions and false-
+    # positives.
+    def _cases(self):
+        ok_df = pd.DataFrame({"a": [1.0, 2.0], "b": ["x", "y"]})
+        out = []
+
+        # KPI codes ----------------------------------------------------
+        out.append(("kpi_no_value_no_source",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x"}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x", "value": 1}]]})))
+
+        out.append(("kpi_value_is_placeholder",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x", "value": "--"}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x", "value": "OK"}]]})))
+
+        out.append(("kpi_source_malformed",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x", "source": "no_dot"}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x", "source": "d.latest.a"}]]})))
+
+        out.append(("kpi_source_dataset_unknown",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x",
+                              "source": "ghost.latest.a"}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x",
+                              "source": "d.latest.a"}]]})))
+
+        out.append(("kpi_source_aggregator_unknown",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x",
+                              "source": "d.median.a"}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x",
+                              "source": "d.mean.a"}]]})))
+
+        out.append(("kpi_source_column_missing",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x",
+                              "source": "d.latest.zzz"}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x",
+                              "source": "d.latest.a"}]]})))
+
+        out.append(("kpi_source_no_numeric_values",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x",
+                              "source": "d.latest.b"}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "kpi", "id": "k", "w": 4,
+                              "label": "x",
+                              "source": "d.latest.a"}]]})))
+
+        # stat_grid codes ----------------------------------------------
+        out.append(("stat_grid_no_value_no_source",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "stat_grid", "id": "g", "w": 12,
+                              "stats": [{"label": "X"}]}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "stat_grid", "id": "g", "w": 12,
+                              "stats": [{"label": "X", "value": 1}]}]]})))
+
+        out.append(("stat_grid_value_is_placeholder",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "stat_grid", "id": "g", "w": 12,
+                              "stats": [{"label": "X",
+                                          "value": "--"}]}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "stat_grid", "id": "g", "w": 12,
+                              "stats": [{"label": "X",
+                                          "value": "real"}]}]]})))
+
+        out.append(("stat_grid_source_unresolvable",
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "stat_grid", "id": "g", "w": 12,
+                              "stats": [{"label": "X",
+                                          "source": "ghost.latest.a"
+                                          }]}]]}),
+            lambda: self._wrap({"d": ok_df},
+                {"rows": [[{"widget": "stat_grid", "id": "g", "w": 12,
+                              "stats": [{"label": "X",
+                                          "source": "d.latest.a"}]}]]})))
+
+        return out
+
+    def test_each_code_fires_on_bad_input(self):
+        for code, bad, _good in self._cases():
+            with self.subTest(code=code):
+                m = bad()
+                self.assertIn(code, self._diag_codes(m),
+                    f"{code} did not fire on intentionally bad manifest")
+
+    def test_each_code_does_not_fire_on_good_input(self):
+        for code, _bad, good in self._cases():
+            with self.subTest(code=code):
+                m = good()
+                self.assertNotIn(code, self._diag_codes(m),
+                    f"{code} false-positive on a clean manifest")
 
 
 class TestPayloadDedupe(unittest.TestCase):
@@ -2818,7 +4870,7 @@ class TestStressDiagnostics(unittest.TestCase):
         m = self._wrap(
             datasets={"d": pd.DataFrame({"v": [42.0]})},
             layout={"rows": [[{"widget": "kpi", "id": "k", "w": 4,
-                                "label": "x", "source": "d.v",
+                                "label": "x", "source": "d.latest.v",
                                 "sparkline_source": "d.v"}]]})
         diags = chart_data_diagnostics(m)
         flagged = self._by_code(diags, "kpi_sparkline_too_short")
@@ -2897,11 +4949,17 @@ class TestStressDiagnostics(unittest.TestCase):
 
     def test_compile_succeeds_with_compound_failures(self):
         """The compound stress dashboard validates AND compiles AND
-        produces HTML, even with multiple categories of broken data."""
+        produces HTML, even with multiple categories of broken data.
+
+        Iteration mode (``strict=False``) is the contract for PRISM:
+        broken charts produce placeholders + diagnostics so PRISM can
+        fix everything in one round-trip rather than playing whack-a-
+        mole one error per recompile.
+        """
         m = build_compound_chaos()
         ok, _ = validate_manifest(m)
         self.assertTrue(ok)
-        r = compile_dashboard(m)
+        r = compile_dashboard(m, strict=False)
         self.assertTrue(r.success)
         self.assertIsNotNone(r.html)
         # Many distinct diagnostic codes should fire
@@ -3602,6 +5660,483 @@ class TestChartClickPopup(unittest.TestCase):
 
 
 # =============================================================================
+# DATA PROVENANCE -- field_provenance / row_provenance + popup integration
+# =============================================================================
+#
+# Provenance is per-column lineage carried on a dataset entry; the
+# compiler does NOT introspect df.attrs (PRISM is responsible for
+# cleaning upstream metadata into the canonical shape). It surfaces in
+# click popups two ways:
+#   1) auto-default popup when chart click_popup / table row_click is
+#      not declared but the dataset carries field_provenance
+#   2) auto-appended "Sources" footer on every popup (suppressible
+#      per-popup with show_provenance:false)
+# Boolean false on click_popup / row_click is the opt-out hatch.
+
+class TestProvenanceValidation(unittest.TestCase):
+    def _ds_with_prov(self, **extras):
+        ds = {"source": [["date", "UST10Y"], ["2026-04-22", 4.30]]}
+        ds.update(extras)
+        return {
+            "schema_version": 1, "id": "p", "title": "p",
+            "datasets": {"d": ds},
+            "layout": {"rows": [[
+                {"widget": "chart", "id": "c", "w": 12,
+                  "spec": {"chart_type": "line", "dataset": "d",
+                            "mapping": {"x": "date", "y": "UST10Y"}}}
+            ]]},
+        }
+
+    def test_field_provenance_dict_validates(self):
+        m = self._ds_with_prov(field_provenance={
+            "UST10Y": {"system": "market_data",
+                        "symbol": "IR_USD_Treasury_10Y_Rate",
+                        "tsdb_symbol": "ustsy10y",
+                        "display_name": "US 10Y Treasury Rate",
+                        "units": "percent",
+                        "source_label": "GS Market Data"}
+        })
+        ok, errs = validate_manifest(m)
+        self.assertTrue(ok, errs)
+
+    def test_field_provenance_must_be_dict(self):
+        m = self._ds_with_prov(field_provenance=["nope"])
+        ok, errs = validate_manifest(m)
+        self.assertFalse(ok)
+        self.assertTrue(any("field_provenance" in e for e in errs))
+
+    def test_field_provenance_inner_must_be_dict(self):
+        m = self._ds_with_prov(field_provenance={"UST10Y": "just a string"})
+        ok, errs = validate_manifest(m)
+        self.assertFalse(ok)
+        self.assertTrue(any("field_provenance.UST10Y" in e for e in errs))
+
+    def test_row_provenance_field_must_be_string(self):
+        m = self._ds_with_prov(row_provenance_field=123)
+        ok, errs = validate_manifest(m)
+        self.assertFalse(ok)
+        self.assertTrue(any("row_provenance_field" in e for e in errs))
+
+    def test_row_provenance_must_be_dict_of_dicts(self):
+        m = self._ds_with_prov(row_provenance={"k": "oops"})
+        ok, errs = validate_manifest(m)
+        self.assertFalse(ok)
+        self.assertTrue(any("row_provenance.k" in e for e in errs))
+
+    def test_row_provenance_full_shape_validates(self):
+        m = self._ds_with_prov(
+            row_provenance_field="UST10Y",
+            row_provenance={"4.30": {"UST10Y": {
+                "system": "bloomberg", "symbol": "USGG10YR Index"
+            }}}
+        )
+        ok, errs = validate_manifest(m)
+        self.assertTrue(ok, errs)
+
+    def test_freeform_provenance_keys_accepted(self):
+        """Inner provenance keys are intentionally free-form so PRISM
+        can carry whatever the upstream system emits without us
+        enumerating every vendor."""
+        m = self._ds_with_prov(field_provenance={
+            "UST10Y": {"system": "haver", "haver_code": "FYCEPI@USECON",
+                        "frequency": "M", "vintage": "2026-04-25"},
+        })
+        ok, errs = validate_manifest(m)
+        self.assertTrue(ok, errs)
+
+
+class TestProvenancePopupOptOut(unittest.TestCase):
+    """`click_popup: false` and `row_click: false` are the opt-out
+    hatches that suppress the auto-default popup even when the
+    dataset has provenance."""
+
+    def _chart_manifest(self, click_popup):
+        m = {
+            "schema_version": 1, "id": "p", "title": "p",
+            "datasets": {"d": pd.DataFrame({"a": [1, 2], "b": [3, 4]})},
+            "layout": {"rows": [[
+                {"widget": "chart", "id": "c", "w": 12,
+                  "spec": {"chart_type": "line", "dataset": "d",
+                            "mapping": {"x": "a", "y": "b"}}}
+            ]]},
+        }
+        if click_popup is not None:
+            m["layout"]["rows"][0][0]["click_popup"] = click_popup
+        return m
+
+    def _table_manifest(self, row_click):
+        m = {
+            "schema_version": 1, "id": "p", "title": "p",
+            "datasets": {"d": pd.DataFrame({"a": [1, 2], "b": [3, 4]})},
+            "layout": {"rows": [[
+                {"widget": "table", "id": "t1", "w": 12,
+                  "dataset_ref": "d"}
+            ]]},
+        }
+        if row_click is not None:
+            m["layout"]["rows"][0][0]["row_click"] = row_click
+        return m
+
+    def test_click_popup_false_validates(self):
+        ok, errs = validate_manifest(self._chart_manifest(False))
+        self.assertTrue(ok, errs)
+
+    def test_row_click_false_validates(self):
+        ok, errs = validate_manifest(self._table_manifest(False))
+        self.assertTrue(ok, errs)
+
+    def test_click_popup_string_rejected(self):
+        ok, errs = validate_manifest(self._chart_manifest("nope"))
+        self.assertFalse(ok)
+        self.assertTrue(any("click_popup" in e for e in errs))
+
+    def test_row_click_string_rejected(self):
+        ok, errs = validate_manifest(self._table_manifest("nope"))
+        self.assertFalse(ok)
+        self.assertTrue(any("row_click" in e for e in errs))
+
+
+class TestProvenanceCompileRoundTrip(unittest.TestCase):
+    """Provenance metadata + JS helpers must end up in the compiled
+    HTML so the runtime can resolve symbols/sources at click time."""
+
+    def _bonds_with_prov(self) -> Dict[str, Any]:
+        return {
+            "schema_version": 1, "id": "prov", "title": "prov",
+            "datasets": {
+                "rates": {
+                    "source": pd.DataFrame({
+                        "date": ["2026-04-22", "2026-04-23"],
+                        "UST10Y": [4.30, 4.31],
+                        "UST2Y":  [4.15, 4.18],
+                    }),
+                    "field_provenance": {
+                        "UST10Y": {
+                            "system": "market_data",
+                            "symbol": "IR_USD_Treasury_10Y_Rate",
+                            "tsdb_symbol": "ustsy10y",
+                            "display_name": "US 10Y Treasury Rate",
+                            "units": "percent",
+                            "source_label": "GS Market Data",
+                        },
+                        "UST2Y": {
+                            "system": "market_data",
+                            "symbol": "IR_USD_Treasury_2Y_Rate",
+                            "tsdb_symbol": "ustsy2y",
+                            "source_label": "GS Market Data",
+                        },
+                    },
+                },
+            },
+            "layout": {"rows": [[
+                {"widget": "chart", "id": "r10", "w": 6, "h_px": 320,
+                  "spec": {"chart_type": "line", "dataset": "rates",
+                            "mapping": {"x": "date", "y": "UST10Y"}}},
+                {"widget": "table", "id": "tbl", "w": 6,
+                  "dataset_ref": "rates",
+                  "columns": [{"field": "date"},
+                                {"field": "UST10Y", "format": "number:2"}]},
+            ]]},
+        }
+
+    def test_provenance_data_in_html(self):
+        m = self._bonds_with_prov()
+        tmp = tempfile.mkdtemp(prefix="prov_rt_")
+        out = Path(tmp) / "d.html"
+        r = compile_dashboard(m, output_path=str(out))
+        self.assertTrue(r.success, r.warnings)
+        html = out.read_text(encoding="utf-8")
+        # Dataset metadata makes it through serialization
+        self.assertIn("field_provenance", html)
+        self.assertIn("IR_USD_Treasury_10Y_Rate", html)
+        self.assertIn("ustsy10y", html)
+        self.assertIn("GS Market Data", html)
+
+    def test_runtime_helpers_present(self):
+        m = self._bonds_with_prov()
+        tmp = tempfile.mkdtemp(prefix="prov_rt_")
+        out = Path(tmp) / "d.html"
+        r = compile_dashboard(m, output_path=str(out))
+        self.assertTrue(r.success, r.warnings)
+        html = out.read_text(encoding="utf-8")
+        # JS resolvers + footer + default popup builders are all defined
+        for sym in [
+            "_provenanceForCol",
+            "_renderProvenanceFooterFor",
+            "_buildDefaultChartPopup",
+            "_buildDefaultTablePopup",
+            "_provenancePrimarySymbol",
+            "_datasetHasProvenance",
+        ]:
+            self.assertIn(sym, html, f"missing JS helper: {sym}")
+
+    def test_provenance_footer_css_present(self):
+        m = self._bonds_with_prov()
+        tmp = tempfile.mkdtemp(prefix="prov_rt_")
+        out = Path(tmp) / "d.html"
+        r = compile_dashboard(m, output_path=str(out))
+        self.assertTrue(r.success, r.warnings)
+        html = out.read_text(encoding="utf-8")
+        self.assertIn(".provenance-footer", html)
+        self.assertIn(".provenance-table", html)
+        self.assertIn(".prov-system", html)
+        self.assertIn(".detail-stat-src", html)
+
+    def test_dataset_without_provenance_compiles_clean(self):
+        """Datasets without field_provenance still compile fine; the
+        runtime helpers are present but won't fire any default popup
+        because hasProvenance returns false."""
+        m = {
+            "schema_version": 1, "id": "noprov", "title": "noprov",
+            "datasets": {"d": pd.DataFrame({"a": [1, 2], "b": [3, 4]})},
+            "layout": {"rows": [[
+                {"widget": "chart", "id": "c", "w": 12,
+                  "spec": {"chart_type": "line", "dataset": "d",
+                            "mapping": {"x": "a", "y": "b"}}}
+            ]]},
+        }
+        tmp = tempfile.mkdtemp(prefix="prov_none_")
+        out = Path(tmp) / "d.html"
+        r = compile_dashboard(m, output_path=str(out))
+        self.assertTrue(r.success, r.warnings)
+        html = out.read_text(encoding="utf-8")
+        # No provenance metadata in the payload, but the runtime
+        # function definitions are still there (cheap, unconditional)
+        self.assertNotIn('"field_provenance"', html)
+        self.assertIn("_buildDefaultChartPopup", html)
+
+
+class TestProvenanceBuilderAPI(unittest.TestCase):
+    """Dashboard.add_dataset accepts field_provenance / row_provenance
+    as explicit kwargs. NEVER pulls from df.attrs -- PRISM is the
+    one cleaning the upstream metadata."""
+
+    def test_add_dataset_field_provenance_kwarg(self):
+        df = pd.DataFrame({"date": ["2026-04-22"], "x": [1.0]})
+        # Even when df.attrs has metadata, the compiler should NOT
+        # auto-promote it. PRISM passes the cleaned version explicitly.
+        df.attrs["metadata"] = [{"col": "x", "haver_code": "X@HAV"}]
+        opt = {"series": [{"type": "line", "data": [[0, 1]]}],
+                "xAxis": {"type": "value"}, "yAxis": {"type": "value"}}
+        db = (Dashboard(id="r", title="R")
+              .add_dataset("d", df,
+                            field_provenance={
+                                "x": {"system": "haver",
+                                      "symbol": "GDP@USECON",
+                                      "source_label": "Haver"},
+                            },
+                            row_provenance_field="date",
+                            row_provenance={
+                                "2026-04-22": {"x": {"system": "override"}},
+                            })
+              .add_row([ChartRef(id="c", option=opt, w=12)]))
+        manifest = db.to_manifest()
+        ds_d = manifest["datasets"]["d"]
+        self.assertIn("field_provenance", ds_d)
+        self.assertEqual(ds_d["field_provenance"]["x"]["symbol"],
+                          "GDP@USECON")
+        self.assertEqual(ds_d["row_provenance_field"], "date")
+        self.assertIn("2026-04-22", ds_d["row_provenance"])
+        # df.attrs was NOT auto-promoted
+        self.assertNotIn("X@HAV", json.dumps(ds_d.get("field_provenance", {})))
+
+
+# =============================================================================
+# CONTROLS DRAWER  (per-tile knobs for chart / table / KPI widgets)
+#
+# The drawer is rendered to HTML by the Python tile renderer and
+# populated by JS at runtime. These tests inspect the compiled HTML
+# string for the markup + JS hooks the drawer relies on -- they don't
+# execute JS, so any logic-level coverage that needs DOM dispatch
+# happens via the runtime smoke test described in the docs.
+# =============================================================================
+
+class TestControlsDrawer(unittest.TestCase):
+    def _manifest(self):
+        return {
+            "schema_version": 1,
+            "id": "drawer_test",
+            "title": "Drawer test",
+            "theme": "gs_clean",
+            "datasets": {
+                "rates": {"source": [
+                    ["date", "us_2y", "us_10y"],
+                    ["2025-01-01", 4.10, 4.40],
+                    ["2025-02-01", 4.18, 4.45],
+                    ["2025-03-01", 4.22, 4.50],
+                    ["2025-04-01", 4.15, 4.55],
+                ]},
+                "tbl": {"source": [
+                    ["name", "val", "pct"],
+                    ["Alpha", 12.5, 0.18],
+                    ["Beta", 8.0, 0.04],
+                    ["Gamma", 22.4, -0.07],
+                ]},
+            },
+            "layout": {"kind": "grid", "cols": 12, "rows": [
+                [
+                    {"widget": "kpi", "id": "k", "w": 3,
+                      "label": "Latest 10Y",
+                      "source": "rates.latest.us_10y",
+                      "sparkline_source": "rates.us_10y",
+                      "delta_source": "rates.prev.us_10y"},
+                    {"widget": "chart", "id": "c", "w": 9,
+                      "spec": {"chart_type": "multi_line",
+                                "dataset": "rates",
+                                "mapping": {"x": "date",
+                                            "y": ["us_2y", "us_10y"]},
+                                "title": "UST yields"}},
+                ],
+                [
+                    {"widget": "table", "id": "t", "w": 12,
+                      "title": "Sample",
+                      "dataset_ref": "tbl",
+                      "columns": [
+                          {"field": "name", "label": "Name"},
+                          {"field": "val",  "label": "Value",
+                            "format": "number:2"},
+                          {"field": "pct",  "label": "Pct",
+                            "format": "percent:1"},
+                      ]},
+                ],
+            ]},
+        }
+
+    def _compile(self, manifest=None):
+        m = manifest or self._manifest()
+        tmp = tempfile.mkdtemp(prefix="drawer_")
+        r = compile_dashboard(m, session_path=tmp)
+        self.assertTrue(r.success, r.warnings)
+        return Path(r.html_path).read_text()
+
+    # ----- chart drawer -----
+
+    def test_chart_tile_emits_drawer_container(self):
+        html = self._compile()
+        self.assertIn('id="controls-c"', html)
+        self.assertIn('data-chart-id="c"', html)
+        self.assertIn('class="chart-controls"', html)
+
+    def test_chart_drawer_carries_shape_section_hooks(self):
+        html = self._compile()
+        for hook in ('shape-line-style', 'shape-step',
+                      'shape-line-width', 'shape-area-fill',
+                      'shape-stack', 'shape-show-symbol'):
+            self.assertIn(hook, html,
+                            f"chart drawer missing shape hook {hook!r}")
+
+    def test_chart_drawer_carries_extended_transforms(self):
+        html = self._compile()
+        for tname in ('log_change', 'yoy_log', 'annualized_change',
+                       'log', 'zscore', 'rolling_zscore_252',
+                       'rank_pct', 'ytd', 'index100'):
+            self.assertIn("'" + tname + "'", html,
+                            f"chart drawer missing transform {tname!r}")
+
+    def test_chart_drawer_carries_download_actions(self):
+        html = self._compile()
+        for act in ('download-png', 'download-csv', 'download-xlsx'):
+            self.assertIn('data-cc-action="' + act + '"', html,
+                            f"chart drawer missing action {act!r}")
+
+    def test_chart_controls_false_suppresses_drawer(self):
+        m = self._manifest()
+        m["layout"]["rows"][0][1]["spec"]["chart_controls"] = False
+        html = self._compile(m)
+        # The chart with controls disabled has no drawer container.
+        # Other tiles' drawers ('controls-t', 'controls-k') still emit.
+        self.assertNotIn('id="controls-c"', html)
+        self.assertIn('id="controls-t"', html)
+
+    # ----- table drawer -----
+
+    def test_table_tile_emits_drawer_container(self):
+        html = self._compile()
+        self.assertIn('id="controls-t"', html)
+        self.assertIn('data-table-id="t"', html)
+
+    def test_table_tile_emits_three_dots_button(self):
+        html = self._compile()
+        # Toolbar markup carries the kebab-glyph 22EE for tables.
+        # We look for the data-tile-id="t" tile, then assert the
+        # toolbar button is inside its header.
+        self.assertIn('data-tile-id="t"', html)
+        self.assertIn('aria-label="Toggle table controls"', html)
+
+    def test_table_drawer_carries_table_specific_hooks(self):
+        html = self._compile()
+        for hook in ('table-search', 'table-sort-col', 'table-sort-dir',
+                      'table-col-visible', 'table-density',
+                      'table-freeze', 'table-decimals'):
+            self.assertIn(hook, html,
+                            f"table drawer missing hook {hook!r}")
+
+    def test_table_drawer_carries_actions(self):
+        html = self._compile()
+        for act in ('table-view-raw', 'table-copy-csv',
+                     'table-download-csv', 'table-download-xlsx',
+                     'table-reset'):
+            self.assertIn('data-cc-action="' + act + '"', html,
+                            f"table drawer missing action {act!r}")
+
+    def test_table_controls_false_suppresses_drawer(self):
+        m = self._manifest()
+        m["layout"]["rows"][1][0]["table_controls"] = False
+        html = self._compile(m)
+        self.assertNotIn('id="controls-t"', html)
+        self.assertNotIn('data-table-id="t"', html)
+
+    def test_table_freeze_first_col_css_present(self):
+        html = self._compile()
+        self.assertIn('.data-table.freeze-first-col', html)
+
+    # ----- kpi drawer -----
+
+    def test_kpi_tile_emits_drawer_container(self):
+        html = self._compile()
+        self.assertIn('id="controls-k"', html)
+        self.assertIn('data-kpi-id="k"', html)
+        self.assertIn('aria-label="Toggle KPI controls"', html)
+
+    def test_kpi_drawer_carries_compare_period(self):
+        html = self._compile()
+        for v in ("'auto'", "'prev'", "'1d'", "'1w'", "'1m'",
+                   "'3m'", "'6m'", "'1y'", "'ytd'"):
+            self.assertIn(v, html,
+                            f"kpi drawer missing compare period {v!r}")
+
+    def test_kpi_drawer_carries_display_toggles(self):
+        html = self._compile()
+        self.assertIn('kpi-show-sparkline', html)
+        self.assertIn('kpi-show-delta', html)
+        self.assertIn('kpi-decimals', html)
+
+    def test_kpi_drawer_carries_actions(self):
+        html = self._compile()
+        for act in ('kpi-view-data', 'kpi-copy-csv',
+                     'kpi-download-csv', 'kpi-download-xlsx',
+                     'kpi-reset'):
+            self.assertIn('data-cc-action="' + act + '"', html,
+                            f"kpi drawer missing action {act!r}")
+
+    def test_kpi_controls_false_suppresses_drawer(self):
+        m = self._manifest()
+        m["layout"]["rows"][0][0]["kpi_controls"] = False
+        html = self._compile(m)
+        self.assertNotIn('id="controls-k"', html)
+
+    # ----- exposed dashboard state -----
+
+    def test_dashboard_exposes_drawer_state(self):
+        html = self._compile()
+        # The DASHBOARD object on window now lists tableState and
+        # kpiState so DevTools / instrumentation can inspect drawer
+        # outputs alongside chartControlState.
+        self.assertIn('tableState: TABLE_STATE', html)
+        self.assertIn('kpiState: KPI_STATE', html)
+
+
+# =============================================================================
 # STRESS TEST DATA HELPERS  (broken-on-purpose pandas DataFrames)
 #
 # These power the stress test scenarios below. Each fixture is a
@@ -3890,11 +6425,11 @@ def build_ghost_data() -> Dict[str, Any]:
                   ]},
                 {"widget": "kpi", "id": "kpi_2y", "w": 3,
                   "label": "Latest 2Y",
-                  "source": "rates.us_2y", "format": "number:2"},
+                  "source": "rates.latest.us_2y", "format": "number:2"},
                 {"widget": "kpi", "id": "kpi_10y", "w": 3,
                   "label": "Latest 10Y",
-                  "source": "rates.us_10y",
-                  "delta_source": "rates.us_10y",
+                  "source": "rates.latest.us_10y",
+                  "delta_source": "rates.prev.us_10y",
                   "sparkline_source": "rates.us_10y",
                   "format": "number:2"},
             ],
@@ -3954,10 +6489,10 @@ def build_column_typos() -> Dict[str, Any]:
                   ]},
                 {"widget": "kpi", "id": "kpi_2y", "w": 3,
                   "label": "Latest 2Y",
-                  "source": "rates.us_2y", "format": "number:2"},
+                  "source": "rates.latest.us_2y", "format": "number:2"},
                 {"widget": "kpi", "id": "kpi_10y", "w": 3,
                   "label": "Latest 10Y",
-                  "source": "rates.us_10y", "format": "number:2"},
+                  "source": "rates.latest.us_10y", "format": "number:2"},
             ],
         ]},
         filters=[
@@ -4017,16 +6552,17 @@ def build_nan_blizzard() -> Dict[str, Any]:
             [
                 {"widget": "kpi", "id": "kpi_allnan", "w": 4,
                   "label": "All-NaN KPI",
-                  "source": "all_nan.us_2y", "format": "number:2"},
+                  "source": "all_nan.latest.us_2y",
+                  "format": "number:2"},
                 {"widget": "kpi", "id": "kpi_short_spark", "w": 4,
                   "label": "Sparkline w/ 1 row",
-                  "source": "single.value",
+                  "source": "single.latest.value",
                   "sparkline_source": "single.value",
                   "format": "number:2"},
                 {"widget": "kpi", "id": "kpi_partial", "w": 4,
                   "label": "Mostly-NaN KPI",
-                  "source": "mostly_nan.us_10y",
-                  "delta_source": "mostly_nan.us_10y",
+                  "source": "mostly_nan.latest.us_10y",
+                  "delta_source": "mostly_nan.prev.us_10y",
                   "format": "number:2"},
             ],
         ]},
@@ -4339,16 +6875,16 @@ def build_broken_bindings() -> Dict[str, Any]:
                   "format": "number:2"},
                 {"widget": "kpi", "id": "kpi_unknown_ds", "w": 3,
                   "label": "Unknown dataset",
-                  "source": "ghost_dataset.col",
+                  "source": "ghost_dataset.latest.col",
                   "format": "number:2"},
                 {"widget": "kpi", "id": "kpi_missing_col", "w": 3,
                   "label": "Missing column",
-                  "source": "rates.spread",
+                  "source": "rates.latest.spread",
                   "format": "number:2"},
                 {"widget": "kpi", "id": "kpi_bad_delta", "w": 3,
                   "label": "Bad delta source",
-                  "source": "rates.us_2y",
-                  "delta_source": "rates.delta_col",
+                  "source": "rates.latest.us_2y",
+                  "delta_source": "rates.prev.delta_col",
                   "sparkline_source": "rates.spark",
                   "format": "number:2"},
             ],
@@ -4479,10 +7015,10 @@ def build_compound_chaos() -> Dict[str, Any]:
                         "source": "no_dot"},
                       {"widget": "kpi", "id": "kpi_unknown", "w": 4,
                         "label": "Unknown dataset",
-                        "source": "ghost.x"},
+                        "source": "ghost.latest.x"},
                       {"widget": "kpi", "id": "kpi_missing", "w": 4,
                         "label": "Missing column",
-                        "source": "real.zzz"},
+                        "source": "real.latest.zzz"},
                   ],
               ]},
         ]},
