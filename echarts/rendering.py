@@ -71,6 +71,43 @@ def _html_escape(s: Any) -> str:
              .replace('"', "&quot;"))
 
 
+def _option_value_label(o: Any) -> Tuple[str, str]:
+    """Normalise a filter option to a (value, label) pair of strings.
+
+    Two option shapes are supported on `filters[].options`:
+
+      * Primitive  -- ``"3M"``, ``42``, ``True``: value == label == ``str(o)``.
+      * Dict       -- ``{"value": "sell", "label": "Looking to Sell"}``:
+                      value comes from ``o["value"]``, label falls back to
+                      ``o.get("label", o["value"])``.
+
+    Anything else (list, set, dict without ``value``) is rejected here --
+    ``validate_manifest`` catches the same shape earlier, so reaching this
+    helper with a bad option is a programmer error, not user input.
+    """
+    if isinstance(o, dict):
+        if "value" not in o:
+            raise ValueError(
+                f"filter option dict missing 'value' key: {o!r}")
+        v = str(o["value"])
+        l = str(o.get("label", o["value"]))
+        return v, l
+    if isinstance(o, (str, int, float, bool)):
+        return str(o), str(o)
+    raise ValueError(
+        f"filter option must be a primitive or {{value,label}} dict, "
+        f"got {type(o).__name__}: {o!r}")
+
+
+def _default_value_for_compare(default: Any) -> Any:
+    """Pull the underlying ``value`` out of a dict default so it compares
+    against an option's value rather than against the whole dict.
+    """
+    if isinstance(default, dict) and "value" in default:
+        return default["value"]
+    return default
+
+
 def _json_default(o: Any) -> Any:
     """json.dumps default handler that keeps numpy / pandas scalars as
     numbers instead of strings.
@@ -1124,6 +1161,7 @@ DASHBOARD_SHELL = """<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>__TITLE__</title>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 /* =============================================================
    Goldman Sachs canonical design tokens (synced with
@@ -1561,30 +1599,208 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 .kpi-sparkline { height: 32px; margin-top: 10px;
                   margin-left: -4px; margin-right: -4px; }
 
-/* markdown tile */
+/* markdown tile + shared prose styling.
+   Both `.markdown-tile` (transparent prose-on-page) and
+   `.markdown-body` (used inside note tiles, drill-down sections,
+   summary banner, popups) share the typography rules so prose
+   reads identically wherever PRISM places it. */
 .markdown-tile {
   background: transparent; border: none; box-shadow: none;
   padding: 0;
 }
 .markdown-tile .tile-body { padding: 12px 4px; }
-.markdown-tile h1, .markdown-tile h2, .markdown-tile h3 {
+.markdown-tile h1, .markdown-tile h2, .markdown-tile h3,
+.markdown-tile h4, .markdown-tile h5,
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5 {
   margin: 6px 0 6px 0; color: var(--text);
   font-family: var(--gs-font-serif); font-weight: 600;
   letter-spacing: -0.005em;
 }
-.markdown-tile h1 { font-size: 20px; }
-.markdown-tile h2 { font-size: 15px; }
-.markdown-tile h3 {
+.markdown-tile h1, .markdown-body h1 { font-size: 20px; }
+.markdown-tile h2, .markdown-body h2 { font-size: 15px; }
+.markdown-tile h3, .markdown-body h3 {
   font-family: var(--gs-font-sans);
   font-size: 11px; color: var(--text-dim);
   text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700;
 }
-.markdown-tile p { margin: 4px 0; color: var(--text-dim); line-height: 1.6;
-                    font-family: var(--gs-font-sans); }
-.markdown-tile a { color: var(--accent); text-decoration: underline;
-                    text-decoration-color: var(--accent-2);
-                    text-underline-offset: 3px; }
-.markdown-tile a:hover { color: var(--gs-navy-deep); }
+.markdown-tile h4, .markdown-body h4 {
+  font-family: var(--gs-font-sans);
+  font-size: 12px; color: var(--text); font-weight: 700;
+}
+.markdown-tile h5, .markdown-body h5 {
+  font-family: var(--gs-font-sans);
+  font-size: 11px; color: var(--text-dim); font-weight: 700;
+  font-style: italic;
+}
+.markdown-tile p, .markdown-body p {
+  margin: 4px 0; color: var(--text-dim); line-height: 1.6;
+  font-family: var(--gs-font-sans);
+}
+.markdown-tile a, .markdown-body a {
+  color: var(--accent); text-decoration: underline;
+  text-decoration-color: var(--accent-2);
+  text-underline-offset: 3px;
+}
+.markdown-tile a:hover, .markdown-body a:hover {
+  color: var(--gs-navy-deep);
+}
+.markdown-tile ul, .markdown-tile ol,
+.markdown-body ul, .markdown-body ol {
+  margin: 6px 0; padding-left: 22px; color: var(--text-dim);
+  font-family: var(--gs-font-sans); line-height: 1.55;
+}
+.markdown-tile li, .markdown-body li { margin: 2px 0; }
+.markdown-tile ul ul, .markdown-tile ul ol,
+.markdown-tile ol ul, .markdown-tile ol ol,
+.markdown-body ul ul, .markdown-body ul ol,
+.markdown-body ol ul, .markdown-body ol ol {
+  margin: 2px 0; padding-left: 18px;
+}
+.markdown-tile blockquote, .markdown-body blockquote {
+  margin: 8px 0; padding: 6px 12px;
+  border-left: 3px solid var(--accent-2);
+  background: rgba(115,153,198,0.08);
+  color: var(--text-dim); font-style: italic;
+}
+.markdown-tile blockquote p, .markdown-body blockquote p {
+  margin: 2px 0; font-style: italic;
+}
+.markdown-tile pre, .markdown-body pre {
+  margin: 6px 0; padding: 8px 12px;
+  background: var(--gs-grey-05);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.markdown-tile pre code, .markdown-body pre code {
+  background: none; padding: 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; color: var(--text); line-height: 1.5;
+}
+.markdown-tile code, .markdown-body code {
+  background: var(--gs-grey-05); padding: 1px 4px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; color: var(--text);
+}
+.markdown-tile hr, .markdown-body hr {
+  margin: 12px 0; border: none;
+  border-top: 1px solid var(--border);
+}
+.markdown-tile del, .markdown-body del {
+  color: var(--text-faint);
+  text-decoration-thickness: 1.5px;
+}
+.markdown-tile table.md-table, .markdown-body table.md-table {
+  border-collapse: collapse; margin: 8px 0;
+  font-family: var(--gs-font-sans); font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.markdown-tile table.md-table th, .markdown-body table.md-table th {
+  text-align: left; padding: 6px 10px;
+  border-bottom: 1px solid var(--gs-navy);
+  background: var(--gs-grey-05);
+  text-transform: uppercase; font-size: 10px;
+  letter-spacing: 0.08em; color: var(--gs-ink); font-weight: 700;
+}
+.markdown-tile table.md-table td, .markdown-body table.md-table td {
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* note tile - semantic callout for narrative writing.
+   Six kinds, each with its own accent stripe + label tint:
+     insight   sky      "this is the lightbulb"
+     thesis    navy     "this is the load-bearing claim"
+     watch     amber    "this is what to monitor"
+     risk      red      "this is the downside"
+     context   muted    "this is background"
+     fact      green    "this is established"
+   The body is full markdown via the shared `.markdown-body`
+   typography rules so prose matches the markdown widget. */
+.note-tile {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 4px solid var(--accent-2);
+  border-radius: var(--radius);
+  padding: 10px 14px 12px 14px;
+  box-shadow: var(--shadow-sm);
+}
+.note-tile .note-head {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 4px;
+}
+.note-tile .note-icon {
+  font-size: 14px; color: var(--accent-2);
+}
+.note-tile .note-kind {
+  font-family: var(--gs-font-sans);
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--accent-2);
+}
+.note-tile .note-title {
+  font-family: var(--gs-font-serif);
+  font-size: 14px; font-weight: 600; color: var(--text);
+  letter-spacing: -0.005em;
+}
+.note-tile .note-body { padding: 0; }
+.note-tile .note-body > :first-child { margin-top: 0; }
+.note-tile .note-body > :last-child { margin-bottom: 0; }
+.note-tile .tile-footer { margin-top: 8px; }
+.note-tile-insight {
+  border-left-color: var(--accent-2);
+  background: rgba(115,153,198,0.06);
+}
+.note-tile-insight .note-icon,
+.note-tile-insight .note-kind { color: var(--accent-2); }
+.note-tile-thesis {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+.note-tile-thesis .note-icon,
+.note-tile-thesis .note-kind { color: var(--accent); }
+.note-tile-watch {
+  border-left-color: #dd6b20;
+  background: rgba(221,107,32,0.07);
+}
+.note-tile-watch .note-icon,
+.note-tile-watch .note-kind { color: #dd6b20; }
+.note-tile-risk {
+  border-left-color: var(--neg);
+  background: var(--neg-soft);
+}
+.note-tile-risk .note-icon,
+.note-tile-risk .note-kind { color: var(--neg); }
+.note-tile-context {
+  border-left-color: var(--gs-grey-40);
+  background: var(--gs-grey-05);
+}
+.note-tile-context .note-icon,
+.note-tile-context .note-kind { color: var(--text-dim); }
+.note-tile-fact {
+  border-left-color: var(--pos);
+  background: var(--pos-soft);
+}
+.note-tile-fact .note-icon,
+.note-tile-fact .note-kind { color: var(--pos); }
+
+/* dashboard summary banner - markdown body rendered below the
+   global filter bar, above the first row / tab bar. Used for the
+   one-paragraph "today's read" / "executive summary" that sits at
+   the top of the page so PRISM can frame the dashboard before any
+   chart loads. Uses .markdown-body typography for parity with the
+   markdown widget. */
+.summary-banner {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--gs-navy);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  margin: 14px 28px 0 28px;
+}
+.summary-banner > :first-child { margin-top: 0; }
+.summary-banner > :last-child { margin-bottom: 0; }
 
 /* divider tile */
 .divider-tile {
@@ -1625,14 +1841,17 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 
 /* Row highlight buckets (see row_highlight on table widgets).
    Subtle left-border accent + tinted background so the row pops
-   without stomping the per-cell conditional colors. */
-.data-table tr.row-hl-pos td   { background: color-mix(in srgb,
-                                    var(--pos-soft) 80%, transparent); }
+   without stomping the per-cell conditional colors. Note: the
+   `--pos-soft` / `--neg-soft` variables are deliberately used
+   directly here -- avoiding `color-mix(in srgb, ..., transparent)`
+   so html2canvas (used by the "Download Dashboard" button) can
+   parse this rule. The visual difference is imperceptible because
+   both vars are already very low-alpha rgba. */
+.data-table tr.row-hl-pos td   { background: var(--pos-soft); }
 .data-table tr.row-hl-pos td:first-child {
   box-shadow: inset 3px 0 0 var(--pos);
 }
-.data-table tr.row-hl-neg td   { background: color-mix(in srgb,
-                                    var(--neg-soft) 80%, transparent); }
+.data-table tr.row-hl-neg td   { background: var(--neg-soft); }
 .data-table tr.row-hl-neg td:first-child {
   box-shadow: inset 3px 0 0 var(--neg);
 }
@@ -1662,6 +1881,22 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 .table-toolbar .table-count {
   color: var(--text-faint); font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+.table-toolbar .table-xlsx-btn {
+  margin-left: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text-dim); border-radius: 4px;
+  padding: 5px 10px; font-size: 11px;
+  font-family: var(--gs-font-sans); font-weight: 600;
+  letter-spacing: 0.04em; cursor: pointer;
+  transition: background 0.12s var(--ease), color 0.12s var(--ease),
+              border-color 0.12s var(--ease);
+}
+.table-toolbar .table-xlsx-btn:hover {
+  background: var(--gs-navy); color: #fff; border-color: var(--gs-navy);
+}
+.table-toolbar .table-xlsx-btn:focus {
+  outline: 2px solid var(--accent-ring); outline-offset: 2px;
 }
 .table-empty {
   padding: 32px 16px; text-align: center; color: var(--text-faint);
@@ -1707,7 +1942,8 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 }
 .ed-modal-body p { margin: 0 0 10px; }
 .ed-modal-body p:last-child { margin-bottom: 0; }
-.ed-modal-body h1, .ed-modal-body h2, .ed-modal-body h3 {
+.ed-modal-body h1, .ed-modal-body h2, .ed-modal-body h3,
+.ed-modal-body h4, .ed-modal-body h5 {
   font-family: var(--gs-font-sans); color: var(--gs-navy);
   margin: 0 0 10px; font-weight: 600;
 }
@@ -1715,8 +1951,53 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
 .ed-modal-body h2 { font-size: 14px; }
 .ed-modal-body h3 { font-size: 13px; text-transform: uppercase;
                      letter-spacing: 0.04em; color: var(--text-faint); }
-.ed-modal-body ul { margin: 6px 0 12px 18px; padding: 0; }
+.ed-modal-body h4 { font-size: 13px; color: var(--text); }
+.ed-modal-body h5 { font-size: 12px; color: var(--text-dim);
+                     font-style: italic; }
+.ed-modal-body ul, .ed-modal-body ol {
+  margin: 6px 0 12px 18px; padding: 0;
+}
 .ed-modal-body li { margin-bottom: 4px; }
+.ed-modal-body ul ul, .ed-modal-body ul ol,
+.ed-modal-body ol ul, .ed-modal-body ol ol {
+  margin: 4px 0 4px 18px;
+}
+.ed-modal-body blockquote {
+  margin: 8px 0; padding: 6px 12px;
+  border-left: 3px solid var(--accent-2);
+  background: rgba(115,153,198,0.08);
+  color: var(--text-dim); font-style: italic;
+}
+.ed-modal-body pre {
+  margin: 8px 0; padding: 8px 12px;
+  background: var(--gs-grey-05); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); overflow-x: auto;
+}
+.ed-modal-body pre code {
+  background: none; padding: 0;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; color: var(--text);
+}
+.ed-modal-body hr {
+  margin: 12px 0; border: none;
+  border-top: 1px solid var(--border);
+}
+.ed-modal-body del { color: var(--text-faint); }
+.ed-modal-body table.md-table {
+  border-collapse: collapse; margin: 8px 0;
+  font-family: var(--gs-font-sans); font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ed-modal-body table.md-table th {
+  text-align: left; padding: 5px 10px;
+  border-bottom: 1px solid var(--gs-navy);
+  background: var(--gs-grey-05);
+  text-transform: uppercase; font-size: 10px;
+  letter-spacing: 0.08em; color: var(--gs-ink);
+}
+.ed-modal-body table.md-table td {
+  padding: 5px 10px; border-bottom: 1px solid var(--border);
+}
 .ed-modal-body strong { color: var(--gs-navy); font-weight: 600; }
 .ed-modal-body em { color: var(--text); }
 .ed-modal-body code {
@@ -1939,21 +2220,34 @@ footer.app-footer .gs-mark .gs-wordmark { font-size: 12px; }
       <span class="meta-dot" id="data-as-of" style="display:none">
         Data as of <span id="data-as-of-val"></span>
       </span>
-      <span id="chart-count"></span>
     </div>
     <div class="header-actions" id="header-actions">
+      <button class="icon-btn" id="methodology-btn"
+              title="View dashboard methodology" style="display:none">
+        Methodology
+      </button>
       <button class="icon-btn" id="refresh-btn"
               title="Refresh dashboard data" style="display:none">
         <span id="refresh-btn-label">Refresh</span>
       </button>
-      <button class="icon-btn primary" id="export-all"
+      <button class="icon-btn" id="export-all"
               title="Download all charts as PNG (2x)">
         Download PNGs
+      </button>
+      <button class="icon-btn" id="export-dashboard"
+              title="Download the entire dashboard as one PNG (full page).">
+        Download Dashboard
+      </button>
+      <button class="icon-btn primary" id="export-excel"
+              title="Download all tables as one Excel workbook"
+              style="display:none">
+        Download Excel
       </button>
     </div>
   </header>
   __TAB_BAR__
   __FILTER_BAR__
+  __SUMMARY__
   <main class="app-main">
     __TAB_PANELS__
   </main>
@@ -2229,6 +2523,7 @@ DASHBOARD_APP_JS = r"""
     subscribe(cid, filtersForChart(cid));
     wireBrush(cid, inst);
     wireChartClick(cid, inst);
+    wireChartClickPopup(cid, inst);
   }
 
   // ----- chart click -> filter emit -----
@@ -2284,6 +2579,156 @@ DASHBOARD_APP_JS = r"""
       } catch (e) {}
       broadcast(cfg.filter_id);
     });
+  }
+
+  // ----- chart click -> detail popup -----
+  //
+  // If a chart widget declares `click_popup`, clicking any data point
+  // resolves the corresponding row in the chart's dataset and opens
+  // a modal with that row's details. Same configuration grammar as
+  // table `row_click` -- simple `popup_fields` mode OR rich
+  // `detail.sections[]` mode (stats / markdown / chart / table).
+  //
+  // The row resolver maps ECharts click params -> dataset row across
+  // chart types:
+  //   line / area / multi_line / bar / scatter / candlestick / bullet
+  //                            (no color)  -> rows[params.dataIndex]
+  //                            (color set) -> filter color==seriesName,
+  //                                             then dataIndex-th row
+  //   scatter_multi                        -> grouped fallback (color)
+  //   pie / donut / funnel / treemap /
+  //   sunburst                             -> match category col ==
+  //                                             params.name
+  //   heatmap                              -> match (x_cat, y_cat)
+  //                                             from params.value[0..1]
+  //   calendar_heatmap                      -> match date col ==
+  //                                              params.value[0]
+  //   histogram / radar / gauge / sankey /
+  //   graph / tree / parallel_coords /
+  //   boxplot                              -> not row-resolvable;
+  //                                              click is a no-op
+  //
+  // For grouped charts (mapping.color set), series names are
+  // humanised by post-build polish but the raw column value is
+  // preserved on `series._column`. We read that off the live ECharts
+  // option so a humanised legend label like "Investment Grade" still
+  // matches a raw cell value of "Investment Grade" (or its
+  // pre-humanise form).
+  function wireChartClickPopup(cid, inst){
+    var w = WIDGET_META[cid] || {};
+    var cp = w.click_popup;
+    if (!cp || typeof cp !== 'object') return;
+    var spec = w.spec || {};
+    var dsName = w.dataset_ref || spec.dataset;
+    if (!dsName) return;
+    var ds = (DATASETS[dsName] && DATASETS[dsName].source) || DATASETS[dsName];
+    if (!Array.isArray(ds) || ds.length < 2) return;
+    inst.on('click', function(params){
+      if (!params || params.componentType !== 'series') return;
+      // When the chart is rewireable, currentDatasets holds the
+      // filter-stripped view that matches what's painted on screen;
+      // otherwise the original DATASETS entry is what we have.
+      var liveDs = currentDatasets[dsName] || ds;
+      var filtered = w.dataset_ref
+        ? applyFilters(w.dataset_ref, liveDs)
+        : liveDs;
+      var header = filtered[0];
+      var rows = filtered.slice(1);
+      var row = _resolveClickRow(w, params, inst, header, rows);
+      if (!row) return;
+      _openPopupModal(cp, header, row, null);
+    });
+  }
+
+  function _resolveClickRow(w, params, inst, header, rows){
+    var spec = w.spec || {};
+    var ct = String(spec.chart_type || '').toLowerCase();
+    var mapping = spec.mapping || {};
+
+    // Aggregate / non-row chart types: histogram bins, radar/gauge
+    // summaries, sankey/graph topology, derived structures. No row
+    // identity to resolve.
+    if (ct === 'histogram' || ct === 'radar' || ct === 'gauge'
+        || ct === 'sankey' || ct === 'graph' || ct === 'tree'
+        || ct === 'parallel_coords' || ct === 'boxplot') {
+      return null;
+    }
+
+    // Category-keyed shapes: match by category cell == params.name.
+    if (ct === 'pie' || ct === 'donut' || ct === 'funnel'
+        || ct === 'treemap' || ct === 'sunburst') {
+      var catCol = mapping.category || mapping.name;
+      if (!catCol) return null;
+      var ci = header.indexOf(catCol);
+      if (ci < 0 || params.name == null) return null;
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i][ci]) === String(params.name)) return rows[i];
+      }
+      return null;
+    }
+
+    // Heatmap: ECharts emits params.value = [xIdx, yIdx, val] using
+    // the same unique-ordered category lists the Python builder
+    // produced. Reconstruct those lists from the dataset and match
+    // back to the (x_cat, y_cat) row.
+    if (ct === 'heatmap') {
+      if (!Array.isArray(params.value)) return null;
+      var xCol = mapping.x, yCol = mapping.y;
+      var xi = header.indexOf(xCol), yi = header.indexOf(yCol);
+      if (xi < 0 || yi < 0) return null;
+      var xCats = [], yCats = [], seenX = {}, seenY = {};
+      for (var i = 0; i < rows.length; i++) {
+        var rxk = String(rows[i][xi]);
+        var ryk = String(rows[i][yi]);
+        if (!seenX[rxk]) { seenX[rxk] = 1; xCats.push(rows[i][xi]); }
+        if (!seenY[ryk]) { seenY[ryk] = 1; yCats.push(rows[i][yi]); }
+      }
+      var xv = xCats[params.value[0]];
+      var yv = yCats[params.value[1]];
+      if (xv == null || yv == null) return null;
+      for (var j = 0; j < rows.length; j++) {
+        if (String(rows[j][xi]) === String(xv)
+            && String(rows[j][yi]) === String(yv)) return rows[j];
+      }
+      return null;
+    }
+
+    if (ct === 'calendar_heatmap') {
+      if (!Array.isArray(params.value)) return null;
+      var dCol = mapping.date;
+      var di = header.indexOf(dCol);
+      if (di < 0) return null;
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i][di]) === String(params.value[0])) return rows[i];
+      }
+      return null;
+    }
+
+    // Default path: line / area / multi_line / bar / bar_horizontal /
+    // scatter / scatter_multi / candlestick / bullet. dataIndex is
+    // the position within the (color-grouped) series, so when a
+    // color column is set we filter the dataset by series name first.
+    var colorCol = mapping.color || mapping.colour;
+    if (colorCol) {
+      var cci = header.indexOf(colorCol);
+      if (cci < 0) return null;
+      var rawSeries = null;
+      try {
+        var opt = inst.getOption();
+        var sArr = opt.series || [];
+        var s = sArr[params.seriesIndex] || {};
+        rawSeries = s._column || s.name || params.seriesName;
+      } catch(e){ rawSeries = params.seriesName; }
+      if (rawSeries == null) return null;
+      var sub = [];
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i][cci]) === String(rawSeries)) sub.push(rows[i]);
+      }
+      var didx = params.dataIndex == null ? 0 : params.dataIndex;
+      return sub[didx] || null;
+    }
+    if (params.dataIndex == null) return null;
+    return rows[params.dataIndex] || null;
   }
   function rerenderChart(cid){
     var rec = CHARTS[cid]; if (!rec) return;
@@ -2783,6 +3228,21 @@ DASHBOARD_APP_JS = r"""
     Object.keys(WIDGET_META).forEach(function(id){
       var w = WIDGET_META[id]; if (w.widget !== 'table') return;
       var el = document.getElementById('table-' + id); if (!el) return;
+
+      // The whole table is rebuilt via innerHTML below, which destroys
+      // the search <input> and any focus/selection on it. Capture caret
+      // state up-front so we can restore it after the rebuild and the
+      // user can keep typing without their cursor being kicked out.
+      var caret = null;
+      var prevSearch = el.querySelector('.table-search');
+      if (prevSearch && document.activeElement === prevSearch){
+        caret = {
+          start: prevSearch.selectionStart,
+          end:   prevSearch.selectionEnd,
+          dir:   prevSearch.selectionDirection || 'none'
+        };
+      }
+
       var ds = w.dataset_ref ? currentDatasets[w.dataset_ref] : null;
       if (!ds || !ds.length) {
         el.innerHTML = '<div class="table-empty">' +
@@ -2824,13 +3284,23 @@ DASHBOARD_APP_JS = r"""
       var allRowsShown = allBody.length <= maxRows;
 
       var html = '';
-      if (w.searchable){
-        html += '<div class="table-toolbar">' +
-          '<input class="table-search" data-tid="' + id +
-          '" placeholder="Search..." value="' + _he(ts.search) + '"/>' +
-          '<span class="table-count">' + allBody.length +
-          (allRowsShown ? '' : ' (showing ' + maxRows + ')') +
-          ' rows</span></div>';
+      var downloadable = w.downloadable !== false;
+      if (w.searchable || downloadable){
+        html += '<div class="table-toolbar">';
+        if (w.searchable){
+          html += '<input class="table-search" data-tid="' + id +
+            '" placeholder="Search..." value="' + _he(ts.search) + '"/>';
+        }
+        if (w.searchable){
+          html += '<span class="table-count">' + allBody.length +
+            (allRowsShown ? '' : ' (showing ' + maxRows + ')') +
+            ' rows</span>';
+        }
+        if (downloadable){
+          html += '<button class="table-xlsx-btn" data-tid="' + id +
+            '" title="Download this table as Excel">XLSX</button>';
+        }
+        html += '</div>';
       }
       html += '<table class="data-table' +
               (w.row_height === 'compact' ? ' compact' : '') +
@@ -2909,11 +3379,25 @@ DASHBOARD_APP_JS = r"""
       // Wire search
       var searchEl = el.querySelector('.table-search');
       if (searchEl){
+        if (caret){
+          searchEl.focus();
+          try { searchEl.setSelectionRange(caret.start, caret.end, caret.dir); }
+          catch(e){}
+        }
         var tId = null;
         searchEl.addEventListener('input', function(){
           ts.search = searchEl.value;
           if (tId) clearTimeout(tId);
           tId = setTimeout(function(){ renderTables(); }, 160);
+        });
+      }
+      // Wire per-table XLSX button
+      var xlsxEl = el.querySelector('.table-xlsx-btn');
+      if (xlsxEl){
+        xlsxEl.addEventListener('click', function(){
+          if (typeof window.downloadOneTableXlsx === 'function'){
+            window.downloadOneTableXlsx(id);
+          }
         });
       }
       // Wire header-click sort
@@ -2944,17 +3428,34 @@ DASHBOARD_APP_JS = r"""
       .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
 
-  // ----- row click modal -----
+  // ----- popup modal (table row_click + chart click_popup) -----
   //
-  // Two modes:
-  //   A) Simple key/value table. Use `row_click.popup_fields` (or
-  //      default = all columns). Same as the v1 behaviour.
-  //   B) Rich detail layout. Use `row_click.detail.sections[]` with
+  // Single source of truth for the click-popup modal. Both
+  // table.row_click and chart.click_popup hand a config dict +
+  // header + row to `_openPopupModal` and get back a populated
+  // modal -- simple key/value table OR rich detail.sections[] layout.
+  //
+  // Two modes (apply identically to row_click and click_popup):
+  //   A) Simple key/value table. Use `popup_fields` -- a list of
+  //      field-name strings, OR `{field, label, format, prefix,
+  //      suffix}` dicts when the caller wants per-row formatting
+  //      without dropping into rich mode (chart click popups don't
+  //      have a column config to inherit formats from).
+  //      Default (no `popup_fields`) = every column in `header`.
+  //   B) Rich detail layout. Use `detail.sections[]` with
   //      section `type: "stats" | "markdown" | "chart" | "table"`.
-  //      Charts can be filtered by the clicked row's key value, so
-  //      you can embed a per-entity time series, yield curve, etc.
+  //      Charts and sub-tables can be filtered by the clicked row's
+  //      key value, so you can embed a per-entity time series,
+  //      yield curve, etc.
+  //
+  // `cols` is the table widget's column config (per-column format
+  // hints, used as a fallback when popup_fields entries are bare
+  // field-name strings). Pass `null` for chart click popups.
   function openRowModal(w, header, row, cols){
-    var rc = w.row_click || {};
+    _openPopupModal(w.row_click || {}, header, row, cols);
+  }
+  function _openPopupModal(rc, header, row, cols){
+    if (!rc || typeof rc !== 'object') return;
     var title = '';
     if (rc.title_field){
       var tIdx = header.indexOf(rc.title_field);
@@ -2964,8 +3465,8 @@ DASHBOARD_APP_JS = r"""
       var firstIdx = header.indexOf(cols[0].field);
       if (firstIdx >= 0) title = String(row[firstIdx]);
     }
-    // subtitle support: `row_click.subtitle_field` or
-    // `row_click.subtitle_template` (string with `{field}` placeholders).
+    // subtitle support: `subtitle_field` or `subtitle_template`
+    // (string with `{field}` / `{field:format}` placeholders).
     var subtitle = null;
     if (rc.subtitle_field){
       var sIdx = header.indexOf(rc.subtitle_field);
@@ -2979,25 +3480,39 @@ DASHBOARD_APP_JS = r"""
       return;
     }
 
-    // Legacy simple mode: key/value table.
+    // Simple mode: key/value table.
+    // Each entry of `popup_fields` is either a plain field-name string
+    // (we look up the format in `cols` if any), or a dict
+    // {field, label?, format?, prefix?, suffix?}. Mixed lists are fine.
     var showFields = rc.popup_fields;
-    if (!showFields || showFields === '*' || (showFields.length === 1 && showFields[0] === '*')){
+    if (!showFields || showFields === '*' ||
+        (Array.isArray(showFields) && showFields.length === 1
+          && showFields[0] === '*')){
       showFields = header.slice();
     }
 
     var body = '<table class="modal-detail-table">';
-    showFields.forEach(function(fname){
+    showFields.forEach(function(item){
+      var fname = (typeof item === 'string') ? item : (item && item.field);
+      if (!fname) return;
       var hi = header.indexOf(fname);
       if (hi < 0) return;
       var val = row[hi];
-      var fmt = null;
-      if (cols){
+      var label = (item && typeof item === 'object' && item.label != null)
+        ? item.label : fname;
+      var fmt = (item && typeof item === 'object') ? item.format : null;
+      if (!fmt && cols){
         for (var i = 0; i < cols.length; i++){
           if (cols[i].field === fname){ fmt = cols[i].format; break; }
         }
       }
-      body += '<tr><th>' + _he(fname) + '</th>' +
-               '<td>' + formatValue(val, fmt) + '</td></tr>';
+      var text = formatValue(val, fmt);
+      if (item && typeof item === 'object'){
+        if (item.prefix) text = item.prefix + text;
+        if (item.suffix) text = text + item.suffix;
+      }
+      body += '<tr><th>' + _he(label) + '</th>' +
+               '<td>' + text + '</td></tr>';
     });
     body += '</table>';
 
@@ -3351,65 +3866,222 @@ DASHBOARD_APP_JS = r"""
   // form control; we stopPropagation so the filter doesn't re-focus
   // underneath the open modal.
   function _mdInlinePopup(text){
-    // Minimal markdown subset shared with the markdown widget:
-    // **bold**, *italic*, `code`, [label](url), - / * bullets,
-    // paragraphs on blank lines. Implemented inline here so we don't
-    // have to re-export the Python markdown renderer to JS.
+    // Markdown renderer for popup bodies (info / methodology /
+    // row drill-down / dashboard summary). Twin of the Python
+    // `_render_md` in rendering.py - both must support the same
+    // grammar so server-rendered tiles and client-rendered modals
+    // read identically.
+    //
+    // Block grammar:
+    //   # ... ##### headings (h1..h5)
+    //   blank-line separated paragraphs
+    //   - / * unordered list items, 1. ordered list items
+    //     (nested via 2-space indent)
+    //   > blockquote (multi-line; recursively parsed)
+    //   ``` fenced code blocks ``` (with optional language tag)
+    //   | a | b |  GFM tables (header + separator + body rows)
+    //   --- / *** / ___ horizontal rules
+    //
+    // Inline grammar:
+    //   **bold**  *italic*  ~~strike~~  `code`  [label](url)
+    //
+    // IMPORTANT ordering: line-level constructs (headings, bullets,
+    // tables, code fences) are detected BEFORE inline transforms run.
+    // Otherwise the italic regex eats things like consecutive bullet
+    // markers across lines.
     if (text == null) return '';
     var escapeHTML = function(s){
       return String(s == null ? '' : s)
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
         .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     };
-    var placeholders = [];
-    var staged = String(text).replace(/\[([^\]]+)\]\(([^)]+)\)/g,
-      function(_, lbl, url){
-        placeholders.push(
-          '<a href="' + escapeHTML(url) + '" target="_blank"' +
-          ' rel="noopener">' + escapeHTML(lbl) + '</a>');
-        return '\x00LINK' + (placeholders.length - 1) + '\x00';
-      });
-    var esc = escapeHTML(staged);
-    esc = esc.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    esc = esc.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
-    esc = esc.replace(/`([^`]+)`/g, '<code>$1</code>');
-    for (var i = 0; i < placeholders.length; i++){
-      esc = esc.replace('\x00LINK' + i + '\x00', placeholders[i]);
+    function inlineTransforms(raw){
+      var phs = [];
+      var staged = String(raw).replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+        function(_, lbl, url){
+          phs.push('<a href="' + escapeHTML(url) + '" target="_blank"' +
+                    ' rel="noopener">' + escapeHTML(lbl) + '</a>');
+          return '\x00LINK' + (phs.length - 1) + '\x00';
+        });
+      var e = escapeHTML(staged);
+      e = e.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      e = e.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+      e = e.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+      e = e.replace(/`([^`]+)`/g, '<code>$1</code>');
+      for (var i = 0; i < phs.length; i++){
+        e = e.replace('\x00LINK' + i + '\x00', phs[i]);
+      }
+      return e;
     }
-    var lines = esc.split(/\n/);
-    var out = [], para = [], list = [];
-    var flushPara = function(){
-      if (para.length){ out.push('<p>' + para.join(' ') + '</p>'); para = []; }
-    };
-    var flushList = function(){
-      if (list.length){
-        out.push('<ul>' + list.map(function(x){
-          return '<li>' + x + '</li>';
-        }).join('') + '</ul>');
-        list = [];
+    function splitTableRow(line){
+      var s = String(line).trim();
+      if (s.charAt(0) === '|') s = s.slice(1);
+      if (s.charAt(s.length - 1) === '|') s = s.slice(0, -1);
+      return s.split('|').map(function(c){ return c.trim(); });
+    }
+    function parseTableAligns(sep){
+      return splitTableRow(sep).map(function(c){
+        if (c.charAt(0) === ':' && c.charAt(c.length - 1) === ':') return 'center';
+        if (c.charAt(c.length - 1) === ':') return 'right';
+        if (c.charAt(0) === ':') return 'left';
+        return null;
+      });
+    }
+    var TABLE_SEP_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+    var HR_RE = /^\s*([-*_])\s*\1\s*\1[\s\1]*$/;
+    var lines = String(text).split(/\n/);
+    var out = [];
+    var para = [];
+    var quoteBuf = [];
+    var listStack = [];   // [{kind, indent}, ...]
+    var liOpen = [];       // parallel to listStack: is the deepest <li> still open?
+    function flushPara(){
+      if (para.length){
+        out.push('<p>' + para.join(' ') + '</p>');
+        para = [];
       }
-    };
-    lines.forEach(function(raw){
-      var l = raw.replace(/\s+$/, '');
-      var s = l.replace(/^\s+/, '');
-      if (/^###\s/.test(s)) {
-        flushPara(); flushList();
-        out.push('<h3>' + s.slice(4) + '</h3>');
-      } else if (/^##\s/.test(s)) {
-        flushPara(); flushList();
-        out.push('<h2>' + s.slice(3) + '</h2>');
-      } else if (/^#\s/.test(s)) {
-        flushPara(); flushList();
-        out.push('<h1>' + s.slice(2) + '</h1>');
-      } else if (/^[-*]\s/.test(s)) {
-        flushPara(); list.push(s.slice(2));
-      } else if (s === '') {
-        flushPara(); flushList();
-      } else {
-        flushList(); para.push(s);
+    }
+    function flushQuote(){
+      if (quoteBuf.length){
+        var inner = _mdInlinePopup(quoteBuf.join('\n'));
+        out.push('<blockquote>' + inner + '</blockquote>');
+        quoteBuf = [];
       }
-    });
-    flushPara(); flushList();
+    }
+    function closeTopList(){
+      var top = listStack.pop();
+      if (liOpen.pop()) out.push('</li>');
+      out.push('</' + top.kind + '>');
+    }
+    function closeAllLists(){
+      while (listStack.length) closeTopList();
+    }
+    function pushListItem(kind, indent, text){
+      while (listStack.length && listStack[listStack.length - 1].indent > indent){
+        closeTopList();
+      }
+      if (listStack.length && listStack[listStack.length - 1].indent === indent){
+        var top = listStack[listStack.length - 1];
+        if (top.kind !== kind){
+          closeTopList();
+        } else {
+          if (liOpen[liOpen.length - 1]){
+            out.push('</li>');
+            liOpen[liOpen.length - 1] = false;
+          }
+        }
+      }
+      var topIndent = listStack.length ? listStack[listStack.length - 1].indent : -1;
+      if (!listStack.length || topIndent < indent){
+        listStack.push({kind: kind, indent: indent});
+        liOpen.push(false);
+        out.push('<' + kind + '>');
+      }
+      out.push('<li>' + inlineTransforms(text));
+      liOpen[liOpen.length - 1] = true;
+    }
+    var i = 0, n = lines.length;
+    while (i < n){
+      var raw = lines[i];
+      var stripped = raw.replace(/^\s+/, '');
+      var indent = raw.length - stripped.length;
+      var s = stripped.replace(/\s+$/, '');
+
+      if (s.indexOf('```') === 0){
+        var lang = s.slice(3).trim();
+        flushPara(); flushQuote(); closeAllLists();
+        var buf = []; i += 1;
+        while (i < n){
+          var fl = lines[i].replace(/^\s+/, '').replace(/\s+$/, '');
+          if (fl.indexOf('```') === 0) break;
+          buf.push(lines[i]); i += 1;
+        }
+        i += 1;
+        var cls = lang ? ' class="lang-' + escapeHTML(lang) + '"' : '';
+        out.push('<pre><code' + cls + '>' + escapeHTML(buf.join('\n')) + '</code></pre>');
+        continue;
+      }
+
+      if (s.indexOf('|') !== -1 && i + 1 < n &&
+          TABLE_SEP_RE.test(lines[i + 1].replace(/\s+$/, ''))){
+        flushPara(); flushQuote(); closeAllLists();
+        var hdr = splitTableRow(s);
+        var aligns = parseTableAligns(lines[i + 1].replace(/\s+$/, ''));
+        i += 2;
+        var rows = [];
+        while (i < n){
+          var rs = lines[i].replace(/\s+$/, '');
+          if (rs.indexOf('|') !== -1 && rs.trim()){
+            rows.push(splitTableRow(rs)); i += 1;
+          } else { break; }
+        }
+        var tbl = ['<table class="md-table"><thead><tr>'];
+        hdr.forEach(function(h, j){
+          var al = aligns[j];
+          tbl.push('<th' + (al ? ' style="text-align:' + al + '"' : '') + '>' +
+                    inlineTransforms(h) + '</th>');
+        });
+        tbl.push('</tr></thead><tbody>');
+        rows.forEach(function(row){
+          tbl.push('<tr>');
+          row.forEach(function(c, j){
+            var al = aligns[j];
+            tbl.push('<td' + (al ? ' style="text-align:' + al + '"' : '') + '>' +
+                      inlineTransforms(c) + '</td>');
+          });
+          tbl.push('</tr>');
+        });
+        tbl.push('</tbody></table>');
+        out.push(tbl.join(''));
+        continue;
+      }
+
+      if (HR_RE.test(s)){
+        flushPara(); flushQuote(); closeAllLists();
+        out.push('<hr/>');
+        i += 1; continue;
+      }
+
+      if (s === ''){
+        flushPara(); flushQuote(); closeAllLists();
+        i += 1; continue;
+      }
+
+      var hMatch = /^(#{1,5})\s+(.*)$/.exec(s);
+      if (hMatch){
+        flushPara(); flushQuote(); closeAllLists();
+        var lvl = Math.min(hMatch[1].length, 5);
+        out.push('<h' + lvl + '>' + inlineTransforms(hMatch[2]) + '</h' + lvl + '>');
+        i += 1; continue;
+      }
+
+      if (s.indexOf('> ') === 0){
+        flushPara(); closeAllLists();
+        quoteBuf.push(s.slice(2));
+        i += 1; continue;
+      }
+      if (s === '>'){
+        flushPara(); closeAllLists();
+        quoteBuf.push('');
+        i += 1; continue;
+      }
+
+      var olMatch = /^(\d+)\.\s+(.*)$/.exec(s);
+      var ulMatch = /^[-*]\s+(.*)$/.exec(s);
+      if (olMatch || ulMatch){
+        flushPara(); flushQuote();
+        var kind = olMatch ? 'ol' : 'ul';
+        var liText = olMatch ? olMatch[2] : ulMatch[1];
+        var snapped = (indent - (indent % 2));
+        pushListItem(kind, snapped, liText);
+        i += 1; continue;
+      }
+
+      flushQuote(); closeAllLists();
+      para.push(inlineTransforms(stripped));
+      i += 1;
+    }
+    flushPara(); flushQuote(); closeAllLists();
     return out.join('\n');
   }
 
@@ -3436,6 +4108,108 @@ DASHBOARD_APP_JS = r"""
   }
   wirePopupIcons();
 
+  // ----- chart PNG export (with title baked in) -----
+  //
+  // The dashboard tile renders the chart's title in its header chrome
+  // and the compiler suppresses the internal ECharts title to avoid
+  // duplication on screen. That means a vanilla `chart.getDataURL()`
+  // produces a PNG with no title, which is useless for embeds /
+  // vision-model handoffs / decks.
+  //
+  // Strategy: temporarily inject a title (using GS type styles)
+  // straight into the live chart, snapshot via getDataURL(), then
+  // immediately revert. ECharts' setOption + getDataURL is fully
+  // synchronous, so the whole sequence runs inside one event-loop
+  // tick and the browser never paints the intermediate state -- no
+  // visual flicker for the user.
+  //
+  // We tried an offscreen-instance variant first (clean isolation,
+  // no live mutation). It rendered the title and axes correctly but
+  // the dataset rows didn't draw -- ECharts doesn't reliably accept
+  // a dataset payload via setOption when it was sourced from another
+  // live instance's getOption(). Mutating-and-restoring is simpler
+  // and bullet-proof.
+  function _hasExistingChartTitle(t){
+    if (!t) return false;
+    if (Array.isArray(t)){
+      return t.some(function(x){ return x && x.text; });
+    }
+    return !!t.text;
+  }
+  function _exportTitleBlock(w){
+    return {
+      text: w && w.title ? String(w.title) : '',
+      subtext: w && w.subtitle ? String(w.subtitle) : '',
+      left: 16,
+      top: 10,
+      textStyle: {
+        fontFamily: 'Goldman Sans, GS Sans, Helvetica Neue, Arial, sans-serif',
+        fontSize: 14,
+        fontWeight: 600,
+        color: '#1A1A1A'
+      },
+      subtextStyle: {
+        fontFamily: 'Goldman Sans, GS Sans, Helvetica Neue, Arial, sans-serif',
+        fontSize: 11,
+        color: '#595959',
+        fontStyle: 'italic'
+      }
+    };
+  }
+  function _downloadChartPngTitled(id, scale){
+    var c = CHARTS[id]; if (!c) return false;
+    var w = WIDGET_META[id] || {};
+    var inst = c.inst;
+    var hasOwnTitle = false;
+    try {
+      hasOwnTitle = _hasExistingChartTitle(inst.getOption().title);
+    } catch(e){}
+
+    // Skip injection when the chart already shows its own title
+    // (spec.keep_title=true) or there's nothing to inject. Fall
+    // through to the plain getDataURL path.
+    var canInject = (w.title || w.subtitle) && !hasOwnTitle;
+
+    if (canInject){
+      try {
+        // Inject title (and small grid.top bump so the plot area
+        // doesn't overlap the title text).
+        var titlePx = 26 + (w.subtitle ? 18 : 0) + 10;
+        inst.setOption({
+          title: [_exportTitleBlock(w)],
+          grid: {top: titlePx + 30}
+        }, false);
+      } catch(e){ canInject = false; }
+    }
+
+    var url = inst.getDataURL({
+      pixelRatio: scale,
+      backgroundColor: '#ffffff',
+      type: 'png'
+    });
+
+    if (canInject){
+      // Restore: ECharts' setOption(opt, true) keeps prior title /
+      // grid state across "notMerge" resets when the new option
+      // doesn't restate them, so calling clear() first is the only
+      // reliable way to wipe them. Then fully re-render from the
+      // single source of truth (materializeOption) which is what
+      // every other code path also uses to draw this chart.
+      try {
+        inst.clear();
+        var fresh = (typeof reviveFns === 'function')
+                       ? reviveFns(materializeOption(id))
+                       : materializeOption(id);
+        inst.setOption(fresh, true);
+      } catch(e){}
+    }
+
+    var a = document.createElement('a');
+    a.href = url; a.download = (id || 'chart') + '.png'; a.click();
+    return true;
+  }
+  window.downloadChartPngTitled = _downloadChartPngTitled;
+
   // ----- per-tile fullscreen + export -----
   function wireTileActions(){
     document.querySelectorAll('.tile').forEach(function(tile){
@@ -3450,11 +4224,7 @@ DASHBOARD_APP_JS = r"""
       var dl = tile.querySelector('.tile-btn.download');
       if (dl){
         dl.addEventListener('click', function(){
-          var c = CHARTS[id]; if (!c) return;
-          var url = c.inst.getDataURL({pixelRatio: 2, type: 'png',
-                                         backgroundColor: '#ffffff'});
-          var a = document.createElement('a'); a.href = url;
-          a.download = (id || 'chart') + '.png'; a.click();
+          _downloadChartPngTitled(id, 2);
         });
       }
     });
@@ -3464,24 +4234,110 @@ DASHBOARD_APP_JS = r"""
   if (exportAll){
     exportAll.addEventListener('click', function(){
       Object.keys(CHARTS).forEach(function(id){
-        var c = CHARTS[id]; if (!c) return;
-        var url = c.inst.getDataURL({pixelRatio: 2, type: 'png', backgroundColor:'#ffffff'});
-        var a = document.createElement('a'); a.href = url; a.download = id + '.png'; a.click();
+        _downloadChartPngTitled(id, 2);
       });
     });
   }
 
+  // ----- whole-dashboard PNG (html2canvas, lazy-loaded) -----
+  //
+  // Captures the entire .app subtree (header, tabs, filter bar, active
+  // tab panel, footer) to a single PNG. Designed for the "drop into a
+  // vision model" workflow, so the export is intentionally generous:
+  // backgroundColor='#fff', scale=2, full scrollHeight. html2canvas is
+  // fetched lazily on first click so dashboards that never click this
+  // pay zero cost.
+  function ensureHtml2Canvas(){
+    if (window.html2canvas) return Promise.resolve();
+    if (window.__h2cLoading__) return window.__h2cLoading__;
+    window.__h2cLoading__ = new Promise(function(resolve, reject){
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+      s.async = true;
+      s.onload = function(){ resolve(); };
+      s.onerror = function(){
+        window.__h2cLoading__ = null;
+        reject(new Error('Failed to load html2canvas'));
+      };
+      document.head.appendChild(s);
+    });
+    return window.__h2cLoading__;
+  }
 
-  // ----- chart count badge -----
-  var ccEl = document.getElementById('chart-count');
-  if (ccEl){
-    var count = Object.keys(WIDGET_META).filter(function(k){
-      return WIDGET_META[k].widget === 'chart';
-    }).length;
-    ccEl.textContent = count + (count === 1 ? ' chart' : ' charts');
+  var exportDash = document.getElementById('export-dashboard');
+  if (exportDash){
+    exportDash.addEventListener('click', function(){
+      var btn = exportDash;
+      var origLabel = btn.textContent;
+      btn.textContent = 'Capturing...';
+      btn.disabled = true;
+      var stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+      var fname = (MANIFEST.id || 'dashboard') + '_' + stamp + '.png';
+      ensureHtml2Canvas().then(function(){
+        // Settle ECharts: every chart that has a pending render
+        // resolves on its 'finished' event before we rasterize.
+        var charts = Object.keys(CHARTS).map(function(k){ return CHARTS[k]; })
+          .filter(Boolean);
+        return Promise.all(charts.map(function(c){
+          return new Promise(function(resolve){
+            try {
+              c.inst.on('finished', function once(){
+                c.inst.off('finished', once); resolve();
+              });
+              setTimeout(resolve, 1200);
+            } catch(e){ resolve(); }
+          });
+        })).then(function(){ return new Promise(function(r){
+          requestAnimationFrame(function(){ requestAnimationFrame(r); });
+        }); });
+      }).then(function(){
+        var target = document.querySelector('.app') || document.body;
+        // Note on file:// origins: Chrome prints a one-time
+        // "Unsafe attempt to load URL ... 'file:' URLs are treated as
+        // unique security origins" warning when html2canvas clones
+        // the document into a sandbox iframe. It is purely a console
+        // warning -- html2canvas falls through to rendering against
+        // the live document and toBlob() succeeds. The warning
+        // disappears entirely if the dashboard is served from http
+        // (e.g. `python -m http.server` in the dashboard folder).
+        return window.html2canvas(target, {
+          backgroundColor: '#ffffff',
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          windowWidth: target.scrollWidth,
+          windowHeight: target.scrollHeight,
+          width: target.scrollWidth,
+          height: target.scrollHeight,
+        });
+      }).then(function(canvas){
+        return new Promise(function(resolve){
+          canvas.toBlob(function(blob){
+            if (!blob){ resolve(); return; }
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url; a.download = fname; a.click();
+            setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
+            resolve();
+          }, 'image/png');
+        });
+      }).catch(function(e){
+        console.error('Dashboard PNG export failed:', e);
+        alert('Dashboard PNG export failed. See console for details.');
+      }).then(function(){
+        btn.textContent = origLabel;
+        btn.disabled = false;
+      });
+    });
   }
 
   // ----- data freshness badge -----
+  //
+  // Renders the "Data as of <stamp>" pill. Input is an ISO-8601 string
+  // from `metadata.data_as_of` (preferred) or `metadata.generated_at`
+  // (fallback). Output is "YYYY-MM-DD HH:MM:SS UTC" -- full second
+  // precision, explicit timezone label. Strings the JS Date parser
+  // can't handle pass through verbatim so the user still sees something.
   var MD = MANIFEST.metadata || {};
   (function(){
     var el = document.getElementById('data-as-of');
@@ -3491,9 +4347,147 @@ DASHBOARD_APP_JS = r"""
     if (!stamp) return;
     var s = String(stamp);
     var d = new Date(s);
-    if (!isNaN(d.getTime())) s = d.toISOString().replace('T',' ').slice(0, 16) + 'Z';
+    if (!isNaN(d.getTime())){
+      s = d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+    }
     val.textContent = s;
     el.style.display = 'inline-flex';
+  })();
+
+  // ----- methodology popup -----
+  //
+  // Shown when manifest.metadata.methodology is set. Accepts either a
+  // plain markdown string or a {title, body} dict. Renders into the
+  // shared modal via _mdInlinePopup() (same engine used by every other
+  // popup in the dashboard, so styling is automatically consistent).
+  (function(){
+    var btn = document.getElementById('methodology-btn');
+    if (!btn) return;
+    var m = MD.methodology;
+    if (m == null || m === '') return;
+    var title = 'Methodology';
+    var body = '';
+    if (typeof m === 'string'){ body = m; }
+    else if (typeof m === 'object'){
+      title = m.title || title;
+      body = m.body || m.text || '';
+    }
+    if (!body) return;
+    btn.style.display = 'inline-flex';
+    btn.addEventListener('click', function(){
+      showModal(title, _mdInlinePopup(body));
+    });
+  })();
+
+  // ----- excel download (header) -----
+  //
+  // One workbook for the whole dashboard. Each `widget=table` widget
+  // gets its own sheet. Rows reflect the current applyFilters() state
+  // PLUS the per-table search string and sort order, so what's
+  // exported is exactly what the user sees. Sheet names are taken
+  // from the widget title (or id), truncated to Excel's 31-char limit
+  // and uniquified if collisions occur.
+  function _excelSheetName(raw, used){
+    var name = String(raw || 'sheet').replace(/[\\\/\?\*\[\]:]/g, ' ').trim();
+    if (!name) name = 'sheet';
+    name = name.slice(0, 31);
+    var base = name, n = 2;
+    while (used[name]){
+      var suf = ' (' + n + ')';
+      name = base.slice(0, 31 - suf.length) + suf;
+      n++;
+    }
+    used[name] = true;
+    return name;
+  }
+  function _exportTableRowsForXlsx(id){
+    var w = WIDGET_META[id]; if (!w || w.widget !== 'table') return null;
+    var ds = w.dataset_ref ? currentDatasets[w.dataset_ref] : null;
+    if (!ds || !ds.length) return null;
+    var header = ds[0];
+    var body = applyFilters(w.dataset_ref, ds).slice(1);
+    var ts = (typeof TABLE_STATE !== 'undefined' && TABLE_STATE[id])
+              ? TABLE_STATE[id] : null;
+    if (ts && ts.search){
+      body = body.filter(function(r){ return _rowMatchesSearch(r, ts.search); });
+    }
+    var cols = w.columns;
+    if (!cols || !cols.length){
+      cols = header.map(function(h){ return {field: h, label: h}; });
+    }
+    var colIndexes = cols.map(function(c){ return header.indexOf(c.field); });
+    if (ts && ts.sortCol != null && colIndexes[ts.sortCol] >= 0){
+      var ci = colIndexes[ts.sortCol], dir = ts.sortDir;
+      body = body.slice().sort(function(a, b){
+        var av = a[ci], bv = b[ci];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        var an = Number(av), bn = Number(bv);
+        if (!isNaN(an) && !isNaN(bn)) return (an - bn) * dir;
+        return String(av).localeCompare(String(bv)) * dir;
+      });
+    }
+    var outHeader = cols.map(function(c){ return c.label != null ? c.label : c.field; });
+    var rows = body.map(function(row){
+      return cols.map(function(c, i){
+        var hi = colIndexes[i];
+        return hi >= 0 ? row[hi] : null;
+      });
+    });
+    return [outHeader].concat(rows);
+  }
+  function downloadAllTablesXlsx(){
+    if (typeof XLSX === 'undefined'){
+      alert('Excel export requires network access to load the SheetJS ' +
+            'library. Please reload while online.');
+      return;
+    }
+    var wb = XLSX.utils.book_new();
+    var used = {};
+    var added = 0;
+    Object.keys(WIDGET_META).forEach(function(id){
+      var w = WIDGET_META[id]; if (w.widget !== 'table') return;
+      var aoa = _exportTableRowsForXlsx(id);
+      if (!aoa) return;
+      var ws = XLSX.utils.aoa_to_sheet(aoa);
+      var nm = _excelSheetName(w.title || id, used);
+      XLSX.utils.book_append_sheet(wb, ws, nm);
+      added++;
+    });
+    if (!added){
+      alert('No table widgets to export.');
+      return;
+    }
+    var stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    XLSX.writeFile(wb, (MANIFEST.id || 'dashboard') + '_' + stamp + '.xlsx');
+  }
+  window.downloadAllTablesXlsx = downloadAllTablesXlsx;
+  function downloadOneTableXlsx(id){
+    if (typeof XLSX === 'undefined'){
+      alert('Excel export requires network access to load the SheetJS ' +
+            'library. Please reload while online.');
+      return;
+    }
+    var w = WIDGET_META[id]; if (!w || w.widget !== 'table') return;
+    var aoa = _exportTableRowsForXlsx(id);
+    if (!aoa){ alert('No rows to export.'); return; }
+    var wb = XLSX.utils.book_new();
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    var nm = _excelSheetName(w.title || id, {});
+    XLSX.utils.book_append_sheet(wb, ws, nm);
+    XLSX.writeFile(wb, (w.title ? String(w.title).replace(/[^\w\-]+/g, '_') : id) + '.xlsx');
+  }
+  window.downloadOneTableXlsx = downloadOneTableXlsx;
+  (function(){
+    var btn = document.getElementById('export-excel');
+    if (!btn) return;
+    var hasTable = Object.keys(WIDGET_META).some(function(k){
+      return WIDGET_META[k].widget === 'table';
+    });
+    if (!hasTable) return;
+    btn.style.display = 'inline-flex';
+    btn.addEventListener('click', downloadAllTablesXlsx);
   })();
 
   // ----- header_actions: custom buttons/links in the header -----
@@ -3710,16 +4704,18 @@ def _render_filter_controls(filters: List[Dict[str, Any]],
         elif ftype in ("select", "multiSelect"):
             options = f.get("options", [])
             multi = " multiple" if ftype == "multiSelect" else ""
-            default_set = set()
+            default_set: set = set()
             if isinstance(default, list):
-                default_set = set(str(d) for d in default)
+                default_set = set(
+                    str(_default_value_for_compare(d)) for d in default)
             elif default:
-                default_set = {str(default)}
+                default_set = {str(_default_value_for_compare(default))}
+            opt_pairs = [_option_value_label(o) for o in options]
             opts_html = "".join(
-                f"<option value=\"{_html_escape(o)}\""
-                f"{' selected' if str(o) in default_set else ''}>"
-                f"{_html_escape(o)}</option>"
-                for o in options
+                f"<option value=\"{_html_escape(v)}\""
+                f"{' selected' if v in default_set else ''}>"
+                f"{_html_escape(l)}</option>"
+                for v, l in opt_pairs
             )
             out.append(
                 f"<div class=\"filter-item\">{lbl}"
@@ -3754,14 +4750,16 @@ def _render_filter_controls(filters: List[Dict[str, Any]],
             )
         elif ftype == "radio":
             options = f.get("options", [])
+            default_v = str(_default_value_for_compare(default))
             radios: List[str] = []
             for o in options:
-                checked = " checked" if str(o) == str(default) else ""
+                v, l = _option_value_label(o)
+                checked = " checked" if v == default_v else ""
                 radios.append(
                     f"<label class=\"radio-opt\">"
                     f"<input type=\"radio\" name=\"filter-{fid}\" "
-                    f"value=\"{_html_escape(o)}\"{checked}/>"
-                    f"{_html_escape(o)}</label>"
+                    f"value=\"{_html_escape(v)}\"{checked}/>"
+                    f"{_html_escape(l)}</label>"
                 )
             out.append(
                 f"<div class=\"filter-item radio-group\">{lbl}"
@@ -4017,8 +5015,55 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
         return (
             f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
             f"style=\"{style}\">"
-            f"  <div class=\"tile-body\">{_render_md(w.get('content', ''))}</div>"
+            f"  <div class=\"tile-body markdown-body\">"
+            f"{_render_md(w.get('content', ''))}</div>"
             f"  {_tile_footer_html(w)}"
+            f"</div>"
+        )
+
+    if wt == "note":
+        # Semantic callout. Tinted card with a colored left-edge stripe
+        # keyed by `kind` so the reader can scan for "this is the
+        # thesis" / "this is a risk" without reading prose. The body
+        # is full markdown via the same renderer used by markdown
+        # widgets; the title is plain text. An optional short icon
+        # glyph renders to the left of the title.
+        kind = str(w.get("kind", "insight"))
+        title = w.get("title")
+        icon = w.get("icon")
+        body_md = w.get("body", "")
+        cls = _tile_class(w, f"tile note-tile note-tile-{kind}")
+        kind_label = {
+            "insight": "Insight",
+            "thesis":  "Thesis",
+            "watch":   "Watch",
+            "risk":    "Risk",
+            "context": "Context",
+            "fact":    "Fact",
+        }.get(kind, kind.capitalize())
+        head_parts: List[str] = []
+        if icon:
+            head_parts.append(
+                f'<span class="note-icon">{_html_escape(str(icon))}</span>'
+            )
+        head_parts.append(
+            f'<span class="note-kind">{_html_escape(kind_label)}</span>'
+        )
+        if title:
+            head_parts.append(
+                f'<span class="note-title">{_html_escape(str(title))}</span>'
+            )
+        head_html = (
+            f'<div class="note-head">{"".join(head_parts)}</div>'
+        )
+        body_html = _render_md(body_md)
+        return (
+            f"<div class=\"{cls}\" data-tile-id=\"{_html_escape(wid)}\" "
+            f"data-note-kind=\"{_html_escape(kind)}\" "
+            f"style=\"{style}\">"
+            f"{head_html}"
+            f"<div class=\"note-body markdown-body\">{body_html}</div>"
+            f"{_tile_footer_html(w)}"
             f"</div>"
         )
 
@@ -4120,21 +5165,32 @@ def _render_widget(w: Dict[str, Any], cols: int) -> str:
 
 import re as _re
 
-# Inline markdown regexes. We intentionally keep the grammar tiny (no
-# full markdown compiler): links, bold, italic, inline code. Anything
-# else is escaped as plain text.
+# Inline markdown regexes. The grammar is intentionally bounded (no
+# full CommonMark / GFM compiler): links, bold, italic, strikethrough,
+# inline code. Block-level constructs (headings, lists, blockquotes,
+# fenced code, tables, hr) are handled by `_render_md` below.
 _RE_LINK = _re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _RE_BOLD = _re.compile(r"\*\*([^*]+)\*\*")
 _RE_ITAL = _re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")
+_RE_STRK = _re.compile(r"~~([^~]+)~~")
 _RE_CODE = _re.compile(r"`([^`]+)`")
+
+# Block-level regexes used by `_render_md`.
+_RE_MD_HEADING = _re.compile(r"^(#{1,5})\s+(.*)$")
+_RE_MD_OL_ITEM = _re.compile(r"^(\d+)\.\s+(.*)$")
+_RE_MD_UL_ITEM = _re.compile(r"^[-*]\s+(.*)$")
+_RE_MD_TABLE_SEP = _re.compile(
+    r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$"
+)
+_RE_MD_HR = _re.compile(r"^\s*([-*_])\s*\1\s*\1[\s\1]*$")
 
 
 def _md_inline(text: str) -> str:
     """Escape the text then re-apply inline markdown for a safe
-    subset: [label](url), **bold**, *italic*, `code`. URLs are
-    passed through intact so we must be careful about escaping.
+    subset: [label](url), **bold**, *italic*, ~~strike~~, `code`.
+    URLs are passed through intact so we must be careful about
+    escaping.
     """
-    # Step 1: extract links to placeholders so we don't escape the URL.
     placeholders: List[str] = []
     def _stash_link(m):
         label, url = m.group(1), m.group(2)
@@ -4146,63 +5202,249 @@ def _md_inline(text: str) -> str:
 
     staged = _RE_LINK.sub(_stash_link, text)
     escaped = _html_escape(staged)
-    # Step 2: bold / italic / inline code on the escaped version.
     escaped = _RE_BOLD.sub(r"<strong>\1</strong>", escaped)
     escaped = _RE_ITAL.sub(r"<em>\1</em>", escaped)
+    escaped = _RE_STRK.sub(r"<del>\1</del>", escaped)
     escaped = _RE_CODE.sub(r"<code>\1</code>", escaped)
-    # Step 3: restore links.
     for i, ph in enumerate(placeholders):
         escaped = escaped.replace(f"\x00LINK{i}\x00", ph)
     return escaped
 
 
-def _render_md(src: str) -> str:
-    """Minimal markdown renderer for dashboard markdown tiles.
+def _split_md_table_row(line: str) -> List[str]:
+    """Split a markdown table row by `|`, trimming surrounding whitespace
+    and dropping a leading/trailing empty cell when the row is fully
+    bounded with `|` (e.g. `| a | b |`).
+    """
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|"):
+        s = s[:-1]
+    return [c.strip() for c in s.split("|")]
 
-    Supports: # / ## / ### headings, paragraphs separated by blank
-    lines, `-` / `*` bullet lists, inline **bold** / *italic* /
-    `code` / [label](url). Paragraphs are rendered as flowing text
-    with line breaks joined by spaces.
+
+def _parse_md_table_aligns(sep: str) -> List[Optional[str]]:
+    """Parse a GFM separator row like `| :--- | ---: | :---: |` into a
+    list of alignment hints (`left` / `right` / `center` / None).
+    """
+    cells = _split_md_table_row(sep)
+    out: List[Optional[str]] = []
+    for c in cells:
+        c = c.strip()
+        if c.startswith(":") and c.endswith(":"):
+            out.append("center")
+        elif c.endswith(":"):
+            out.append("right")
+        elif c.startswith(":"):
+            out.append("left")
+        else:
+            out.append(None)
+    return out
+
+
+def _render_md(src: str) -> str:
+    """Markdown renderer for prose-style dashboard content.
+
+    Single source of truth for server-side prose rendering: markdown
+    widget body, ``note`` widget body, and the dashboard summary
+    banner. The JS twin ``_mdInlinePopup`` (defined in the dashboard
+    shell script) mirrors this grammar for client-side popup bodies
+    (info / methodology / row drill-down). Both must be upgraded
+    together when extending the grammar.
+
+    Block-level grammar:
+      * ``# H1`` .. ``##### H5`` headings
+      * blank-line separated paragraphs (lines within a paragraph are
+        joined with a single space)
+      * ``-`` / ``*`` unordered list items, ``1.`` ordered list items;
+        nested via 2-space indent (each two leading spaces opens
+        another list level)
+      * ``> ...`` blockquotes (multi-line; consecutive ``>`` lines are
+        collapsed and re-rendered through this same parser so quotes
+        can carry their own headings, lists, and emphasis)
+      * triple-backtick fenced code blocks (with optional language tag,
+        rendered as ``<pre><code class="lang-<X>">``)
+      * GFM-style tables: header row, ``| --- |`` separator (with
+        optional ``:`` alignment hints), zero or more body rows
+      * ``---`` / ``***`` / ``___`` on a line by itself for horizontal
+        rules
+
+    Inline grammar:
+      ``**bold**``  ``*italic*``  ``~~strike~~``  ``` `code` ```
+      ``[label](url)`` (always opens new tab)
+
+    Anything that does not match is escaped as plain text.
     """
     lines = str(src).splitlines()
-    html: List[str] = []
+    n = len(lines)
+    out: List[str] = []
     buf_para: List[str] = []
-    buf_list: List[str] = []
+    quote_buf: List[str] = []
+    # Parallel stacks: list_stack tracks (kind, indent) per open list,
+    # li_open tracks whether the deepest <li> at that level is still
+    # awaiting its closing tag. Keeping `<li>` open lets a nested
+    # `<ul>` / `<ol>` live inside its parent `<li>`, which is the
+    # only HTML-valid nesting shape.
+    list_stack: List[Tuple[str, int]] = []
+    li_open: List[bool] = []
 
     def flush_para():
         if buf_para:
-            html.append(f"<p>{_md_inline(' '.join(buf_para))}</p>")
+            out.append(f"<p>{_md_inline(' '.join(buf_para))}</p>")
             buf_para.clear()
 
-    def flush_list():
-        if buf_list:
-            items = "".join(f"<li>{_md_inline(li)}</li>"
-                             for li in buf_list)
-            html.append(f"<ul>{items}</ul>")
-            buf_list.clear()
+    def flush_quote():
+        if quote_buf:
+            inner = _render_md("\n".join(quote_buf))
+            out.append(f"<blockquote>{inner}</blockquote>")
+            quote_buf.clear()
 
-    for raw in lines:
-        line = raw.rstrip()
-        stripped = line.lstrip()
-        if stripped.startswith("### "):
-            flush_para(); flush_list()
-            html.append(f"<h3>{_md_inline(stripped[4:])}</h3>")
-        elif stripped.startswith("## "):
-            flush_para(); flush_list()
-            html.append(f"<h2>{_md_inline(stripped[3:])}</h2>")
-        elif stripped.startswith("# "):
-            flush_para(); flush_list()
-            html.append(f"<h1>{_md_inline(stripped[2:])}</h1>")
-        elif stripped.startswith("- ") or stripped.startswith("* "):
-            flush_para()
-            buf_list.append(stripped[2:])
-        elif stripped == "":
-            flush_para(); flush_list()
-        else:
-            flush_list()
-            buf_para.append(stripped)
-    flush_para(); flush_list()
-    return "\n".join(html)
+    def close_top_list():
+        kind, _ = list_stack.pop()
+        if li_open.pop():
+            out.append("</li>")
+        out.append(f"</{kind}>")
+
+    def close_all_lists():
+        while list_stack:
+            close_top_list()
+
+    def push_list_item(kind: str, indent: int, text: str):
+        # Step 1: pop all lists deeper than this indent (with their open
+        # <li>, since the parent <li> at the shallower level is still
+        # awaiting its close).
+        while list_stack and list_stack[-1][1] > indent:
+            close_top_list()
+        # Step 2: at the same indent, close any open <li> sibling, and
+        # if the kind switches (ul -> ol or vice versa) close that list
+        # entirely so we can open a fresh one of the new kind.
+        if list_stack and list_stack[-1][1] == indent:
+            top_kind, _ = list_stack[-1]
+            if top_kind != kind:
+                close_top_list()
+            else:
+                if li_open[-1]:
+                    out.append("</li>")
+                    li_open[-1] = False
+        # Step 3: if no list at this indent (either empty stack or
+        # parent is shallower), open a new nested one INSIDE the
+        # parent <li> (which we deliberately leave open).
+        if not list_stack or list_stack[-1][1] < indent:
+            list_stack.append((kind, indent))
+            li_open.append(False)
+            out.append(f"<{kind}>")
+        # Step 4: open the new <li>; it stays open until either a
+        # sibling closes it or a deeper list nests inside it.
+        out.append(f"<li>{_md_inline(text)}")
+        li_open[-1] = True
+
+    i = 0
+    while i < n:
+        raw = lines[i]
+        stripped = raw.lstrip()
+        indent = len(raw) - len(stripped)
+        s = stripped.rstrip()
+
+        if s.startswith("```"):
+            lang = s[3:].strip()
+            flush_para(); flush_quote(); close_all_lists()
+            buf: List[str] = []
+            i += 1
+            while i < n and not lines[i].lstrip().rstrip().startswith("```"):
+                buf.append(lines[i])
+                i += 1
+            i += 1
+            code = "\n".join(buf)
+            cls = (f' class="lang-{_html_escape(lang)}"'
+                   if lang else "")
+            out.append(
+                f"<pre><code{cls}>{_html_escape(code)}</code></pre>"
+            )
+            continue
+
+        if "|" in s and i + 1 < n and \
+           _RE_MD_TABLE_SEP.match(lines[i + 1].rstrip()):
+            flush_para(); flush_quote(); close_all_lists()
+            hdr = _split_md_table_row(s)
+            aligns = _parse_md_table_aligns(lines[i + 1].rstrip())
+            i += 2
+            rows: List[List[str]] = []
+            while i < n:
+                rs = lines[i].rstrip()
+                if "|" in rs and rs.strip():
+                    rows.append(_split_md_table_row(rs))
+                    i += 1
+                else:
+                    break
+            tbl: List[str] = ['<table class="md-table">']
+            tbl.append("<thead><tr>")
+            for j, h in enumerate(hdr):
+                al = aligns[j] if j < len(aligns) else None
+                style = (f' style="text-align:{al}"' if al else "")
+                tbl.append(f"<th{style}>{_md_inline(h)}</th>")
+            tbl.append("</tr></thead><tbody>")
+            for row in rows:
+                tbl.append("<tr>")
+                for j, c in enumerate(row):
+                    al = aligns[j] if j < len(aligns) else None
+                    style = (f' style="text-align:{al}"' if al else "")
+                    tbl.append(f"<td{style}>{_md_inline(c)}</td>")
+                tbl.append("</tr>")
+            tbl.append("</tbody></table>")
+            out.append("".join(tbl))
+            continue
+
+        if _RE_MD_HR.match(s):
+            flush_para(); flush_quote(); close_all_lists()
+            out.append("<hr/>")
+            i += 1
+            continue
+
+        if s == "":
+            flush_para(); flush_quote(); close_all_lists()
+            i += 1
+            continue
+
+        h_match = _RE_MD_HEADING.match(s)
+        if h_match:
+            flush_para(); flush_quote(); close_all_lists()
+            level = min(len(h_match.group(1)), 5)
+            out.append(
+                f"<h{level}>{_md_inline(h_match.group(2))}</h{level}>"
+            )
+            i += 1
+            continue
+
+        if s.startswith("> "):
+            flush_para(); close_all_lists()
+            quote_buf.append(s[2:])
+            i += 1
+            continue
+        if s == ">":
+            flush_para(); close_all_lists()
+            quote_buf.append("")
+            i += 1
+            continue
+
+        ol_match = _RE_MD_OL_ITEM.match(s)
+        ul_match = _RE_MD_UL_ITEM.match(s)
+        if ol_match or ul_match:
+            flush_para(); flush_quote()
+            kind = "ol" if ol_match else "ul"
+            text = (ol_match.group(2) if ol_match
+                    else ul_match.group(1))
+            snapped = (indent // 2) * 2
+            push_list_item(kind, snapped, text)
+            i += 1
+            continue
+
+        flush_quote(); close_all_lists()
+        buf_para.append(stripped)
+        i += 1
+
+    flush_para(); flush_quote(); close_all_lists()
+    return "\n".join(out)
 
 
 def _render_rows(rows: List[List[Dict[str, Any]]], cols: int) -> str:
@@ -4308,13 +5550,48 @@ def render_dashboard_html(
 
     filter_bar_html = _render_filter_controls(global_filters, inline=False)
 
+    # Optional dashboard-level summary banner. `metadata.summary` is a
+    # short markdown blurb rendered below the filter bar and above the
+    # first row / tab bar - the "today's read" header. Accepts either
+    # a plain markdown string or a {title, body} dict where `title`
+    # becomes a leading `<h2>` (so PRISM can label the banner without
+    # the body needing its own `## Title` line).
+    summary = (manifest.get("metadata") or {}).get("summary")
+    if summary:
+        if isinstance(summary, dict):
+            s_title = summary.get("title")
+            s_body = summary.get("body") or summary.get("text") or ""
+        else:
+            s_title = None
+            s_body = str(summary)
+        if s_body:
+            head = (f"<h2>{_html_escape(str(s_title))}</h2>"
+                    if s_title else "")
+            summary_html = (
+                f'<aside class="summary-banner markdown-body">'
+                f'{head}{_render_md(s_body)}</aside>'
+            )
+        else:
+            summary_html = ""
+    else:
+        summary_html = ""
+
     # Payload
-    # DATASETS should include full {source:..., ...} per manifest
+    # The runtime JS reads DATASETS = PAYLOAD.datasets exclusively; nothing
+    # in DASHBOARD_APP_JS references PAYLOAD.manifest.datasets. So the
+    # canonical dataset copy lives in PAYLOAD.datasets and the manifest
+    # copy in the payload is shipped without its datasets to avoid
+    # serialising the rows twice (would otherwise ~double the HTML size
+    # on data-heavy dashboards). The on-disk manifest.json written by
+    # save_manifest() still includes datasets in full.
     specs = _collect_specs(manifest, chart_specs)
+    datasets = manifest.get("datasets", {}) or {}
+    manifest_for_payload = {k: v for k, v in manifest.items() if k != "datasets"}
+    manifest_for_payload["datasets"] = {}
     payload = {
-        "manifest": manifest,
+        "manifest": manifest_for_payload,
         "specs": specs,
-        "datasets": manifest.get("datasets", {}) or {},
+        "datasets": datasets,
         "themes": {n: t["echarts"] for n, t in THEMES.items()},
         "palettes": {n: {"colors": list(p["colors"]), "kind": p["kind"]}
                       for n, p in PALETTES.items()},
@@ -4358,6 +5635,7 @@ def render_dashboard_html(
             .replace("__COLS__", str(cols))
             .replace("__TAB_BAR__", tab_bar_html)
             .replace("__FILTER_BAR__", filter_bar_html)
+            .replace("__SUMMARY__", summary_html)
             .replace("__TAB_PANELS__", panels_html)
             .replace("__TIMESTAMP__", _html_escape(ts))
             .replace("__VERSION__", VERSION)
@@ -4599,6 +5877,74 @@ def _cell_px(w_cols: int, container_px: int, cols: int, gap_px: int) -> int:
     return int(round(cell * w_cols + (w_cols - 1) * gap_px))
 
 
+def _has_existing_chart_title(t: Any) -> bool:
+    if not t:
+        return False
+    if isinstance(t, list):
+        return any(isinstance(x, dict) and x.get("text") for x in t)
+    if isinstance(t, dict):
+        return bool(t.get("text"))
+    return False
+
+
+def _inject_widget_title_into_option(
+    opt: Dict[str, Any], w: Dict[str, Any]
+) -> Tuple[Dict[str, Any], int]:
+    """Bake the widget's tile title (and subtitle) into the chart option
+    so PNG exports show what the user sees on the dashboard tile.
+
+    The dashboard compiler clears ``opt.title.text`` to avoid double
+    headlines on screen (the tile chrome already shows the title).
+    That same stripping bites every PNG export -- in-browser via
+    ``getDataURL()`` and headless-Chrome via ``save_chart_png``.
+    This helper re-injects the title using GS type styles so the
+    exported PNG has the title visually attached to the chart.
+
+    Returns the (possibly mutated) option and the extra vertical
+    pixels the title block consumes (so the caller can grow the
+    canvas height accordingly and not squeeze the plot area).
+    """
+    title = w.get("title") or ""
+    subtitle = w.get("subtitle") or ""
+    if not title and not subtitle:
+        return opt, 0
+    if _has_existing_chart_title(opt.get("title")):
+        return opt, 0
+    spec = w.get("spec") or {}
+    if isinstance(spec, dict) and spec.get("keep_title"):
+        return opt, 0
+    title_block = {
+        "text": str(title),
+        "subtext": str(subtitle),
+        "left": 16,
+        "top": 10,
+        "textStyle": {
+            "fontFamily": ('Goldman Sans, GS Sans, '
+                            'Helvetica Neue, Arial, sans-serif'),
+            "fontSize": 14, "fontWeight": 600, "color": "#1A1A1A",
+        },
+        "subtextStyle": {
+            "fontFamily": ('Goldman Sans, GS Sans, '
+                            'Helvetica Neue, Arial, sans-serif'),
+            "fontSize": 11, "color": "#595959", "fontStyle": "italic",
+        },
+    }
+    opt["title"] = [title_block]
+    title_px = 26 + (18 if subtitle else 0) + 10
+    grid = opt.get("grid")
+    if isinstance(grid, list):
+        for g in grid:
+            if isinstance(g, dict):
+                cur = g.get("top", 30)
+                cur_n = cur if isinstance(cur, (int, float)) else 30
+                g["top"] = int(cur_n) + title_px
+    elif isinstance(grid, dict):
+        cur = grid.get("top", 30)
+        cur_n = cur if isinstance(cur, (int, float)) else 30
+        grid["top"] = int(cur_n) + title_px
+    return opt, title_px
+
+
 def save_dashboard_pngs(
     manifest: Dict[str, Any],
     chart_specs: Dict[str, Dict[str, Any]],
@@ -4656,7 +6002,13 @@ def save_dashboard_pngs(
                 opt = chart_specs.get(wid) or w.get("option")
                 if not opt or not wid:
                     continue
-                height = int(w.get("h_px", 320))
+                # Bake the tile title into the option so the PNG
+                # actually shows what's on screen. _inject... is a
+                # no-op when there's no widget title or the chart
+                # already provides one (spec.keep_title=True).
+                opt = json.loads(json.dumps(opt))
+                opt, title_px = _inject_widget_title_into_option(opt, w)
+                height = int(w.get("h_px", 320)) + title_px
                 w_cols = int(w.get("w", cols))
                 width = max(
                     min_width,

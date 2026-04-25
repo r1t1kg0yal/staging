@@ -227,28 +227,229 @@ def _apply_typography_to_axes(opt: Dict[str, Any], ctx: BuilderContext):
 # Axis title / sort / dash helpers (used by multiple XY builders)
 # ---------------------------------------------------------------------------
 
+# Approximate average pixel width of a single character at a given font
+# size for the GS Sans / Helvetica stack. 0.62 of font_size is a
+# conservative middle ground for proportional fonts: digits are
+# narrower (~0.55), uppercase wider (~0.7), mixed-case prose averages
+# 0.6-0.65. Used purely for layout pre-sizing; ECharts still measures
+# at render time, so an over-estimate just means a touch more padding.
+_CHAR_W_RATIO = 0.62
+
+# Default cap for category-axis labels on the LEFT (yAxis horizontal
+# bar / bullet) or BOTTOM (xAxis with very long category names). Beyond
+# this, labels are truncated with an ellipsis so the chart stays
+# readable. Override via ``mapping.category_label_max_px``.
+_CATEGORY_LABEL_CAP_PX = 220
+
+# Pixel cost of the rotated axis title's bounding box (font_size + a
+# couple px for stroke). Empirically ECharts allocates roughly the
+# font size plus ~6px slack for a rotated nameTextStyle.
+_ROTATED_TITLE_THICKNESS_PX = 18
+
+# Padding (px) between the longest tick label and the axis title.
+_TITLE_LABEL_PADDING_PX = 8
+
+
+def _estimate_text_px(s: Any, font_size: int = 12) -> int:
+    """Rough pixel-width estimate for a text label at the given font size.
+
+    Used to size grid margins / nameGap so axis titles never overlap
+    long tick labels. Overestimates slightly (we'd rather pad than
+    clip), and returns 0 for empty input.
+    """
+    if s is None:
+        return 0
+    text = str(s)
+    if not text:
+        return 0
+    return int(round(len(text) * font_size * _CHAR_W_RATIO))
+
+
+def _label_font_size(opt: Dict[str, Any], axis_key: str = "yAxis",
+                      default: int = 12) -> int:
+    """Resolve the effective axisLabel.fontSize for an axis. Falls back
+    to opt.textStyle.fontSize and finally `default`. Lists pick element 0."""
+    ax = opt.get(axis_key)
+    if isinstance(ax, list):
+        ax = ax[0] if ax else None
+    if isinstance(ax, dict):
+        al = ax.get("axisLabel") or {}
+        fs = al.get("fontSize")
+        if isinstance(fs, (int, float)) and fs > 0:
+            return int(fs)
+    ts = opt.get("textStyle") or {}
+    fs = ts.get("fontSize")
+    if isinstance(fs, (int, float)) and fs > 0:
+        return int(fs)
+    return default
+
+
+def _layout_long_category_axis(
+    opt: Dict[str, Any],
+    axis_key: str,
+    *,
+    cap_px: int = _CATEGORY_LABEL_CAP_PX,
+    truncate: bool = True,
+) -> int:
+    """Estimate the longest category label on `axis_key`, optionally
+    apply ECharts label truncation at `cap_px`, and return the effective
+    label-region width in pixels. Returns 0 when the axis is missing,
+    not categorical, or has no `data`.
+
+    Truncation is applied as ``axisLabel.width`` + ``overflow: 'truncate'``
+    so over-long labels render as ``"long la..."`` while the tooltip /
+    underlying value remain intact.
+    """
+    ax = opt.get(axis_key)
+    if isinstance(ax, list):
+        ax = ax[0] if ax else None
+    if not isinstance(ax, dict):
+        return 0
+    if ax.get("type") != "category":
+        return 0
+    data = ax.get("data") or []
+    if not data:
+        return 0
+    font_size = _label_font_size(opt, axis_key)
+    raw_max = max(_estimate_text_px(v, font_size) for v in data)
+    if truncate and raw_max > cap_px:
+        al = ax.setdefault("axisLabel", {})
+        al.setdefault("width", cap_px)
+        al.setdefault("overflow", "truncate")
+        al.setdefault("ellipsis", "...")
+        return cap_px
+    return raw_max
+
+
+def _x_category_density_overflow(
+    opt: Dict[str, Any], inner_width_px: int
+) -> bool:
+    """Return True when a horizontal category axis has more total label
+    width than fits in the inner plot width (i.e. ECharts will silently
+    drop labels via the default `interval: 'auto'`)."""
+    ax = opt.get("xAxis")
+    if isinstance(ax, list):
+        ax = ax[0] if ax else None
+    if not isinstance(ax, dict):
+        return False
+    if ax.get("type") != "category":
+        return False
+    data = ax.get("data") or []
+    if len(data) < 2:
+        return False
+    font_size = _label_font_size(opt, "xAxis")
+    total = sum(_estimate_text_px(v, font_size) + 12 for v in data)
+    return total > max(inner_width_px, 1)
+
+
+def _autorotate_x_category_labels(opt: Dict[str, Any],
+                                    ctx: "BuilderContext",
+                                    rotate_deg: int = 30,
+                                    max_n: int = 30) -> None:
+    """When an x-axis category has long labels that don't fit
+    horizontally, rotate them and force ``interval: 0`` so ECharts
+    doesn't silently drop every other label.
+
+    Heuristic (must satisfy ALL):
+      1. category count <= ``max_n`` (default 30). Past that, even
+         rotation gets too dense; let ECharts use ``interval: 'auto'``
+         to thin out the labels (the right call for daily time series
+         with hundreds of bars).
+      2. estimated total label-pixel width (incl. inter-tick padding)
+         exceeds the usable plot width.
+      3. average label length > 5 chars (so 1-3 char labels like
+         tenor codes / months don't trigger rotation).
+
+    Idempotent: if the user has already set ``axisLabel.rotate``, we
+    leave their value alone.
+    """
+    ax = opt.get("xAxis")
+    if isinstance(ax, list):
+        ax = ax[0] if ax else None
+    if not isinstance(ax, dict):
+        return
+    if ax.get("type") != "category":
+        return
+    al = ax.setdefault("axisLabel", {})
+    if "rotate" in al:
+        return
+    data = ax.get("data") or []
+    if len(data) > max_n or len(data) < 2:
+        return
+    avg_len = sum(len(str(v)) for v in data) / len(data)
+    if avg_len < 5:
+        return
+    grid = opt.get("grid") or {}
+    chart_w = max(int(getattr(ctx, "width", 700) or 700), 200)
+    inner_w = chart_w - int(grid.get("left", 76) or 0) - int(grid.get("right", 20) or 0)
+    if not _x_category_density_overflow(opt, inner_w):
+        return
+    al["rotate"] = rotate_deg
+    al["interval"] = 0
+    cap = max(120, inner_w // 6)
+    al.setdefault("width", cap)
+    al.setdefault("overflow", "truncate")
+    al.setdefault("ellipsis", "...")
+
+
+def _bottom_label_lift_px(opt: Dict[str, Any]) -> int:
+    """Vertical pixels consumed by the xAxis tick labels (height for
+    horizontal labels, width * sin(rotate) for rotated labels). Used
+    to size the xAxis title's nameGap and grid.bottom."""
+    import math
+    ax = opt.get("xAxis")
+    if isinstance(ax, list):
+        ax = ax[0] if ax else None
+    if not isinstance(ax, dict):
+        return 0
+    if ax.get("type") != "category":
+        font_size = _label_font_size(opt, "xAxis")
+        return int(font_size + 4)
+    al = ax.get("axisLabel") or {}
+    rotate = int(al.get("rotate") or 0)
+    font_size = _label_font_size(opt, "xAxis")
+    if rotate == 0:
+        return int(font_size + 4)
+    data = ax.get("data") or []
+    raw_max = max((_estimate_text_px(v, font_size) for v in data),
+                   default=0)
+    cap = al.get("width")
+    if isinstance(cap, (int, float)) and cap > 0:
+        raw_max = min(raw_max, int(cap))
+    return int(round(raw_max * abs(math.sin(math.radians(rotate))))) + 4
+
+
 def _apply_axis_titles(opt: Dict[str, Any],
                         mapping: Dict[str, Any],
-                        horizontal: bool = False) -> None:
-    """Set yAxis.name / xAxis.name from mapping['y_title'] / ['x_title'].
+                        horizontal: bool = False,
+                        chart_width: Optional[int] = None) -> None:
+    """Set yAxis.name / xAxis.name from mapping['y_title'] / ['x_title']
+    and size grid margins / nameGap so titles never overlap tick labels.
+
+    Layout pipeline:
+      1. For each category axis, optionally truncate over-long labels
+         (via ``_layout_long_category_axis``) so the label region has
+         a known max width.
+      2. Compute nameGap for each axis title based on the actual label
+         dimension (label width for left/right yAxis, label height-
+         after-rotation for bottom xAxis).
+      3. Bump grid.left / grid.right / grid.bottom to make sure the
+         rotated axis title doesn't get clipped at the canvas edge.
 
     For horizontal=True, y_title applies to the value axis (xAxis on screen)
     and x_title applies to the category axis (yAxis on screen).
 
-    y_title_right (if present) sets the right-axis name for dual-axis charts.
-
-    Defaults chosen to avoid the rotated axis title colliding with wide
-    tick labels (e.g. "50,000" or "2.38%"). For Y-axis the default gap
-    is 52 px (was 35) and for X-axis 36 (was 30). Override per-spec
-    with ``mapping.y_title_gap`` / ``mapping.x_title_gap`` or via the
-    ``grid`` knob.
+    Override per-spec with ``mapping.y_title_gap`` / ``mapping.x_title_gap``
+    / ``mapping.y_title_right_gap`` / ``mapping.category_label_max_px``.
     """
     y_title = mapping.get("y_title")
     x_title = mapping.get("x_title")
     y_title_right = mapping.get("y_title_right")
-    y_gap = mapping.get("y_title_gap", 56)
-    x_gap = mapping.get("x_title_gap", 40)
+    user_y_gap = mapping.get("y_title_gap")
+    user_x_gap = mapping.get("x_title_gap")
     y_gap_right = mapping.get("y_title_right_gap", 52)
+    cap_px = int(mapping.get("category_label_max_px",
+                              _CATEGORY_LABEL_CAP_PX))
 
     def _set(axis_key: str, name: str, gap: int,
               idx: int = 0) -> None:
@@ -263,13 +464,39 @@ def _apply_axis_titles(opt: Dict[str, Any],
             ax["nameLocation"] = "middle"
             ax["nameGap"] = gap
 
+    grid = opt.get("grid") if isinstance(opt.get("grid"), dict) else None
+
+    # ---- size yAxis nameGap from category labels (regardless of orientation)
+    # If the yAxis is type=category, its tick labels are wider than the
+    # default 56 px gap can accommodate. Truncate over-long labels and
+    # size nameGap to clear the longest one.
+    y_label_room_px = _layout_long_category_axis(
+        opt, "yAxis", cap_px=cap_px, truncate=True
+    )
+    y_cat_gap = (y_label_room_px + _TITLE_LABEL_PADDING_PX +
+                 _ROTATED_TITLE_THICKNESS_PX) if y_label_room_px else 0
+
+    # ---- size xAxis nameGap from category-label height (rotation-aware)
+    x_label_lift_px = _bottom_label_lift_px(opt)
+    x_cat_gap = (x_label_lift_px + _TITLE_LABEL_PADDING_PX +
+                  _ROTATED_TITLE_THICKNESS_PX)
+
+    # ---- resolve final per-axis gaps -------------------------------------
     if horizontal:
-        # value axis is xAxis, category axis is yAxis
+        # category axis is yAxis; value axis is xAxis.
+        x_gap = user_x_gap if user_x_gap is not None else max(y_cat_gap, 56)
+        y_gap = user_y_gap if user_y_gap is not None else max(x_cat_gap, 40)
+
         if y_title:
-            _set("xAxis", y_title, x_gap)
+            _set("xAxis", y_title, y_gap)
         if x_title:
-            _set("yAxis", x_title, y_gap)
+            _set("yAxis", x_title, x_gap)
     else:
+        # category axis is xAxis (or none); yAxis is value (or also category
+        # in heatmap).
+        x_gap = user_x_gap if user_x_gap is not None else max(x_cat_gap, 40)
+        y_gap = user_y_gap if user_y_gap is not None else max(y_cat_gap, 56)
+
         if y_title:
             _set("yAxis", y_title, y_gap)
         if x_title:
@@ -278,20 +505,34 @@ def _apply_axis_titles(opt: Dict[str, Any],
     if y_title_right:
         _set("yAxis", y_title_right, y_gap_right, idx=1)
 
-    # When axis titles are set, the grid margins need to be bumped so the
-    # title sits clear of axis tick labels without being clipped at the
-    # canvas edge. The base grid (bottom: 84, left: 76) is sized for
-    # labels-only; titles need ~40-50 more pixels in the same direction
-    # because ECharts positions axis names FURTHER below the bounding
-    # box than `nameGap` would suggest at face value (empirically: with
-    # bottom=100 a nameGap of 40 still clips the title; bottom needs to
-    # be ~120-130 for a nameGap of 40 to render fully).
-    grid = opt.get("grid")
-    if isinstance(grid, dict):
-        if (x_title or (horizontal and y_title)):
-            grid["bottom"] = max(int(grid.get("bottom", 84)), 130)
-        if (y_title or (horizontal and x_title)):
-            grid["left"] = max(int(grid.get("left", 76)), 100)
+    # ---- size grid margins to fit titles + labels -----------------------
+    # ECharts positions axis names OUTSIDE the grid box and below /
+    # left of the label region. Empirically, with containLabel: True,
+    # the bottom margin needed for a non-clipped xAxis name is roughly
+    # ``nameGap + 80`` (varies 60-90 across font sizes / rotations);
+    # the left margin needs the rotated title bounding box plus a
+    # small canvas pad. Without an axis title, we still need to clear
+    # rotated labels.
+    if grid is not None:
+        # Resolve which mapping title corresponds to which screen axis.
+        # bottom_axis_title: the axis name shown at the BOTTOM of the
+        #   chart (xAxis name in screen orientation).
+        # left_axis_title:   the axis name shown on the LEFT of the
+        #   chart (yAxis name in screen orientation).
+        bottom_axis_title = y_title if horizontal else x_title
+        left_axis_title = x_title if horizontal else y_title
+        bottom_axis_gap = y_gap if horizontal else x_gap
+
+        if bottom_axis_title:
+            need_bottom = int(bottom_axis_gap) + 80
+            grid["bottom"] = max(int(grid.get("bottom", 84)),
+                                  need_bottom, 100)
+        elif x_label_lift_px > 30:
+            grid["bottom"] = max(int(grid.get("bottom", 84)),
+                                  x_label_lift_px + 30)
+        if left_axis_title:
+            need_left = _ROTATED_TITLE_THICKNESS_PX + 16
+            grid["left"] = max(int(grid.get("left", 76)), need_left)
         if y_title_right:
             grid["right"] = max(int(grid.get("right", 20)), 76)
 
@@ -743,7 +984,10 @@ def build_bar(df, mapping: Dict[str, Any], ctx: BuilderContext, horizontal: bool
     opt["series"] = series
     opt["legend"]["data"] = legend_names
 
-    _apply_axis_titles(opt, mapping, horizontal=horizontal)
+    if not horizontal:
+        _autorotate_x_category_labels(opt, ctx)
+    _apply_axis_titles(opt, mapping, horizontal=horizontal,
+                        chart_width=ctx.width)
     _apply_x_sort(opt, mapping,
                     axis_key="yAxis" if horizontal else "xAxis")
     _apply_typography_to_axes(opt, ctx)
@@ -932,11 +1176,22 @@ def build_heatmap(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str,
         "top": "center",
         "inRange": {"color": list(seq_colors)},
     }]
+    # The vertical visualMap legend on the right (~36 px wide + ticks)
+    # needs grid clearance, otherwise the rightmost cell column is
+    # half-covered. A 76 px grid.right is the empirically-derived
+    # minimum for the default styling.
+    opt["grid"]["right"] = max(int(opt["grid"].get("right", 20)), 76)
     opt["series"] = [{
         "name": str(val), "type": "heatmap", "data": cells,
         "label": {"show": False},
         "emphasis": {"itemStyle": {"shadowBlur": 6, "shadowColor": "rgba(0,0,0,0.3)"}},
     }]
+    # Long y-category labels would push the heatmap matrix far to the
+    # right; truncation keeps the plot area stable.
+    _layout_long_category_axis(opt, "yAxis")
+    _autorotate_x_category_labels(opt, ctx)
+    _apply_axis_titles(opt, mapping, horizontal=False,
+                        chart_width=ctx.width)
     _apply_typography_to_axes(opt, ctx)
     return opt
 
@@ -1021,6 +1276,8 @@ def build_boxplot(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str,
           "symbolSize": 6, "emphasis": {"focus": "series"}},
     ]
     opt["legend"]["data"] = [str(y), "outliers"]
+    _autorotate_x_category_labels(opt, ctx)
+    _apply_axis_titles(opt, mapping, horizontal=False, chart_width=ctx.width)
     _apply_typography_to_axes(opt, ctx)
     return opt
 

@@ -38,6 +38,24 @@ across the gallery.
                         colors, all 9 filter types on one dataset, bond
                         universe screener with row_click.detail modal
                         (stats / markdown / charts / sub-table sections).
+    bond_carry_roll     Carry/roll scatter where every point is
+                        clickable: chart click_popup with rich detail
+                        sections (per-bond stats, issuer blurb, spread
+                        + price history filtered by CUSIP, recent
+                        events). Plus simple-mode click popups on a
+                        bar of top names and a sector summary.
+    news_wrap           Text-heavy news desk: summary banner, six
+                        semantic note kinds, sortable headlines table
+                        with full-body markdown drilldown, per-asset
+                        commentary, calendar + reading list.
+    fomc_brief          Document-first FOMC dashboard: statement diff
+                        narrative, minutes excerpts (blockquotes), Fed
+                        speakers table with row-click verbatim quote
+                        modal + hawk-dove bar chart, dot plot panel.
+    research_feed       Substack-style aggregator: featured + theme
+                        notes up top, curated reading list, full
+                        article feed with row-click drilldown surfacing
+                        each piece's full markdown body.
 
 All data is synthetic and deterministic (SEED-controlled). Every demo
 follows the PRISM pattern: pull DataFrame(s), drop into a manifest, call
@@ -445,6 +463,41 @@ def build_rates_monitor(out_dir: Path) -> Dict[str, Any]:
             "refresh_frequency": "daily",
             "refresh_enabled": True,
             "tags": ["rates", "policy", "global"],
+            "summary": {
+                "title": "Today's read",
+                "body": (
+                    "Front-end has richened ~6bp into the close on a "
+                    "softer print and a dovish-leaning Fed speaker. "
+                    "The curve **bull-steepened**, with 2s10s widening "
+                    "out of the inversion zone for the first time in "
+                    "three weeks.\n\n"
+                    "1. 2Y -6bp, 10Y -3bp: classic bull-steepener\n"
+                    "2. 5s30s flatter on long-end demand into auction\n"
+                    "3. Real-yield curve barely moved; the move is "
+                    "predominantly nominal / breakeven-driven\n\n"
+                    "> Watch the 4.10% 10Y level into tomorrow's PCE; "
+                    "a clean break opens the door to 4.00% as the "
+                    "next pivot."
+                ),
+            },
+            "methodology": (
+                "## Sources\n\n"
+                "* US Treasury OTR yields (FRED H.15)\n"
+                "* Global central-bank policy rates (BIS, ECB SDW, "
+                "BoE Bankstats, BoJ statistics)\n\n"
+                "## Construction\n\n"
+                "* Curve points are end-of-day actively-traded OTR "
+                "Treasuries\n"
+                "* Spreads (2s10s, 5s30s) are simple cash differences "
+                "in basis points\n"
+                "* 10Y real yield = 10Y nominal minus 10Y breakeven\n"
+                "* Cut probabilities are derived from FFR futures "
+                "settlement (CME FedWatch methodology)\n\n"
+                "## Refresh\n\n"
+                "* Daily after US cash close (~16:00 ET)\n"
+                "* Curve and CB rates land independently; partial "
+                "refreshes flag the affected widgets only"
+            ),
         },
         "datasets": datasets,
         "filters": [
@@ -498,6 +551,31 @@ def build_rates_monitor(out_dir: Path) -> Dict[str, Any]:
                           "title": "UST yield curve"}},
                 ],
                 [
+                    {"widget": "note", "id": "n_thesis", "w": 6,
+                      "kind": "thesis",
+                      "title": "Bull-steepener resumes",
+                      "body": (
+                          "The curve is **bull-steepening** for the "
+                          "third session in a row. Front-end demand "
+                          "is led by real-money buyers re-engaging "
+                          "after the FOMC; long-end is range-bound.\n\n"
+                          "1. 2Y -6bp on the day, -18bp on the week\n"
+                          "2. 10Y -3bp on the day, -9bp on the week\n"
+                          "3. Spread widening primarily front-led, "
+                          "consistent with a *priced-in cut* trade")},
+                    {"widget": "note", "id": "n_watch", "w": 6,
+                      "kind": "watch",
+                      "title": "Levels to watch",
+                      "body": (
+                          "| Level | Significance |\n"
+                          "|---|---|\n"
+                          "| 4.10% 10Y | 50dma; clean break opens 4.00% |\n"
+                          "| -50bp 2s10s | recession signal floor |\n"
+                          "| 4.50% 2Y | terminal-rate-implied ceiling |\n\n"
+                          "Tomorrow's core PCE is the key catalyst; "
+                          "consensus is 0.2% m/m / 2.7% y/y.")},
+                ],
+                [
                     {"widget": "chart", "id": "spread",
                       "w": 12, "h_px": 280,
                       "spec": {
@@ -513,6 +591,29 @@ def build_rates_monitor(out_dir: Path) -> Dict[str, Any]:
                                 "color": "#c53030", "opacity": 0.08,
                                 "label": "Inverted"},
                           ]}},
+                ],
+                [
+                    {"widget": "note", "id": "n_risk", "w": 6,
+                      "kind": "risk",
+                      "title": "Tail risk",
+                      "body": (
+                          "A hot core PCE print (>0.3% m/m) would "
+                          "likely reverse the front-end rally and put "
+                          "2Y yields back through 4.40%. The pain "
+                          "trade is a hawkish *re-flattening* into a "
+                          "long-only book that has been adding "
+                          "duration on the cuts narrative.")},
+                    {"widget": "note", "id": "n_context", "w": 6,
+                      "kind": "context",
+                      "title": "Backdrop",
+                      "body": (
+                          "Positioning into PCE is **light** vs the "
+                          "5Y average; CFTC futures show specs net "
+                          "short ~140k 10Y contracts (-0.5z). "
+                          "Real-money long base from Q1 has largely "
+                          "been monetized, so a hawkish surprise has "
+                          "less stop-out risk than it did six weeks "
+                          "ago.")},
                 ],
             ]},
             {"id": "detail", "label": "US curve detail",
@@ -551,11 +652,30 @@ def build_rates_monitor(out_dir: Path) -> Dict[str, Any]:
                 ],
                 [
                     {"widget": "markdown", "id": "method", "w": 12,
-                      "content": ("### Method\n"
-                                    "Synthetic UST panel. Brush the "
-                                    "curve on the Overview tab to "
-                                    "filter the spread chart by date "
-                                    "range.")},
+                      "content": (
+                          "### Method\n\n"
+                          "Synthetic UST panel. **Brush** the curve "
+                          "on the Overview tab to filter the spread "
+                          "chart by date range.\n\n"
+                          "#### Reading the panel\n\n"
+                          "1. The 2Y/10Y line carries the most "
+                          "information about Fed expectations.\n"
+                          "2. The 5s30s spread is the cleanest "
+                          "duration-only barometer.\n"
+                          "3. The real-yield series strips inflation "
+                          "out and is closer to *true cost of capital*.\n\n"
+                          "#### Reference levels\n\n"
+                          "| Series | Threshold | Meaning |\n"
+                          "|---|---:|---|\n"
+                          "| 2s10s | `0bp` | flat -> recession watch |\n"
+                          "| 5s30s | `+50bp` | normal carry regime |\n"
+                          "| 10Y real | `+2.0%` | restrictive territory |\n\n"
+                          "> Synthetic data; do not trade off this "
+                          "panel. Real GS data is plumbed in via the "
+                          "`rates` dataset reference.\n\n"
+                          "Skip the dashed annotations on the spread "
+                          "chart -- those are ~~policy targets~~ "
+                          "shape thresholds, not central-bank levels.")},
                 ],
             ]},
             {"id": "macro", "label": "US macro overlay",
@@ -870,6 +990,36 @@ def build_fomc_monitor(out_dir: Path) -> Dict[str, Any]:
             "refresh_enabled": True,
             "tags": ["rates", "policy", "fed"],
             "version": "1.0.0",
+            "methodology": {
+                "title": "FOMC monitor methodology",
+                "body": (
+                    "## Cut probability gauge\n\n"
+                    "Implied probability that the Fed delivers a 25bp "
+                    "cut at the next meeting. Derived from the front-"
+                    "month Fed Funds futures contract using the CME "
+                    "FedWatch convention.\n\n"
+                    "## FFR path candlestick\n\n"
+                    "Each candle is one Fed Funds futures contract: "
+                    "open / high / low / close = the implied effective "
+                    "rate over the contract's reference month. Reads "
+                    "left-to-right as the market-implied policy path.\n\n"
+                    "## Dot plot vs realised\n\n"
+                    "Dashed line is the median SEP dot at the most "
+                    "recent quarterly meeting. Solid line is realised "
+                    "EFFR. Gap between them is the SEP-vs-market "
+                    "policy disagreement.\n\n"
+                    "## Voter hawk-dove radar\n\n"
+                    "Compositional score across five dimensions "
+                    "(growth, inflation, employment, financial "
+                    "conditions, balance sheet) sourced from public "
+                    "speeches in the past 60 days. Pure heuristic; not "
+                    "a formal scoring model.\n\n"
+                    "## Decision calendar\n\n"
+                    "One cell per FOMC meeting, color-coded by the "
+                    "decision (hike / hold / cut). Hover for the "
+                    "statement summary."
+                ),
+            },
         },
         "header_actions": [
             {"label": "FOMC calendar",
@@ -1461,6 +1611,28 @@ def build_equity_deep_dive(out_dir: Path) -> Dict[str, Any]:
             "refresh_enabled": True,
             "tags": ["equity", "single_name"],
             "version": "1.0.0",
+            "methodology": (
+                "## Price + volume\n\n"
+                "Daily OHLC bars with overlaid volume; dollar "
+                "volume not adjusted for splits.\n\n"
+                "## Earnings vs consensus\n\n"
+                "Reported EPS minus the consensus median in the "
+                "5 trading days before announcement (Visible Alpha). "
+                "Bars are absolute USD; tooltip shows percent surprise.\n\n"
+                "## Analyst ratings distribution\n\n"
+                "Snapshot of buy / hold / sell counts, refreshed "
+                "weekly. Conviction-weighted is excluded; treat each "
+                "analyst equally.\n\n"
+                "## Beta regression\n\n"
+                "OLS of daily log returns vs SPX over a 2Y rolling "
+                "window. Outliers >3sigma kept (no Winsorisation).\n\n"
+                "## Valuation\n\n"
+                "Forward P/E percentile rank vs the stock's own "
+                "5Y range; sector median shown as a dashed reference.\n\n"
+                "## Return distribution\n\n"
+                "Histogram of daily log returns over the displayed "
+                "lookback. Bin width = 25bp, no smoothing."
+            ),
         },
         "header_actions": [
             {"label": "Company filings", "icon": "\u2197",
@@ -2179,6 +2351,24 @@ def build_markets_wrap(out_dir: Path) -> Dict[str, Any]:
             "refresh_enabled": True,
             "tags": ["cross_asset", "eod"],
             "version": "1.0.0",
+            "methodology": (
+                "## Coverage\n\n"
+                "End-of-day prints for the major asset classes: "
+                "equities (regional + sector), rates (UST + global), "
+                "FX (DXY + G10), commodities (energy + metals + ags), "
+                "and credit (IG + HY).\n\n"
+                "## Returns\n\n"
+                "* Single-day moves are absolute price changes (or "
+                "basis points for yields)\n"
+                "* WTD / MTD / YTD tiles use simple price returns; "
+                "FX is quote-currency depreciation ('+' = USD up)\n\n"
+                "## Sector + regional bars\n\n"
+                "Cap-weighted within sector; equal-weighted across "
+                "regions for the global panel.\n\n"
+                "## Notes\n\n"
+                "Pre-market / overnight moves are excluded. "
+                "Snapshot is a single timestamp, not VWAP."
+            ),
         },
         "datasets": {
             "eq":  df_eq,  "sec": df_sec, "rt": df_rt,
@@ -2729,6 +2919,31 @@ def build_screener_studio(out_dir: Path) -> Dict[str, Any]:
                          "rich-modal drill-down."),
         "theme": "gs_clean",
         "palette": "gs_primary",
+        "metadata": {
+            "data_as_of": "2026-04-24T16:30:00Z",
+            "generated_at": "2026-04-24T16:35:00Z",
+            "sources": ["GS Market Data", "FRED"],
+            "tags": ["rates", "credit", "screener"],
+            "methodology": (
+                "## RV screen\n\n"
+                "Each row is a relative-value pair. Z-score is the "
+                "current spread minus the rolling 1Y mean, divided by "
+                "its rolling 1Y stdev. Cell colours map to z bins:\n\n"
+                "* `z >= 2`  rich (blue)\n"
+                "* `z <= -2` cheap (gold)\n"
+                "* `|z| < 0.5` neutral (white)\n\n"
+                "## Filter library\n\n"
+                "All nine filter types bound to a single synthetic "
+                "dataset so the wiring of each control type is "
+                "demonstrable in isolation. No live data; for shape "
+                "reference only.\n\n"
+                "## Bond universe\n\n"
+                "IG + HY USD bonds with daily indicative spreads "
+                "(GS market data). Row click opens a detail modal: "
+                "issuer blurb, recent events, price history, and "
+                "issuer-level peer table."
+            ),
+        },
         "datasets": {
             "rv": df_rv,
             "rates": df_rates,
@@ -3201,6 +3416,2195 @@ def build_screener_studio(out_dir: Path) -> Dict[str, Any]:
 
 
 # =============================================================================
+# DEMO: bond_carry_roll  (chart click_popup -- click a scatter point for
+#                          per-bond detail)
+# =============================================================================
+#
+# Stress-tests the chart `click_popup` feature: a carry / roll scatter
+# across the IG+HY bond universe where every point is interactive.
+# Clicking a point opens a per-bond modal with stats, an issuer blurb,
+# spread + price history charts filtered to that CUSIP, and a recent-
+# events sub-table filtered to that issuer. Same modal grammar as
+# `row_click`, applied to chart points.
+#
+# Tab 1 -- Carry & roll: scatter (rich popup) + bar of top combined
+#          carry/roll names (simple popup with a few key stats).
+# Tab 2 -- Sector view: avg-carry-by-sector bar (sector summary popup)
+#          + sector weights donut + bond universe table for context.
+
+
+def _pull_bond_carry_roll() -> pd.DataFrame:
+    """Adds toy carry_bp / roll_bp / total_bp / financing_bp columns
+    onto the main bond table. The numbers are deliberately illustrative
+    (carry tracks rating, roll tracks duration) rather than market-
+    accurate; the demo's purpose is the click interaction, not the
+    valuation methodology."""
+    main = _pull_bond_main()
+    rng = random.Random(SEED + 700)
+    financing_pct = 4.20
+    carry_bp, roll_bp = [], []
+    for _, row in main.iterrows():
+        c = (row["ytm_pct"] - financing_pct) * 100 + rng.uniform(-8, 8)
+        d = row["duration_yrs"]
+        spread_factor = max(0.4, min(2.5, row["spread_bp"] / 120))
+        r = (15 + d * 4.5 + (spread_factor - 1) * 18
+              + rng.uniform(-6, 6))
+        carry_bp.append(round(c, 1))
+        roll_bp.append(round(r, 1))
+    main["carry_bp"] = carry_bp
+    main["roll_bp"] = roll_bp
+    main["total_bp"] = [round(c + r, 1)
+                          for c, r in zip(carry_bp, roll_bp)]
+    main["financing_bp"] = round(financing_pct * 100, 1)
+    return main
+
+
+def _pull_bond_sector_summary(carry_roll_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per sector with average carry/roll/total and headline-
+    line counts -- powers Tab 2 click popups (sector-level summary
+    instead of bond-level)."""
+    grouped = (carry_roll_df.groupby("sector")
+                .agg(avg_carry_bp=("carry_bp", "mean"),
+                       avg_roll_bp=("roll_bp", "mean"),
+                       avg_total_bp=("total_bp", "mean"),
+                       avg_duration=("duration_yrs", "mean"),
+                       avg_spread_bp=("spread_bp", "mean"),
+                       avg_ytm_pct=("ytm_pct", "mean"),
+                       n_bonds=("cusip", "count"))
+                .reset_index())
+    for c in ("avg_carry_bp", "avg_roll_bp", "avg_total_bp",
+                "avg_spread_bp"):
+        grouped[c] = grouped[c].round(1)
+    for c in ("avg_duration", "avg_ytm_pct"):
+        grouped[c] = grouped[c].round(2)
+    return grouped
+
+
+def build_bond_carry_roll(out_dir: Path) -> Dict[str, Any]:
+    """Carry / roll scatter dashboard. The main demo for chart
+    click_popup."""
+    bonds = _pull_bond_carry_roll()
+    sectors = _pull_bond_sector_summary(bonds)
+    hist = _pull_bond_price_history()
+    blurbs = _pull_bond_issuer_blurbs()
+    events = _pull_bond_recent_events()
+
+    main_with_blurb = bonds.merge(blurbs, on="issuer", how="left")
+    top_total = (bonds.sort_values("total_bp", ascending=False)
+                  .head(10).copy())
+
+    manifest = {
+        "schema_version": 1,
+        "id": "bond_carry_roll",
+        "title": "Bond carry & roll screen",
+        "description": ("Click any point on the scatter to see the "
+                         "bond's full profile -- demoing chart "
+                         "click_popup."),
+        "theme": "gs_clean", "palette": "gs_primary",
+        "metadata": {
+            "data_as_of": "2026-04-22T20:00:00Z",
+            "generated_at": "2026-04-22T21:00:00Z",
+            "sources": ["GS Market Data (synthetic)"],
+            "summary": {
+                "title": "How to read this screen",
+                "body": (
+                    "Each point is a corporate bond plotted by **carry** "
+                    "(YTM minus 1M financing, in bp) versus **roll** "
+                    "(rolldown along the curve, in bp). Names in the "
+                    "**upper-right quadrant** are the highest combined "
+                    "carry+roll trades; names in the **lower-left** are "
+                    "the cheapest legs to fund.\n\n"
+                    "**Click any point** to open a modal with that "
+                    "bond's stats, issuer blurb, recent spread + price "
+                    "history, and event log. The same interaction is "
+                    "wired on the bar charts in Tabs 1 and 2."),
+            },
+            "methodology": (
+                "## Definitions\n\n"
+                "* **Carry** = `(YTM - 1M financing rate) * 100`, in bp\n"
+                "* **Roll** = approximated rolldown gain along the curve "
+                "based on duration and current spread\n"
+                "* **Total** = carry + roll, the headline 1-year "
+                "expected ex-mark-to-market return in bp\n\n"
+                "## Universe\n\n"
+                "20 corporate bonds spanning IG and HY, deliberately "
+                "selected to span sectors (Tech, Financials, Energy, "
+                "Consumer, Healthcare, Utilities, Media, REIT)."),
+        },
+
+        "datasets": {
+            "bonds": main_with_blurb,
+            "sectors": sectors,
+            "top_total": top_total,
+            "bond_hist": hist,
+            "bond_events": events,
+        },
+
+        "filters": [
+            {"id": "rating_grade", "type": "radio", "default": "All",
+              "options": ["All", "IG", "HY"],
+              "all_value": "All",
+              "label": "Rating grade",
+              "field": "rating",
+              "scope": "global",
+              "targets": ["scatter_carry_roll"],
+              "description": ("All shows everything; IG keeps "
+                                "investment-grade ratings (BBB- and "
+                                "above); HY keeps speculative-grade "
+                                "(BB+ and below)."),
+              "popup": {"title": "Rating grade filter",
+                          "body": ("This filter is a placeholder for the "
+                                    "demo -- the radio is wired to the "
+                                    "scatter only. In a production build "
+                                    "you'd target every widget that reads "
+                                    "from the bond universe.")}},
+        ],
+
+        "layout": {"kind": "tabs", "cols": 12, "tabs": [
+            # --- Tab 1: scatter + bar of top names -----------------------
+            {"id": "carry_roll", "label": "Carry & roll",
+              "description": ("Scatter every bond by carry (x) and roll "
+                                "(y); click any point for the bond "
+                                "profile."),
+              "rows": [
+                  [{"widget": "note", "id": "n_thesis", "w": 12,
+                     "kind": "thesis", "title": "Where to look",
+                     "body": (
+                         "The **scatter is the primary chart** -- carry "
+                         "on x, roll on y, colored by sector. Bonds "
+                         "drift upper-right as combined return rises.\n\n"
+                         "1. **Tech / Healthcare** anchor the IG cluster "
+                         "in the lower-left -- low carry, low roll.\n"
+                         "2. **Financials** drift north on duration\n"
+                         "3. **Consumer HY (Tesla, Netflix)** sits in the "
+                         "upper-right with the highest combined "
+                         "carry+roll -- earn the most, but *click them* "
+                         "to see why.")}],
+                  [{"widget": "chart", "id": "scatter_carry_roll", "w": 8,
+                     "h_px": 480,
+                     "title": "Carry vs roll, by sector",
+                     "subtitle": ("Click any point to open the bond's "
+                                    "profile."),
+                     "footer": ("Total return = carry + roll, ignoring "
+                                 "MTM. Synthetic illustrative data."),
+                     "spec": {
+                         "chart_type": "scatter",
+                         "dataset": "bonds",
+                         "mapping": {"x": "carry_bp", "y": "roll_bp",
+                                       "color": "sector",
+                                       "x_title": "Carry (bp)",
+                                       "y_title": "Roll (bp)"},
+                         "annotations": [
+                             {"type": "vline", "x": 100,
+                               "label": "100bp carry", "style": "dashed",
+                               "color": "#999"},
+                             {"type": "hline", "y": 30,
+                               "label": "30bp roll", "style": "dashed",
+                               "color": "#999"},
+                         ],
+                     },
+                     "click_popup": {
+                         "title_field": "issuer",
+                         "subtitle_template": (
+                             "CUSIP {cusip} \u00B7 {sector} \u00B7 "
+                             "{coupon_pct:number:2}% coupon \u00B7 "
+                             "matures {maturity}"),
+                         "detail": {
+                             "wide": True,
+                             "sections": [
+                                 {"type": "stats",
+                                   "fields": [
+                                       {"field": "carry_bp",
+                                         "label": "Carry",
+                                         "format": "number:1",
+                                         "suffix": " bp",
+                                         "signed_color": True},
+                                       {"field": "roll_bp",
+                                         "label": "Roll",
+                                         "format": "number:1",
+                                         "suffix": " bp",
+                                         "signed_color": True},
+                                       {"field": "total_bp",
+                                         "label": "Total",
+                                         "format": "number:1",
+                                         "suffix": " bp",
+                                         "signed_color": True},
+                                       {"field": "ytm_pct",
+                                         "label": "YTM",
+                                         "format": "number:2",
+                                         "suffix": "%"},
+                                       {"field": "duration_yrs",
+                                         "label": "Duration",
+                                         "format": "number:2",
+                                         "suffix": " yrs"},
+                                       {"field": "spread_bp",
+                                         "label": "OAS",
+                                         "format": "number:0",
+                                         "suffix": " bp"},
+                                       {"field": "rating",
+                                         "label": "Rating"},
+                                   ]},
+                                 {"type": "markdown",
+                                   "template": (
+                                       "**{issuer}** \u00B7 *{sector}* "
+                                       "\u00B7 rated `{rating}`.\n\n"
+                                       "{blurb}\n\n"
+                                       "Coupon {coupon_pct:number:3}%, "
+                                       "matures **{maturity}** "
+                                       "({years_to_maturity:number:1}y). "
+                                       "OAS spread "
+                                       "**{spread_bp:number:0} bp** vs "
+                                       "the UST curve.")},
+                                 {"type": "chart",
+                                   "title": ("OAS spread history "
+                                               "(180 biz days)"),
+                                   "chart_type": "line",
+                                   "dataset": "bond_hist",
+                                   "row_key": "cusip",
+                                   "filter_field": "cusip",
+                                   "mapping": {"x": "date",
+                                                 "y": "spread_bp",
+                                                 "y_title": "Spread (bp)"},
+                                   "height": 220},
+                                 {"type": "chart",
+                                   "title": ("Clean price history "
+                                               "(180 biz days)"),
+                                   "chart_type": "line",
+                                   "dataset": "bond_hist",
+                                   "row_key": "cusip",
+                                   "filter_field": "cusip",
+                                   "mapping": {"x": "date",
+                                                 "y": "price",
+                                                 "y_title": ("Clean "
+                                                              "price")},
+                                   "height": 200},
+                                 {"type": "table",
+                                   "title": "Recent events",
+                                   "dataset": "bond_events",
+                                   "row_key": "issuer",
+                                   "filter_field": "issuer",
+                                   "max_rows": 6,
+                                   "columns": [
+                                       {"field": "date", "label": "Date"},
+                                       {"field": "event",
+                                         "label": "Event"},
+                                       {"field": "reaction",
+                                         "label": ("Spread "
+                                                    "reaction")},
+                                   ]},
+                             ],
+                         },
+                     }},
+                    {"widget": "chart", "id": "bar_top_total", "w": 4,
+                     "h_px": 480,
+                     "title": "Top 10 by carry + roll",
+                     "subtitle": ("Same data, different view. Click a "
+                                    "bar for a quick stat sheet."),
+                     "spec": {
+                         "chart_type": "bar_horizontal",
+                         "dataset": "top_total",
+                         "mapping": {"x": "total_bp", "y": "issuer",
+                                       "x_title": ("Carry + roll "
+                                                    "(bp)")},
+                     },
+                     "click_popup": {
+                         "title_field": "issuer",
+                         "subtitle_template": (
+                             "{sector} \u00B7 {rating} \u00B7 matures "
+                             "{maturity}"),
+                         "popup_fields": [
+                             {"field": "total_bp", "label": "Total",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "carry_bp", "label": "Carry",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "roll_bp", "label": "Roll",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "ytm_pct", "label": "YTM",
+                               "format": "number:2", "suffix": "%"},
+                             {"field": "duration_yrs",
+                               "label": "Duration",
+                               "format": "number:2", "suffix": " yrs"},
+                             {"field": "spread_bp", "label": "OAS",
+                               "format": "number:0", "suffix": " bp"},
+                         ]}},
+                  ]]},
+            # --- Tab 2: sector view + universe table --------------------
+            {"id": "sectors", "label": "Sector view",
+              "description": ("Same universe, aggregated by sector "
+                                "(click bars or pie slices for the "
+                                "sector summary)."),
+              "rows": [
+                  [{"widget": "chart", "id": "bar_sector_avg", "w": 8,
+                     "h_px": 360,
+                     "title": "Average carry + roll, by sector",
+                     "subtitle": "Click a bar for the sector summary.",
+                     "spec": {
+                         "chart_type": "bar",
+                         "dataset": "sectors",
+                         "mapping": {"x": "sector", "y": "avg_total_bp",
+                                       "y_title": ("Avg carry + roll "
+                                                    "(bp)")},
+                     },
+                     "click_popup": {
+                         "title_field": "sector",
+                         "subtitle_template": (
+                             "{n_bonds:integer} bonds \u00B7 avg "
+                             "duration {avg_duration:number:1}y"),
+                         "popup_fields": [
+                             {"field": "avg_total_bp",
+                               "label": "Avg total",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "avg_carry_bp",
+                               "label": "Avg carry",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "avg_roll_bp",
+                               "label": "Avg roll",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "avg_ytm_pct",
+                               "label": "Avg YTM",
+                               "format": "number:2", "suffix": "%"},
+                             {"field": "avg_spread_bp",
+                               "label": "Avg OAS",
+                               "format": "number:0", "suffix": " bp"},
+                             {"field": "n_bonds",
+                               "label": "Bond count",
+                               "format": "integer"},
+                         ]}},
+                    {"widget": "chart", "id": "pie_sector_count", "w": 4,
+                     "h_px": 360,
+                     "title": "Sector weight (bond count)",
+                     "subtitle": ("Click a slice for the same sector "
+                                    "summary."),
+                     "spec": {
+                         "chart_type": "donut",
+                         "dataset": "sectors",
+                         "mapping": {"category": "sector",
+                                       "value": "n_bonds"},
+                     },
+                     "click_popup": {
+                         "title_field": "sector",
+                         "popup_fields": [
+                             {"field": "n_bonds",
+                               "label": "Bond count",
+                               "format": "integer"},
+                             {"field": "avg_total_bp",
+                               "label": "Avg total",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "avg_duration",
+                               "label": "Avg duration",
+                               "format": "number:2",
+                               "suffix": " yrs"},
+                         ]}},
+                  ],
+                  [{"widget": "table", "id": "tbl_universe", "w": 12,
+                     "title": "Full universe",
+                     "subtitle": ("Same dataset as the scatter; "
+                                    "click a row for the full profile "
+                                    "(matches the scatter popup)."),
+                     "dataset_ref": "bonds",
+                     "max_rows": 50,
+                     "row_height": "compact",
+                     "searchable": True, "sortable": True,
+                     "columns": [
+                         {"field": "issuer", "label": "Issuer",
+                           "align": "left"},
+                         {"field": "sector", "label": "Sector",
+                           "align": "left"},
+                         {"field": "rating", "label": "Rating"},
+                         {"field": "carry_bp", "label": "Carry (bp)",
+                           "format": "number:1"},
+                         {"field": "roll_bp", "label": "Roll (bp)",
+                           "format": "number:1"},
+                         {"field": "total_bp", "label": "Total (bp)",
+                           "format": "number:1"},
+                         {"field": "ytm_pct", "label": "YTM (%)",
+                           "format": "number:2"},
+                         {"field": "duration_yrs",
+                           "label": "Duration",
+                           "format": "number:2"},
+                         {"field": "spread_bp", "label": "OAS (bp)",
+                           "format": "number:0"},
+                     ],
+                     "row_click": {
+                         "title_field": "issuer",
+                         "subtitle_template": (
+                             "CUSIP {cusip} \u00B7 {sector} \u00B7 "
+                             "{coupon_pct:number:2}% coupon"),
+                         "popup_fields": [
+                             {"field": "carry_bp", "label": "Carry",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "roll_bp", "label": "Roll",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "total_bp", "label": "Total",
+                               "format": "number:1", "suffix": " bp"},
+                             {"field": "ytm_pct", "label": "YTM",
+                               "format": "number:2", "suffix": "%"},
+                             {"field": "spread_bp", "label": "OAS",
+                               "format": "number:0", "suffix": " bp"},
+                             {"field": "duration_yrs",
+                               "label": "Duration",
+                               "format": "number:2",
+                               "suffix": " yrs"},
+                             {"field": "rating", "label": "Rating"},
+                         ]}}],
+              ]},
+        ]},
+        "links": [],
+    }
+    r = compile_dashboard(manifest,
+                           output_path=str(out_dir / "dashboard.html"))
+    thumb = _thumbnail(r.html_path, out_dir / "thumbnail.png",
+                        width=1600, height=1500)
+    return _result(r, thumb)
+
+
+# =============================================================================
+# DEMO: news_wrap  (text-heavy: headlines table + thematic notes + summary)
+# =============================================================================
+#
+# Stress-tests the prose surface area of the dashboard system. Built
+# entirely around the new note widget + summary banner + extended
+# markdown grammar (ordered lists, blockquotes, tables in markdown,
+# strikethrough). No charts in the headline area; PRISM is the
+# narrator and the dashboard is the page.
+
+
+def pull_news_headlines() -> pd.DataFrame:
+    """Synthetic intraday news desk: 30 headlines with timestamp,
+    source, asset class, sentiment, impact rating (1-5), tags, and
+    a markdown body for drill-down."""
+    rng = random.Random(SEED + 11)
+    sources = ["Bloomberg", "Reuters", "FT", "WSJ",
+                "GS Research", "DJ Newswires", "MNI", "BBG TOP"]
+    classes = ["Rates", "Equity", "FX", "Commodity",
+                "Credit", "Macro", "Policy"]
+    sentiments = ["bullish", "bearish", "neutral"]
+    base_dt = pd.Timestamp("2026-04-24 09:30:00")
+    rows = []
+    headlines = [
+        ("Front-end UST richens 6bp on softer payrolls",
+          "Rates", "bullish", 5,
+          ["UST", "front-end", "NFP"],
+          "Two-year yields **fell ~6bp** to 4.32% intraday after a "
+          "weaker-than-expected NFP print (180k vs 210k consensus). "
+          "Real-money buyers re-engaged at the front end, and dealer "
+          "books saw a notable lift in 2Y/3Y demand.\n\n"
+          "1. NFP 180k vs 210k consensus\n"
+          "2. Unemployment rate held at 3.9%\n"
+          "3. Average hourly earnings 0.2% m/m\n\n"
+          "> The rally extends a multi-week bull-steepener; 2s10s "
+          "is back in positive territory for the first time in "
+          "three weeks."),
+        ("ECB's Lagarde: 'Disinflation broadly on track'",
+          "Policy", "bullish", 4,
+          ["ECB", "Lagarde", "inflation"],
+          "ECB President Lagarde said disinflation in the euro area "
+          "is **broadly on track** but warned that services prices "
+          "remain sticky. Markets pared back bets on a faster cutting "
+          "cycle, with EUR OIS pricing now implying ~70bp of cuts "
+          "by year-end vs ~85bp pre-speech.\n\n"
+          "> 'We are confident inflation is heading to target, but "
+          "the last mile is the hardest.' -- Lagarde, press conf"),
+        ("WTI -2.1% as inventory build surprises",
+          "Commodity", "bearish", 3,
+          ["oil", "WTI", "inventories"],
+          "EIA reported a +5.4mb crude build vs -1.0mb consensus. "
+          "WTI front-month traded below $78 for the first time "
+          "in two weeks. Refining margins narrowed on the print.\n\n"
+          "Bias: ~~tight~~ amply supplied near-term; OPEC+ meeting "
+          "on May 8 remains the next catalyst."),
+        ("Equity vol bid: VIX +1.8 vols ahead of CPI",
+          "Equity", "neutral", 3,
+          ["VIX", "CPI", "vol"],
+          "S&P front-month vol bid up 1.8 vols into tomorrow's "
+          "core PCE print. SPX skew steepened modestly. Single-stock "
+          "vol underperformed the index on dispersion bets."),
+        ("Apple beats on services, Q3 guide light",
+          "Equity", "neutral", 4,
+          ["AAPL", "earnings", "services"],
+          "Apple reported Q2 EPS $1.55 vs $1.50 consensus. Services "
+          "revenue +14% y/y was the standout. Q3 guide light: "
+          "iPhone units expected -5% y/y on weak China demand.\n\n"
+          "1. Services rev: $24.2bn (+14% y/y)\n"
+          "2. iPhone: $46.0bn (-2% y/y)\n"
+          "3. Mac: $7.5bn (+4% y/y)\n"
+          "4. China: $16.4bn (-8% y/y)"),
+        ("Fed's Powell: 'No rush' to ease policy",
+          "Policy", "bearish", 5,
+          ["Fed", "Powell", "FOMC"],
+          "Chair Powell, speaking at the Economic Club of New York, "
+          "said the Fed is in **no rush** to ease policy and needs "
+          "to see further evidence inflation is sustainably moving "
+          "to 2%. Front-end softened ~3bp on the headline before "
+          "recovering.\n\n"
+          "> 'The strength of the economy and ongoing progress on "
+          "inflation give us the ability to be patient.'"),
+        ("EUR/USD breaks 1.10, lowest since November",
+          "FX", "bearish", 4,
+          ["EUR", "USD", "DXY"],
+          "EUR/USD broke below 1.10 for the first time since "
+          "November on the back of a hawkish Powell tape and weaker "
+          "EU services PMI. DXY trades at 105.3, +0.5% on the day.\n\n"
+          "Levels:\n\n"
+          "| Level | Tech significance |\n"
+          "|---|---|\n"
+          "| 1.0950 | Q4 2025 swing low |\n"
+          "| 1.0900 | psychological + 200dma |\n"
+          "| 1.0850 | next major support |"),
+        ("CDX IG -2bp on macro tailwind",
+          "Credit", "bullish", 2,
+          ["CDX", "IG", "credit"],
+          "CDX IG tightened 2bp to 53bp, the lowest level in two "
+          "weeks, on broad risk-on tone. HY also tightened 8bp to "
+          "324bp. New-issue calendar is light through month-end."),
+        ("BoJ leaves policy unchanged, hints at June review",
+          "Policy", "neutral", 4,
+          ["BoJ", "JPY", "policy"],
+          "Bank of Japan held the policy rate at 0.10% as expected. "
+          "Governor Ueda flagged a **likely** policy review in June. "
+          "USD/JPY traded a 156.20-156.80 range on the announcement."),
+        ("Tesla -3.5% pre-market on delivery cut",
+          "Equity", "bearish", 3,
+          ["TSLA", "deliveries"],
+          "Tesla cut its Q2 delivery target by ~5% citing soft "
+          "China demand and the Cybertruck production ramp. "
+          "Sell-side reactions mixed; consensus PT range $180-$220."),
+        ("China loan prime rate held at 3.45% / 3.95%",
+          "Macro", "neutral", 2,
+          ["China", "PBOC", "LPR"],
+          "PBOC held both 1Y and 5Y LPRs unchanged. Market focus "
+          "shifts to potential RRR cut in May."),
+        ("Gold near record high on geopolitical premium",
+          "Commodity", "bullish", 3,
+          ["gold", "geopolitics"],
+          "Spot gold traded near $2,420/oz, +1.1% intraday. ETF "
+          "flows neutral, suggesting the bid is institutional / "
+          "central-bank rather than retail."),
+        ("US 5Y auction tails 0.4bp, BTC at 2.42x",
+          "Rates", "bearish", 2,
+          ["UST", "auction", "5Y"],
+          "Today's $70bn 5Y auction stopped at 4.215%, 0.4bp tail. "
+          "Bid-to-cover 2.42x (5-auction avg 2.45x). Indirect bid "
+          "62% (avg 65%). Tepid demand; modest concession in 5Y "
+          "afterwards."),
+        ("Bitcoin breaks $70k, ETF inflows +$420mn",
+          "Macro", "bullish", 2,
+          ["BTC", "crypto", "ETF"],
+          "Spot BTC ETFs saw $420mn of inflows yesterday, the "
+          "largest daily inflow in two weeks. Spot price broke "
+          "above $70k on Asia open."),
+        ("EU services PMI 49.8 vs 51.2 expected",
+          "Macro", "bearish", 4,
+          ["EU", "PMI", "macro"],
+          "Eurozone composite services PMI printed 49.8 vs 51.2 "
+          "consensus, dipping back into contraction. Manufacturing "
+          "PMI was firmer at 47.6 (vs 47.0 prior).\n\n"
+          "Country detail:\n\n"
+          "* Germany services 50.1 (-2.0pt)\n"
+          "* France services 47.3 (-1.5pt)\n"
+          "* Italy services 51.5 (+0.4pt)"),
+        ("Saudi Arabia raises May OSP to Asia by 60c",
+          "Commodity", "bullish", 2,
+          ["oil", "Saudi", "OSP"],
+          "Saudi Aramco raised its May Arab Light OSP to Asia "
+          "by 60c to a $2.30 premium. Larger increase than market "
+          "expected; supportive for crude term structure."),
+        ("Chinese ADRs +2.4%; Alibaba leads",
+          "Equity", "bullish", 2,
+          ["China", "ADR", "BABA"],
+          "Chinese ADRs rallied on rumors of further policy "
+          "support measures. KWEB +2.8%, BABA +3.4%, JD +2.1%."),
+        ("UK CPI 3.2% y/y vs 3.1% expected",
+          "Macro", "bearish", 4,
+          ["UK", "CPI", "BoE"],
+          "UK headline CPI surprised to the upside at 3.2% y/y. "
+          "Core CPI 4.2% y/y vs 4.1% expected. GBP rallied 50 "
+          "pips; Gilt curve flattened on hawkish repricing."),
+        ("S&P 500 +0.6%, NDX +0.9%; small-caps lag",
+          "Equity", "bullish", 1,
+          ["SPX", "NDX", "small-caps"],
+          "Broader equities firm with tech leading. Russell 2000 "
+          "underperformed (+0.1%) on rates sensitivity into PCE."),
+        ("US 10Y trades range 4.10-4.18%",
+          "Rates", "neutral", 1,
+          ["UST", "10Y"],
+          "Belly-of-curve consolidation pre-PCE. Range trade; "
+          "no clear catalyst until tomorrow's print."),
+        ("Yen weakness sparks intervention chatter",
+          "FX", "neutral", 3,
+          ["JPY", "intervention"],
+          "USD/JPY pushing 156.80; Japanese officials reiterated "
+          "they are 'watching FX moves carefully'. Market parsing "
+          "language as one step short of formal warning."),
+        ("Copper -0.8% on Chinese property data",
+          "Commodity", "bearish", 2,
+          ["copper", "China", "property"],
+          "Copper weighed by soft China April property starts data. "
+          "LME 3M -0.8% to $9,820/t; broader base metals firmer."),
+        ("Schwab cuts 5-7Y UST recommendation",
+          "Rates", "bearish", 2,
+          ["UST", "Schwab", "research"],
+          "Schwab fixed-income strategists downgraded 5-7Y UST "
+          "to neutral from buy citing tactical positioning and "
+          "richer valuations vs 10Y."),
+        ("Goldman raises year-end SPX target to 5,800",
+          "Equity", "bullish", 3,
+          ["SPX", "GS", "research"],
+          "Goldman strategists raised year-end S&P 500 target "
+          "to 5,800 from 5,600 citing earnings resilience and "
+          "easing financial conditions."),
+        ("US new home sales 712k vs 670k expected",
+          "Macro", "bullish", 2,
+          ["housing", "new-home-sales"],
+          "March new home sales surprised firmly at 712k saar. "
+          "Median price +1.6% y/y to $429,800. Months of supply "
+          "fell to 7.3 from 7.9."),
+        ("Crude term structure flattens 2c",
+          "Commodity", "neutral", 1,
+          ["oil", "WTI", "term-structure"],
+          "WTI Dec25/Dec26 spread flattened 2c to 38c backwardation. "
+          "Front spreads firmer on inventory print noise."),
+        ("Norges Bank dovish hold, NOK -0.4%",
+          "FX", "bearish", 2,
+          ["NOK", "Norges-Bank"],
+          "Norges Bank held rates at 4.50% with dovish guidance. "
+          "First cut signaled for September; NOK underperformed "
+          "G10 peers."),
+        ("Brent -1.5%, near 6-week low",
+          "Commodity", "bearish", 2,
+          ["Brent", "oil"],
+          "Brent front-month near $82, 6-week low on inventory "
+          "build + soft China demand signal."),
+        ("Chair Powell speaks 1:00pm ET tomorrow",
+          "Policy", "neutral", 4,
+          ["Fed", "Powell", "calendar"],
+          "Speech at Stanford Business School, topic: 'Monetary "
+          "policy under uncertainty.' First public remarks since "
+          "the FOMC press conference."),
+        ("EM debt fund flows +$280mn last week",
+          "Macro", "bullish", 1,
+          ["EM", "flows"],
+          "EPFR data shows EM debt funds saw $280mn of inflows "
+          "last week, the eighth consecutive week of inflows."),
+    ]
+    for hh, asset_class, sent, impact, tags, body in headlines:
+        ts = base_dt + pd.Timedelta(minutes=rng.randint(0, 360))
+        rows.append({
+            "ts": ts.strftime("%H:%M"),
+            "headline": hh,
+            "source": rng.choice(sources),
+            "asset_class": asset_class,
+            "sentiment": sent,
+            "impact": impact,
+            "tags": ", ".join(tags),
+            "body": body,
+        })
+    df = pd.DataFrame(rows)
+    return df.sort_values("impact", ascending=False).reset_index(drop=True)
+
+
+def pull_news_sparklines() -> pd.DataFrame:
+    """Tiny intraday tape for sparkline tiles -- one row per minute,
+    one column per asset class proxy."""
+    rng = random.Random(SEED + 12)
+    n = 60
+    base_ts = pd.Timestamp("2026-04-24 09:30:00")
+    out = []
+    spx = 5710.0; ust10 = 4.13; dxy = 105.30; wti = 78.0
+    for i in range(n):
+        spx *= 1 + rng.gauss(0.00015, 0.0008)
+        ust10 += rng.gauss(0, 0.008)
+        dxy *= 1 + rng.gauss(0, 0.0006)
+        wti *= 1 + rng.gauss(-0.0003, 0.003)
+        out.append({
+            "ts": (base_ts + pd.Timedelta(minutes=i)).strftime("%H:%M"),
+            "spx": round(spx, 2),
+            "ust10": round(ust10, 4),
+            "dxy": round(dxy, 3),
+            "wti": round(wti, 2),
+        })
+    return pd.DataFrame(out)
+
+
+def build_news_wrap(out_dir: Path) -> Dict[str, Any]:
+    """News-desk dashboard: headlines table + thematic notes + per-
+    asset commentary + reading list. Stress-tests the prose surfaces:
+    summary banner, semantic note widgets across all six kinds, full
+    markdown grammar in widget bodies + drill-down sections, and a
+    rich row-click drilldown that surfaces the markdown body of each
+    headline in a modal."""
+    df_hl = pull_news_headlines()
+    df_tape = pull_news_sparklines()
+
+    manifest = {
+        "schema_version": 1,
+        "id": "news_wrap",
+        "title": "News desk -- intraday market wrap",
+        "description": ("Headline-driven dashboard: top of book, "
+                         "themed commentary, sortable headlines table "
+                         "with full-body drill-down, per-asset "
+                         "callouts, reading list. Demonstrates the "
+                         "text-heavy / prose-heavy dashboard pattern."),
+        "theme": "gs_clean",
+        "palette": "gs_primary",
+        "metadata": {
+            "data_as_of": "2026-04-24T16:00:00Z",
+            "generated_at": "2026-04-24T16:05:00Z",
+            "sources": ["Bloomberg", "Reuters", "FT", "WSJ",
+                         "GS Research", "MNI"],
+            "tags": ["news", "headlines", "wrap"],
+            "summary": {
+                "title": "Today's read",
+                "body": (
+                    "**Soft-data day** dominated by a weaker NFP "
+                    "print and a market-friendly Lagarde tape. The "
+                    "front-end of the UST curve led the rally and "
+                    "the curve **bull-steepened**; FX is the cleanest "
+                    "expression of the divergence between dovish ECB "
+                    "comments and a still-firm DXY.\n\n"
+                    "1. **Rates**: 2Y -6bp; 2s10s back positive\n"
+                    "2. **FX**: EUR/USD broke 1.10 -- watch 1.0950\n"
+                    "3. **Equity**: bid into PCE; vol up 1.8 vols\n"
+                    "4. **Commodity**: WTI -2.1% on inventory build\n\n"
+                    "> All eyes on tomorrow's core PCE print (consensus "
+                    "0.2% m/m / 2.7% y/y). A clean miss likely extends "
+                    "the front-end rally; an upside surprise risks a "
+                    "hawkish re-flattening into a long book."
+                ),
+            },
+            "methodology": (
+                "## Sources\n\n"
+                "Synthetic feed; production version pulls from the GS "
+                "Research news API + curated wire feeds (Bloomberg, "
+                "Reuters, FT, WSJ, MNI, DJ).\n\n"
+                "## Impact rating\n\n"
+                "1-5 scale set by the desk:\n\n"
+                "1. Information only / no market reaction\n"
+                "2. Sector-level / single-asset move\n"
+                "3. Multi-asset reaction\n"
+                "4. Macro driver / cross-asset reaction\n"
+                "5. Regime / week-defining event\n\n"
+                "## Refresh\n\n"
+                "Continuous during US cash session; this dashboard "
+                "snapshot was taken at 4:00pm ET."
+            ),
+        },
+        "datasets": {
+            "headlines": df_hl,
+            "tape": df_tape,
+        },
+        "filters": [
+            {"id": "asset_f", "type": "multiSelect",
+              "default": ["Rates", "Equity", "FX", "Commodity",
+                           "Credit", "Macro", "Policy"],
+              "options": ["Rates", "Equity", "FX", "Commodity",
+                           "Credit", "Macro", "Policy"],
+              "field": "asset_class", "label": "Asset class",
+              "targets": ["headlines_table"]},
+            {"id": "sent_f", "type": "radio", "default": "All",
+              "all_value": "All",
+              "options": ["All", "bullish", "bearish", "neutral"],
+              "field": "sentiment", "label": "Sentiment",
+              "targets": ["headlines_table"]},
+            {"id": "impact_f", "type": "slider", "default": 1,
+              "min": 1, "max": 5, "step": 1,
+              "field": "impact", "op": ">=",
+              "label": "Impact >=", "targets": ["headlines_table"]},
+            {"id": "search_f", "type": "text", "default": "",
+              "field": "headline", "op": "contains",
+              "label": "Headline contains",
+              "placeholder": "e.g. CPI, Powell, oil",
+              "targets": ["headlines_table"]},
+        ],
+        "layout": {"kind": "grid", "rows": [
+            [
+                {"widget": "note", "id": "n_thesis", "w": 6,
+                  "kind": "thesis",
+                  "title": "Bull-steepener resumes on soft NFP",
+                  "body": (
+                      "The **2Y led the rally** with -6bp on a "
+                      "180k NFP print (vs 210k consensus). 5s30s "
+                      "flatter on long-end demand into the 7Y "
+                      "auction. 2s10s widening primarily front-led, "
+                      "consistent with a *priced-in cut* trade.\n\n"
+                      "1. NFP: 180k vs 210k (miss)\n"
+                      "2. Unemployment: 3.9% (in line)\n"
+                      "3. AHE: 0.2% m/m (in line)")},
+                {"widget": "note", "id": "n_watch", "w": 6,
+                  "kind": "watch",
+                  "title": "Levels into PCE",
+                  "body": (
+                      "Core PCE consensus 0.2% m/m / 2.7% y/y at "
+                      "8:30am ET tomorrow.\n\n"
+                      "| Asset | Level | If broken |\n"
+                      "|---|---|---|\n"
+                      "| 10Y UST | 4.10% | 4.00% pivot |\n"
+                      "| EUR/USD | 1.0950 | 1.0900 200dma |\n"
+                      "| 2s10s | +20bp | momentum confirm |\n"
+                      "| SPX | 5,725 | range break to 5,750 |")},
+            ],
+            [
+                {"widget": "note", "id": "n_risk", "w": 6,
+                  "kind": "risk",
+                  "title": "Hawkish PCE tail",
+                  "body": (
+                      "A hot core PCE (>0.3% m/m) reverses the "
+                      "front-end rally and puts 2Y back through "
+                      "4.40%. Pain trade is a *hawkish "
+                      "re-flattening* into a long book that has "
+                      "been adding duration on the cuts narrative.\n\n"
+                      "Adjacent risk: Powell speaks 1pm ET. First "
+                      "remarks since the press conference; the bar "
+                      "for fresh dovishness is high.")},
+                {"widget": "note", "id": "n_context", "w": 6,
+                  "kind": "context",
+                  "title": "Positioning backdrop",
+                  "body": (
+                      "Positioning into PCE is **light** vs the 5Y "
+                      "average. CFTC futures show specs net short "
+                      "~140k 10Y contracts (-0.5z); real-money long "
+                      "base from Q1 has largely been monetized.\n\n"
+                      "> A hawkish surprise has less stop-out risk "
+                      "than it did six weeks ago.")},
+            ],
+            [
+                {"widget": "note", "id": "n_fact", "w": 12,
+                  "kind": "fact",
+                  "title": "By the numbers",
+                  "body": (
+                      "End-of-day cash settles, GS Market Data:\n\n"
+                      "| | Level | 1d | 1w | YTD |\n"
+                      "|---|---:|---:|---:|---:|\n"
+                      "| SPX | 5,742 | +0.6% | +1.4% | +14.2% |\n"
+                      "| NDX | 18,310 | +0.9% | +2.1% | +9.8% |\n"
+                      "| US 2Y | 4.32% | -6bp | -18bp | -41bp |\n"
+                      "| US 10Y | 4.13% | -3bp | -9bp | -22bp |\n"
+                      "| 2s10s | +20bp | +3bp | +9bp | +19bp |\n"
+                      "| EUR/USD | 1.0982 | -0.5% | -0.9% | -2.4% |\n"
+                      "| WTI | $78.10 | -2.1% | -3.4% | +9.1% |\n"
+                      "| Gold | $2,418 | +1.1% | +2.6% | +17.0% |\n"
+                      "| BTC | $70,420 | +2.4% | +5.1% | +66% |")},
+            ],
+            [
+                {"widget": "table", "id": "headlines_table", "w": 12,
+                  "dataset_ref": "headlines",
+                  "title": "Headlines (sorted by impact)",
+                  "info": ("Click any row to read the full body. "
+                           "Filter by asset class, sentiment, or "
+                           "impact threshold via the controls above."),
+                  "searchable": True, "sortable": True,
+                  "downloadable": True,
+                  "max_rows": 30, "row_height": "compact",
+                  "columns": [
+                      {"field": "ts", "label": "Time", "align": "left"},
+                      {"field": "headline", "label": "Headline",
+                        "align": "left",
+                        "tooltip": "Click row for full body"},
+                      {"field": "source", "label": "Source",
+                        "align": "left"},
+                      {"field": "asset_class", "label": "Class",
+                        "align": "left"},
+                      {"field": "sentiment", "label": "Sentiment",
+                        "align": "center",
+                        "conditional": [
+                            {"op": "==", "value": "bullish",
+                              "background": "#c6f6d5", "color": "#22543d"},
+                            {"op": "==", "value": "bearish",
+                              "background": "#fed7d7", "color": "#742a2a"},
+                            {"op": "==", "value": "neutral",
+                              "background": "#edf2f7", "color": "#4a5568"},
+                        ]},
+                      {"field": "impact", "label": "Impact",
+                        "align": "center", "format": "integer",
+                        "color_scale": {"min": 1, "max": 5,
+                                          "palette": "gs_blues"}},
+                      {"field": "tags", "label": "Tags", "align": "left"},
+                  ],
+                  "row_highlight": [
+                      {"field": "impact", "op": ">=", "value": 5,
+                        "class": "info"},
+                      {"field": "sentiment", "op": "==",
+                        "value": "bullish", "class": "pos"},
+                      {"field": "sentiment", "op": "==",
+                        "value": "bearish", "class": "neg"},
+                  ],
+                  "row_click": {
+                      "title_field": "headline",
+                      "subtitle_template": (
+                          "{ts} ET . {source} . {asset_class} . "
+                          "impact {impact}/5"
+                      ),
+                      "detail": {
+                          "wide": True,
+                          "sections": [
+                              {"type": "stats",
+                                "fields": [
+                                    {"field": "asset_class",
+                                      "label": "Asset class"},
+                                    {"field": "sentiment",
+                                      "label": "Sentiment"},
+                                    {"field": "impact",
+                                      "label": "Impact",
+                                      "format": "integer",
+                                      "suffix": " / 5"},
+                                    {"field": "source",
+                                      "label": "Source"},
+                                ]},
+                              {"type": "markdown",
+                                "title": "Full story",
+                                "template": "{body}"},
+                              {"type": "markdown",
+                                "title": "Tags",
+                                "template":
+                                    "Filed under: `{tags}`."},
+                          ],
+                      },
+                  }},
+            ],
+            [
+                {"widget": "markdown", "id": "section_a",
+                  "w": 12, "content": "## By asset class"},
+            ],
+            [
+                {"widget": "note", "id": "n_rates", "w": 6,
+                  "kind": "insight",
+                  "title": "Rates",
+                  "body": (
+                      "Bull-steepener; 2Y led the rally on soft NFP. "
+                      "Auction noise in 5Y modestly poor (0.4bp tail). "
+                      "Real yields little changed; nominal-led move.\n\n"
+                      "Headlines:\n\n"
+                      "* Front-end UST richens 6bp on softer payrolls\n"
+                      "* US 5Y auction tails 0.4bp\n"
+                      "* Schwab cuts 5-7Y UST recommendation")},
+                {"widget": "chart", "id": "tape_ust10", "w": 6, "h_px": 200,
+                  "title": "10Y UST yield (today, intraday)",
+                  "subtitle": "Range trade pre-PCE",
+                  "spec": {
+                      "chart_type": "line", "dataset": "tape",
+                      "mapping": {"x": "ts", "y": "ust10",
+                                    "y_title": "Yield (%)"}}},
+            ],
+            [
+                {"widget": "note", "id": "n_eq", "w": 6,
+                  "kind": "insight",
+                  "title": "Equity",
+                  "body": (
+                      "Broader index firm into PCE; tech leadership "
+                      "narrow. Vol bid up 1.8 vols on the day. "
+                      "Earnings dispersion reasserting (AAPL services "
+                      "beat, TSLA delivery cut).\n\n"
+                      "Headlines:\n\n"
+                      "* Equity vol bid: VIX +1.8 vols ahead of CPI\n"
+                      "* Apple beats on services, Q3 guide light\n"
+                      "* Goldman raises year-end SPX target to 5,800")},
+                {"widget": "chart", "id": "tape_spx", "w": 6, "h_px": 200,
+                  "title": "S&P 500 (today, intraday)",
+                  "subtitle": "Drift higher into close",
+                  "spec": {
+                      "chart_type": "line", "dataset": "tape",
+                      "mapping": {"x": "ts", "y": "spx",
+                                    "y_title": "Index"}}},
+            ],
+            [
+                {"widget": "note", "id": "n_fx", "w": 6,
+                  "kind": "watch",
+                  "title": "FX",
+                  "body": (
+                      "**EUR/USD broke 1.10**, lowest since November. "
+                      "Lagarde tape pulled back EUR OIS cut bets. "
+                      "JPY weakness past 156.80 sparking intervention "
+                      "chatter.\n\n"
+                      "1. EUR/USD: 1.10 break, eyes 1.0950\n"
+                      "2. USD/JPY: 156.80, intervention zone\n"
+                      "3. NOK underperformed G10 on dovish Norges hold")},
+                {"widget": "chart", "id": "tape_dxy", "w": 6, "h_px": 200,
+                  "title": "DXY (today, intraday)",
+                  "subtitle": "Bid throughout the session",
+                  "spec": {
+                      "chart_type": "line", "dataset": "tape",
+                      "mapping": {"x": "ts", "y": "dxy",
+                                    "y_title": "Index"}}},
+            ],
+            [
+                {"widget": "note", "id": "n_cmdy", "w": 6,
+                  "kind": "risk",
+                  "title": "Commodities",
+                  "body": (
+                      "Crude weighed by surprise inventory build "
+                      "(+5.4mb vs -1.0mb). Gold near record on "
+                      "geopolitical premium. Copper soft on China "
+                      "property data.\n\n"
+                      "> OPEC+ meeting May 8 remains the crude "
+                      "catalyst. Algorithmic selling extended the "
+                      "WTI move post-print.")},
+                {"widget": "chart", "id": "tape_wti", "w": 6, "h_px": 200,
+                  "title": "WTI (today, intraday)",
+                  "subtitle": "Inventory print drove the move",
+                  "spec": {
+                      "chart_type": "line", "dataset": "tape",
+                      "mapping": {"x": "ts", "y": "wti",
+                                    "y_title": "$/bbl"}}},
+            ],
+            [
+                {"widget": "markdown", "id": "section_b",
+                  "w": 12, "content": "## Reading list"},
+            ],
+            [
+                {"widget": "markdown", "id": "reading", "w": 12,
+                  "content": (
+                      "### Recommended\n\n"
+                      "1. [GS Research: Front-end UST playbook into "
+                      "PCE](https://example.com/gs/front-end-pce) "
+                      "-- *thesis-level*; informs the bull-steepener "
+                      "view above.\n"
+                      "2. [Hilsenrath: Powell's 'no rush' framing"
+                      "](https://example.com/wsj/hilsenrath-no-rush) "
+                      "-- short read; useful colour on the FOMC "
+                      "thinking.\n"
+                      "3. [GS Research: ECB cuts repriced "
+                      "lower](https://example.com/gs/ecb-cuts) -- "
+                      "EUR FX tactical desk note.\n"
+                      "4. [Bloomberg: Inside the BoJ June review"
+                      "](https://example.com/bbg/boj-june) -- "
+                      "background; positions are light, surprise "
+                      "potential exists.\n"
+                      "5. [FT Lex: Apple services premium"
+                      "](https://example.com/ft/aapl-services) -- "
+                      "single-name; relevant for tech earnings vol.\n\n"
+                      "### Listening\n\n"
+                      "* [Odd Lots: 'When does the front end stop "
+                      "trading the cuts?'](https://example.com/oddlots) "
+                      "-- 50min, recorded yesterday.\n"
+                      "* [Macro Voices: 'Curve dynamics with "
+                      "Burghardt'](https://example.com/mv-burghardt) "
+                      "-- 1h, foundational on butterflies / spreads.\n\n"
+                      "### Calendar (next 24h)\n\n"
+                      "| Time (ET) | Event | Consensus |\n"
+                      "|---|---|---|\n"
+                      "| 8:30am | US Core PCE | 0.2% m/m / 2.7% y/y |\n"
+                      "| 10:00am | UMich sentiment | 79.0 |\n"
+                      "| 1:00pm | Powell speech | -- |\n"
+                      "| 2:30pm | Fed Williams | -- |\n\n"
+                      "> *Skip the 6pm BoE Pill speech; he is on "
+                      "embargo until Friday.*")},
+            ],
+        ]},
+        "links": [],
+    }
+    r = compile_dashboard(manifest,
+                           output_path=str(out_dir / "dashboard.html"))
+    thumb = _thumbnail(r.html_path, out_dir / "thumbnail.png",
+                        width=1400, height=2000)
+    return _result(r, thumb)
+
+
+# =============================================================================
+# DEMO: fomc_brief  (Fed-document analysis: statement, minutes, speakers)
+# =============================================================================
+#
+# Heavy on blockquotes (direct quotes from Fed officials), markdown
+# tables (statement diff matrix), nested lists (themes inside topics),
+# and note widgets (hawk/dove signals). Demonstrates how to build a
+# document-centric dashboard where prose is the artifact, not
+# decoration.
+
+
+def pull_fed_speakers() -> pd.DataFrame:
+    """Recent Fed speakers with hawkish-dovish rating (-2..+2) and
+    a key quote. Synthetic but flavoured to reflect each FOMC voter's
+    public bias."""
+    rows = [
+        ("2026-04-22", "Powell", "Chair", "neutral", 0,
+          "FOMC press conference",
+          "The strength of the economy and ongoing progress on "
+          "inflation give us the ability to be patient."),
+        ("2026-04-23", "Williams", "NY Fed", "neutral", 0,
+          "Speech at Stanford",
+          "We are well positioned to respond to the economy as it "
+          "evolves. There is no rush to cut."),
+        ("2026-04-22", "Bowman", "Governor", "hawk", 2,
+          "OMFIF speech",
+          "I see meaningful upside risks to inflation and would "
+          "support holding policy steady for some time."),
+        ("2026-04-21", "Waller", "Governor", "hawk", 1,
+          "Hoover Institution",
+          "The data continue to suggest that monetary policy "
+          "should remain restrictive for longer."),
+        ("2026-04-21", "Goolsbee", "Chicago", "dove", -1,
+          "Yahoo Finance interview",
+          "If we get a few more good inflation readings, I think "
+          "we should be cutting."),
+        ("2026-04-20", "Daly", "SF Fed", "neutral", 0,
+          "FRBSF town hall",
+          "Patience is the operative word. The risks are now "
+          "two-sided."),
+        ("2026-04-19", "Kashkari", "Minneapolis", "hawk", 1,
+          "Town hall",
+          "I'm not yet convinced inflation is on a sustainable "
+          "path back to 2%."),
+        ("2026-04-18", "Mester", "Cleveland", "hawk", 1,
+          "Speech to NABE",
+          "We need more data to be confident in cuts. Three rate "
+          "cuts this year still seems reasonable."),
+        ("2026-04-17", "Logan", "Dallas", "hawk", 2,
+          "Money marketeers speech",
+          "Recent disinflation has been bumpier than expected. "
+          "I am much more cautious about cuts."),
+        ("2026-04-16", "Bostic", "Atlanta", "dove", -1,
+          "Speech at NABE",
+          "I now see one cut this year, in Q4. The path forward "
+          "remains data dependent."),
+        ("2026-04-15", "Jefferson", "Vice Chair", "neutral", 0,
+          "Brookings speech",
+          "Monetary policy is well positioned to respond to the "
+          "evolving economic outlook."),
+        ("2026-04-14", "Cook", "Governor", "neutral", 0,
+          "Speech at Macroeconomic Policy Institute",
+          "I expect to gradually reduce the policy rate as "
+          "inflation moves toward 2%."),
+    ]
+    return pd.DataFrame(rows, columns=[
+        "date", "speaker", "role", "lean", "hawk_score",
+        "venue", "quote",
+    ])
+
+
+def pull_fed_dots() -> pd.DataFrame:
+    """Synthetic dot-plot snapshot: median + range per FOMC year."""
+    return pd.DataFrame([
+        {"year": "2026", "median": 4.625, "low": 4.375, "high": 5.125,
+          "n_voters": 19},
+        {"year": "2027", "median": 3.875, "low": 3.375, "high": 4.625,
+          "n_voters": 19},
+        {"year": "2028", "median": 3.125, "low": 2.625, "high": 3.625,
+          "n_voters": 19},
+        {"year": "Long run", "median": 2.750,
+          "low": 2.500, "high": 3.000, "n_voters": 19},
+    ])
+
+
+def pull_fed_speaker_history() -> pd.DataFrame:
+    """Speaker hawkish-dovish rating over time, for a small ribbon
+    chart on the speakers tab."""
+    rng = random.Random(SEED + 7)
+    rows = []
+    speakers = ["Powell", "Williams", "Waller", "Bowman",
+                 "Goolsbee", "Daly", "Bostic"]
+    base = pd.Timestamp("2026-01-01")
+    for s in speakers:
+        baseline = rng.uniform(-1, 1)
+        for w in range(16):
+            ts = base + pd.Timedelta(weeks=w)
+            score = baseline + rng.gauss(0, 0.4)
+            score = max(-2, min(2, score))
+            rows.append({"date": ts.strftime("%Y-%m-%d"),
+                          "speaker": s,
+                          "score": round(score, 2)})
+    return pd.DataFrame(rows)
+
+
+def build_fomc_brief(out_dir: Path) -> Dict[str, Any]:
+    """Fed-document-centric dashboard: statement diff prose, minutes
+    excerpts with blockquotes, speakers timeline + quote table with
+    drill-down, and dot-plot panel with commentary. Heavy use of
+    note widgets (hawk / dove / watch) and the full markdown grammar
+    (blockquotes, tables, nested lists, ordered lists)."""
+    df_speakers = pull_fed_speakers()
+    df_dots = pull_fed_dots()
+    df_speaker_hist = pull_fed_speaker_history()
+
+    # Average lean score across most recent comments (positive = hawkish)
+    recent_score = round(float(df_speakers["hawk_score"].mean()), 2)
+
+    manifest = {
+        "schema_version": 1,
+        "id": "fomc_brief",
+        "title": "FOMC document brief",
+        "description": ("Statement diff narrative, minutes excerpts, "
+                         "speakers timeline + quote board, and dot "
+                         "plot. Document-first dashboard pattern."),
+        "theme": "gs_clean",
+        "palette": "gs_primary",
+        "metadata": {
+            "data_as_of": "2026-04-24T18:00:00Z",
+            "generated_at": "2026-04-24T18:05:00Z",
+            "sources": ["FOMC press materials",
+                         "GS Research", "MNI", "Bloomberg"],
+            "tags": ["fed", "fomc", "policy"],
+            "summary": {
+                "title": "Today's read on the Fed",
+                "body": (
+                    "The post-April-FOMC tape has been **incrementally "
+                    "hawkish** despite the soft NFP. Average speaker "
+                    f"hawk-dove score is +{recent_score} (positive = "
+                    "hawkish), driven by Bowman / Logan / Kashkari "
+                    "leaning into 'patience' and a less-frequent "
+                    "dovish push from Goolsbee / Bostic.\n\n"
+                    "1. **Statement**: removed 'further progress' "
+                    "language; added 'risks two-sided'\n"
+                    "2. **Press conf**: Powell 'no rush' was the "
+                    "memorable line; markets parsed neutral-hawkish\n"
+                    "3. **Dots**: 2026 median 4.625% implies one cut "
+                    "from current; tail higher\n"
+                    "4. **Speakers**: 8/12 recent comments rated "
+                    "neutral-to-hawkish\n\n"
+                    "> Watch tomorrow's Powell at Stanford. The "
+                    "venue is academic; speeches there have "
+                    "historically carried more signal than press "
+                    "conferences."
+                ),
+            },
+            "methodology": (
+                "## Statement diff\n\n"
+                "Prose is the artifact. Each row of the diff captures "
+                "**one substantive change** between the prior FOMC "
+                "statement and the current one. Wording-only edits "
+                "(punctuation, paragraphing) are dropped.\n\n"
+                "## Hawk-dove score\n\n"
+                "Each speaker comment is rated by the desk on a "
+                "-2..+2 scale where:\n\n"
+                "* `+2` very hawkish (e.g. 'no cuts this year')\n"
+                "* `+1` hawkish lean (e.g. 'patient', 'restrictive')\n"
+                "* ` 0` neutral / two-sided\n"
+                "* `-1` dovish lean (e.g. 'data-dependent cuts')\n"
+                "* `-2` very dovish (e.g. 'cuts soon')\n\n"
+                "## Refresh\n\n"
+                "Manual after each FOMC + speaker event. Production "
+                "version pulls the FOMC press doc, Powell transcript, "
+                "and speakers from the wires."
+            ),
+        },
+        "datasets": {
+            "speakers": df_speakers,
+            "dots": df_dots,
+            "speaker_hist": df_speaker_hist,
+        },
+        "filters": [
+            {"id": "lean_f", "type": "radio", "default": "All",
+              "all_value": "All",
+              "options": ["All", "hawk", "dove", "neutral"],
+              "field": "lean", "label": "Lean",
+              "scope": "tab:speakers",
+              "targets": ["speakers_table", "speakers_chart"]},
+        ],
+        "layout": {"kind": "tabs", "tabs": [
+            {"id": "statement", "label": "Statement",
+              "description": ("Statement-language diff and the "
+                               "hawkish / dovish read of the changes."),
+              "rows": [
+                  [
+                      {"widget": "note", "id": "stmt_thesis", "w": 12,
+                        "kind": "thesis",
+                        "title": "Read of the April statement",
+                        "body": (
+                            "The committee **removed the "
+                            "'further progress' language** that had "
+                            "underwritten the cuts narrative since "
+                            "January. New phrasing -- 'risks to "
+                            "achieving the dual mandate are now "
+                            "more in balance' -- is consistent with "
+                            "a longer hold than markets are pricing.\n\n"
+                            "Three load-bearing edits:\n\n"
+                            "1. *'Inflation has eased over the past "
+                            "year but remains elevated'* -> "
+                            "*'Inflation has eased; lack of further "
+                            "progress in recent months'*\n"
+                            "2. *'Risks to mandates are moving "
+                            "toward better balance'* -> *'Risks to "
+                            "mandates are roughly in balance'*\n"
+                            "3. New sentence: *'The committee does "
+                            "not expect it will be appropriate to "
+                            "reduce the target range until it has "
+                            "gained greater confidence...'* (this "
+                            "is the meaningful add)")},
+                  ],
+                  [
+                      {"widget": "note", "id": "stmt_hawk", "w": 6,
+                        "kind": "watch",
+                        "title": "Hawkish reads",
+                        "body": (
+                            "1. **Inflation language harder.** "
+                            "'Lack of further progress' is the "
+                            "starkest framing in 18 months.\n"
+                            "2. **Explicit cut-conditioning** added "
+                            "for the first time. This is the "
+                            "biggest move from press-conference "
+                            "guidance into the formal statement.\n"
+                            "3. Removal of 'better balance' "
+                            "phrasing dampens the dovish-pivot "
+                            "narrative.")},
+                      {"widget": "note", "id": "stmt_dove", "w": 6,
+                        "kind": "context",
+                        "title": "Dovish counters",
+                        "body": (
+                            "1. *'Solid pace'* growth language "
+                            "**unchanged** (vs upgraded).\n"
+                            "2. Labor-market characterization still "
+                            "*'strong job gains'* (no upgrade to "
+                            "'overheating').\n"
+                            "3. No change to the 'sum total of "
+                            "data' boilerplate.\n\n"
+                            "> Net read: incremental hawkish on "
+                            "inflation language; tone elsewhere "
+                            "unchanged. Not a regime shift, a "
+                            "calibration.")},
+                  ],
+                  [
+                      {"widget": "markdown", "id": "stmt_full", "w": 12,
+                        "content": (
+                            "## Statement diff (April vs March)\n\n"
+                            "| Theme | March '26 | April '26 |\n"
+                            "|---|---|---|\n"
+                            "| Inflation | 'eased over the past "
+                            "year' | 'lack of further progress in "
+                            "recent months' |\n"
+                            "| Growth | 'expanding at a solid pace' "
+                            "| 'expanding at a solid pace' |\n"
+                            "| Labor | 'strong job gains' | "
+                            "'strong job gains' |\n"
+                            "| Risks | 'moving toward better "
+                            "balance' | 'roughly in balance' |\n"
+                            "| Cut path | (implicit) | 'not "
+                            "appropriate... until greater confidence' |\n"
+                            "| Balance sheet | unchanged | unchanged |\n\n"
+                            "### Voting record\n\n"
+                            "All voters **for** the unchanged target "
+                            "range and the QT taper schedule. "
+                            "Bowman-style dissent absent this round.\n\n"
+                            "### What didn't change\n\n"
+                            "- Forward guidance framework "
+                            "(data-dependent)\n"
+                            "- Reference to financial-conditions "
+                            "tightening\n"
+                            "- The 2% target restatement in "
+                            "paragraph 4\n\n"
+                            "### Removed phrasing\n\n"
+                            "Three short clauses were dropped vs "
+                            "March:\n\n"
+                            "1. ~~'further progress toward 2%'~~\n"
+                            "2. ~~'continued moderation'~~ (in the "
+                            "labor section)\n"
+                            "3. ~~'broadly disinflationary'~~ "
+                            "(price-pressures paragraph)\n\n"
+                            "> Each removal is incrementally hawkish; "
+                            "the cumulative effect is the most "
+                            "hawkish statement since September 2024.")},
+                  ],
+              ]},
+            {"id": "minutes", "label": "Minutes",
+              "description": ("Excerpted passages by topic with "
+                               "verbatim quotes from participants."),
+              "rows": [
+                  [
+                      {"widget": "note", "id": "min_thesis", "w": 12,
+                        "kind": "thesis",
+                        "title": "What the minutes say",
+                        "body": (
+                            "Two themes carry the minutes:\n\n"
+                            "1. **Risk-management framing on "
+                            "inflation** is more two-sided than "
+                            "the statement implies. Several "
+                            "participants flagged services prices "
+                            "as the bottleneck; a smaller group "
+                            "noted shelter has rolled.\n"
+                            "2. **Balance-sheet decisions** got "
+                            "more space than expected. The minutes "
+                            "lean toward a **slower QT pace** than "
+                            "current; this is dovish at the "
+                            "margin.\n\n"
+                            "Net read: the statement was hawkish "
+                            "by edit; the minutes are slightly "
+                            "more dovish in tone. Markets correctly "
+                            "split the difference on the headline "
+                            "vol.")},
+                  ],
+                  [
+                      {"widget": "markdown", "id": "min_inflation",
+                        "w": 6, "content": (
+                            "### Inflation\n\n"
+                            "> 'Several participants noted that the "
+                            "process of disinflation appears to "
+                            "have slowed in recent months, with "
+                            "shelter and services components "
+                            "providing most of the resistance.'\n\n"
+                            "> 'A few participants emphasized that "
+                            "shelter inflation has begun to roll "
+                            "and may decelerate further over coming "
+                            "quarters as observed market rents "
+                            "translate to the official series with "
+                            "the usual lag.'\n\n"
+                            "Implication:\n\n"
+                            "1. Services / non-housing services is "
+                            "the watch-item.\n"
+                            "2. Shelter is mechanically backward-"
+                            "looking; the rolling-off is real.\n"
+                            "3. The committee's *modal* path is "
+                            "still toward 2%; the patience is about "
+                            "confidence, not direction.")},
+                      {"widget": "markdown", "id": "min_labor",
+                        "w": 6, "content": (
+                            "### Labor\n\n"
+                            "> 'Most participants viewed the labor "
+                            "market as having continued to "
+                            "rebalance over the past several "
+                            "months, with job openings declining "
+                            "while the unemployment rate has "
+                            "remained low and stable.'\n\n"
+                            "> 'A couple of participants suggested "
+                            "that further softening in the labor "
+                            "market may bring inflation back to "
+                            "target more quickly than implied by "
+                            "the central tendency of projections.'\n\n"
+                            "Implication:\n\n"
+                            "* Soft-landing language survives.\n"
+                            "* The 'couple' framing on a faster cut "
+                            "path is **dovish at the margin**.\n"
+                            "* Watch JOLTS / quits ratio for early "
+                            "signs of cracks.")},
+                  ],
+                  [
+                      {"widget": "markdown", "id": "min_balance",
+                        "w": 6, "content": (
+                            "### Balance sheet\n\n"
+                            "> 'The vast majority of participants "
+                            "judged that it would be appropriate "
+                            "to slow the pace of decline of "
+                            "securities holdings fairly soon.'\n\n"
+                            "> 'A few participants suggested that "
+                            "the slower pace might be implemented "
+                            "in the next few meetings, with "
+                            "appropriate communication.'\n\n"
+                            "Implication:\n\n"
+                            "1. **QT taper is coming.** This was "
+                            "the most concrete forward-looking "
+                            "language in the document.\n"
+                            "2. Communication path matters; a "
+                            "May/June pre-announcement is "
+                            "consistent with this language.")},
+                      {"widget": "markdown", "id": "min_growth",
+                        "w": 6, "content": (
+                            "### Growth\n\n"
+                            "> 'Real GDP appeared to be expanding "
+                            "at a solid pace, supported by resilient "
+                            "consumer spending and continued "
+                            "strength in business investment.'\n\n"
+                            "> 'Some participants noted softening "
+                            "in interest-rate-sensitive sectors, "
+                            "particularly auto sales and "
+                            "single-family residential investment.'\n\n"
+                            "Implication:\n\n"
+                            "1. Headline growth narrative unchanged.\n"
+                            "2. The 'softening' language on rate-"
+                            "sensitive sectors is **the leading "
+                            "indicator** to watch.\n"
+                            "3. No participants flagged "
+                            "overheating; demand-side overheat is "
+                            "off the table for now.")},
+                  ],
+              ]},
+            {"id": "speakers", "label": "Speakers",
+              "description": ("Recent FOMC speakers with hawkish-"
+                               "dovish rating + verbatim quote "
+                               "highlights. Click any row for the "
+                               "full quote."),
+              "rows": [
+                  [
+                      {"widget": "note", "id": "sp_thesis", "w": 12,
+                        "kind": "insight",
+                        "title": "What the speakers are saying",
+                        "body": (
+                            f"Average score across the 12 most "
+                            f"recent speakers is **+{recent_score}** "
+                            "(positive = hawkish). The hawkish "
+                            "skew is **Bowman / Logan / Kashkari**; "
+                            "dovish counterweight is **Goolsbee / "
+                            "Bostic**. Powell himself remains "
+                            "neutral with a hawkish tilt on the "
+                            "inflation side.\n\n"
+                            "> Filter by lean to isolate either "
+                            "side; click any row to read the full "
+                            "quote in context.")},
+                  ],
+                  [
+                      {"widget": "chart", "id": "speakers_chart",
+                        "w": 12, "h_px": 320,
+                        "title": "Hawk-dove score by speaker",
+                        "subtitle": ("Sum of recent comments; "
+                                      "positive = hawkish"),
+                        "spec": {
+                            "chart_type": "bar_horizontal",
+                            "dataset": "speakers",
+                            "mapping": {"y": "speaker",
+                                          "x": "hawk_score",
+                                          "x_title": "Hawk-dove score"},
+                            "annotations": [
+                                {"type": "vline", "x": 0,
+                                  "label": "Neutral",
+                                  "color": "#666",
+                                  "style": "dashed"},
+                            ]}},
+                  ],
+                  [
+                      {"widget": "table", "id": "speakers_table",
+                        "w": 12, "dataset_ref": "speakers",
+                        "title": "Speaker quote board",
+                        "info": ("Click a row for the full venue + "
+                                  "quote. Filter by lean above."),
+                        "searchable": True, "sortable": True,
+                        "max_rows": 30, "row_height": "compact",
+                        "columns": [
+                            {"field": "date", "label": "Date",
+                              "align": "left", "format": "date"},
+                            {"field": "speaker", "label": "Speaker",
+                              "align": "left"},
+                            {"field": "role", "label": "Role",
+                              "align": "left"},
+                            {"field": "lean", "label": "Lean",
+                              "align": "center",
+                              "conditional": [
+                                  {"op": "==", "value": "hawk",
+                                    "background": "#fed7d7",
+                                    "color": "#742a2a"},
+                                  {"op": "==", "value": "dove",
+                                    "background": "#c6f6d5",
+                                    "color": "#22543d"},
+                                  {"op": "==", "value": "neutral",
+                                    "background": "#edf2f7",
+                                    "color": "#4a5568"},
+                              ]},
+                            {"field": "hawk_score", "label": "Score",
+                              "align": "center", "format": "signed:0",
+                              "color_scale": {
+                                  "min": -2, "max": 2,
+                                  "palette": "gs_diverging"}},
+                            {"field": "quote", "label": "Quote",
+                              "align": "left",
+                              "tooltip": "Click row for full quote"},
+                        ],
+                        "row_click": {
+                            "title_field": "speaker",
+                            "subtitle_template": (
+                                "{role} . {date} . lean: {lean} "
+                                "({hawk_score:signed:0})"),
+                            "detail": {
+                                "wide": True,
+                                "sections": [
+                                    {"type": "stats",
+                                      "fields": [
+                                          {"field": "lean",
+                                            "label": "Lean"},
+                                          {"field": "hawk_score",
+                                            "label": "Score",
+                                            "format": "signed:0",
+                                            "suffix": " / +2"},
+                                          {"field": "venue",
+                                            "label": "Venue"},
+                                      ]},
+                                    {"type": "markdown",
+                                      "title": "Quote",
+                                      "template": (
+                                          "> {quote}\n\n"
+                                          "Source: *{venue}*, "
+                                          "{date}.")},
+                                ],
+                            },
+                        }},
+                  ],
+              ]},
+            {"id": "dots", "label": "Dot plot",
+              "description": ("March SEP median + range with desk "
+                               "commentary."),
+              "rows": [
+                  [
+                      {"widget": "note", "id": "dot_thesis", "w": 12,
+                        "kind": "thesis",
+                        "title": "What the dots imply",
+                        "body": (
+                            "2026 median at **4.625%** implies one "
+                            "25bp cut from the current target range "
+                            "(4.875%). The range (4.375%-5.125%) is "
+                            "**asymmetric to the upside** -- two "
+                            "voters at 5.125% pull the tail "
+                            "higher.\n\n"
+                            "1. **2026 median**: 4.625% (one cut)\n"
+                            "2. **2027 median**: 3.875% (three more)\n"
+                            "3. **Long run**: 2.75% (unchanged)\n\n"
+                            "> Market is currently pricing ~50bp of "
+                            "cuts in 2026, slightly more than the "
+                            "median. The hawkish tail of the dots "
+                            "is more meaningful than the median for "
+                            "the right-skew of policy outcomes.")},
+                  ],
+                  [
+                      {"widget": "chart", "id": "dot_chart", "w": 8,
+                        "h_px": 320,
+                        "title": "FOMC dots: median + range",
+                        "subtitle": ("Vertical bars = high-low across "
+                                      "voters; line = median"),
+                        "spec": {
+                            "chart_type": "bullet", "dataset": "dots",
+                            "mapping": {"y": "year",
+                                          "x": "median",
+                                          "x_low": "low",
+                                          "x_high": "high",
+                                          "label": "year",
+                                          "x_title": "Policy rate (%)"}}},
+                      {"widget": "stat_grid", "id": "dot_summary",
+                        "w": 4,
+                        "title": "Dot summary",
+                        "stats": [
+                            {"id": "d1", "label": "2026 median",
+                              "value": "4.625%",
+                              "sub": "One cut from current",
+                              "info": ("Median of the 19 voter dots "
+                                        "for end-2026")},
+                            {"id": "d2", "label": "2027 median",
+                              "value": "3.875%",
+                              "sub": "Three more cuts implied"},
+                            {"id": "d3", "label": "Long run",
+                              "value": "2.750%",
+                              "sub": "Unchanged from prior SEP"},
+                            {"id": "d4", "label": "Hawk tail (2026)",
+                              "value": "5.125%",
+                              "sub": "Two voters; matters for skew"},
+                        ]},
+                  ],
+              ]},
+        ]},
+        "links": [],
+    }
+    r = compile_dashboard(manifest,
+                           output_path=str(out_dir / "dashboard.html"))
+    thumb = _thumbnail(r.html_path, out_dir / "thumbnail.png",
+                        width=1400, height=1700)
+    return _result(r, thumb)
+
+
+# =============================================================================
+# DEMO: research_feed  (Substack-style article feed with full-body drilldown)
+# =============================================================================
+#
+# A reading-list-meets-aggregator pattern: list of analyst pieces with
+# tags + truncated takeaway, click any row to read the full markdown
+# body. Curator commentary lives in note widgets at the top. Heavy
+# use of the row_click rich modal pattern with markdown sections,
+# nested lists for "key takeaways" inside articles, and the new
+# tables-in-markdown for inline data.
+
+
+def pull_research_articles() -> pd.DataFrame:
+    """Synthetic feed of analyst articles. Each row carries a full
+    markdown body for the drill-down panel."""
+    rows = [
+        {
+            "date": "2026-04-24",
+            "author": "G. Burghardt",
+            "title": "Rolling down the curve: a primer for 2026",
+            "topic": "Rates",
+            "tags": "carry, butterflies, 2s5s10s",
+            "minutes": 8,
+            "summary": ("Foundational note on butterfly trades "
+                         "and roll-down mechanics. Reframes carry "
+                         "as the dominant factor in 2026's range-"
+                         "bound rates regime."),
+            "body": (
+                "## Why this note now\n\n"
+                "We're in a **range-bound** regime. With realized "
+                "vol on the 10Y collapsed to 6 vols and Fed-cut "
+                "expectations flat-lined into PCE, the dominant "
+                "P&L driver is **carry**, not direction.\n\n"
+                "Three implications:\n\n"
+                "1. The cleanest expression of a range view is a "
+                "**fly**, not a duration trade.\n"
+                "2. Roll-down on the belly is currently +6bp/3M, "
+                "the highest since 2019.\n"
+                "3. The 5s30s flattener loses ~1.5bp/month to "
+                "negative carry; needs ~3bp/month of curve roll "
+                "to break even.\n\n"
+                "## The mechanics\n\n"
+                "A 2s5s10s fly works because:\n\n"
+                "- The **belly** (5Y) carries positive vs the "
+                "wings (2Y, 10Y) in a positively-sloped curve.\n"
+                "- Roll-down compounds: the 5Y rolls down to "
+                "the 4Y faster than the 2Y rolls to 1Y or the "
+                "10Y rolls to 9Y.\n"
+                "- *Convexity* on the belly is lower than the "
+                "wings, so the trade is short-gamma. This is "
+                "the cost of the carry.\n\n"
+                "> The fly is **not** a directional trade. It "
+                "is a duration-neutral expression of a range "
+                "view. If you want directional, use a 2Y or "
+                "10Y outright.\n\n"
+                "## Sizing\n\n"
+                "I default to:\n\n"
+                "| Leg | DV01 |\n"
+                "|---|---:|\n"
+                "| 2Y | -50 |\n"
+                "| 5Y | +100 |\n"
+                "| 10Y | -50 |\n\n"
+                "DV01-neutral, ~3:1:3 in face value. "
+                "Adjust the wings if your view is asymmetric.\n\n"
+                "## Risk\n\n"
+                "1. **Sudden steepening**: hot CPI + Fed reaction "
+                "function flip. Stop is +25bp on the wings.\n"
+                "2. **Sudden flattening**: recession trade; "
+                "front-end rallies into the belly.\n"
+                "3. *~~Idiosyncratic auction noise~~* is usually "
+                "transitory; do not stop on it."),
+        },
+        {
+            "date": "2026-04-23",
+            "author": "K. Lim",
+            "title": "EUR positioning: short EUR/USD into Lagarde",
+            "topic": "FX",
+            "tags": "EUR, USD, ECB",
+            "minutes": 4,
+            "summary": ("Tactical short EUR/USD into Lagarde "
+                         "press conference; entry 1.1020, target "
+                         "1.0950, stop 1.1080."),
+            "body": (
+                "## Setup\n\n"
+                "EUR has been **range-bound** for three weeks, "
+                "1.0980-1.1060. ECB cut path is fully priced; "
+                "I see asymmetric risk into Lagarde.\n\n"
+                "Trade:\n\n"
+                "| | Level |\n"
+                "|---|---|\n"
+                "| Entry | 1.1020 |\n"
+                "| Target | 1.0950 |\n"
+                "| Stop | 1.1080 |\n"
+                "| R/R | 1.2 |\n\n"
+                "## Catalyst\n\n"
+                "Three things to listen for:\n\n"
+                "1. Service-prices framing (sticky vs cooling).\n"
+                "2. Wage-growth language (deceleration vs "
+                "stable).\n"
+                "3. Any pushback on **June** vs September for "
+                "the first cut.\n\n"
+                "> If she leans into 'broadly on track' "
+                "disinflation **and** signals June is on the "
+                "table, EUR breaks 1.10."),
+        },
+        {
+            "date": "2026-04-22",
+            "author": "M. Reyes",
+            "title": "Front-end UST: positioning vs price",
+            "topic": "Rates",
+            "tags": "UST, positioning, CFTC",
+            "minutes": 6,
+            "summary": ("CFTC futures show net specs short 140k 2Y "
+                         "contracts. Net dealer long was the largest "
+                         "since 2019. The pain trade is a rally."),
+            "body": (
+                "## Positioning\n\n"
+                "The **CFTC TFF** report shows specs short ~140k "
+                "2Y contracts (-0.5z vs 5Y avg). The mirror image "
+                "is dealers long; this is the largest net dealer "
+                "long since 2019.\n\n"
+                "Mechanically:\n\n"
+                "1. Specs are short.\n"
+                "2. Dealers are long.\n"
+                "3. Real money is moderately long; this is the "
+                "balance.\n\n"
+                "## What changes my mind\n\n"
+                "- A clean 2Y break above 4.40% with no headline "
+                "would tell me dealers are flipping.\n"
+                "- A failed rally on a soft NFP would tell me "
+                "the spec base has rotated.\n\n"
+                "> The pain trade is a 2Y rally; specs cover and "
+                "dealers monetize. Short-vol carry trades on the "
+                "front-end **work** in this setup."),
+        },
+        {
+            "date": "2026-04-22",
+            "author": "P. Singh",
+            "title": "Apple services: re-rating or a one-off?",
+            "topic": "Equity",
+            "tags": "AAPL, services, re-rating",
+            "minutes": 5,
+            "summary": ("AAPL services 14% y/y vs 8% trailing 4Q "
+                         "average. Buy-side debate: structural "
+                         "re-rating or pulling forward?"),
+            "body": (
+                "## What happened\n\n"
+                "Apple Q2 services revenue was **$24.2bn**, +14% "
+                "y/y vs an 8% trailing 4Q average. The largest "
+                "single beat on services in three years.\n\n"
+                "## Bull case\n\n"
+                "1. Subscription mix is hardening: video, music, "
+                "cloud, news all growing double digits.\n"
+                "2. App Store take rate stable despite EU/US "
+                "regulatory pressure.\n"
+                "3. AI-services bundle (rumored) starts to drip "
+                "into the FY27 estimate stack.\n\n"
+                "## Bear case\n\n"
+                "1. China iPhone weakness offsets services "
+                "growth at the consolidated level.\n"
+                "2. *Pulling forward* of subscription renewals "
+                "from a Q3 calendar shift.\n"
+                "3. Services margin pressure once AI compute "
+                "costs hit COGS.\n\n"
+                "## Trade implication\n\n"
+                "> Long AAPL Q3 vol via straddle. The buy/sell "
+                "side dispersion on services is the largest in "
+                "the cohort; expect a 5-7% post-print move.\n\n"
+                "Skip the ~~outright long~~ trade -- the China "
+                "tail is real."),
+        },
+        {
+            "date": "2026-04-21",
+            "author": "G. Burghardt",
+            "title": "When does carry stop working?",
+            "topic": "Rates",
+            "tags": "carry, regime, vol",
+            "minutes": 7,
+            "summary": ("Three signals for the carry-regime "
+                         "rolling over: realized vol breakout, "
+                         "MOVE > 110, and a 2s5s spread move > "
+                         "1z."),
+            "body": (
+                "## The setup\n\n"
+                "Carry trades work when:\n\n"
+                "1. The curve is positively sloped (so roll-"
+                "down is positive).\n"
+                "2. Realized vol is contained (so the carry "
+                "outpaces the noise).\n"
+                "3. The Fed reaction function is well anchored "
+                "(so the tails are bounded).\n\n"
+                "All three are **currently true**. None are "
+                "permanent.\n\n"
+                "## Three regime-rollover signals\n\n"
+                "Order matters; the first one tends to lead the "
+                "next two by 2-4 weeks.\n\n"
+                "1. **MOVE index > 110**. Currently 78. Fed "
+                "uncertainty is the marginal driver.\n"
+                "2. **5d realized 10Y vol > 8 vols**. Currently "
+                "6.0. A breakout means dealers have to widen.\n"
+                "3. **2s5s break of 1z**. Currently flat; a 1z "
+                "break tells you the front-end pricing is "
+                "shifting.\n\n"
+                "## Trades to watch\n\n"
+                "* If signal 1 hits: cut fly size by 50%.\n"
+                "* If 1+2 hit: flatten the fly entirely.\n"
+                "* If 1+2+3 hit: flip to a long-vol expression.\n\n"
+                "> The cleanest hedge is a **payer ladder** in "
+                "1Y-1Y; roughly delta-neutral, gets paid if any "
+                "of the three signals fires."),
+        },
+        {
+            "date": "2026-04-21",
+            "author": "T. Nakamura",
+            "title": "BoJ June review: what to listen for",
+            "topic": "Policy",
+            "tags": "BoJ, JPY, Ueda",
+            "minutes": 4,
+            "summary": ("BoJ governor Ueda flagged a 'likely' "
+                         "June review. Three things matter: "
+                         "wage-growth read, JGB purchase taper "
+                         "schedule, and FX language."),
+            "body": (
+                "## Why June matters\n\n"
+                "The BoJ has been the slowest of the G3 "
+                "central banks to normalize. June is the "
+                "earliest plausible window for a meaningful "
+                "**second hike** + JGB taper announcement.\n\n"
+                "## Three things to listen for\n\n"
+                "1. **Wage-growth read.** Shunto results "
+                "outperformed; if Ueda upgrades the language, "
+                "the case for a hike strengthens.\n"
+                "2. **JGB purchase schedule.** A pre-announced "
+                "taper would be the biggest signal.\n"
+                "3. **FX language.** USDJPY 156+ has put MoF "
+                "back in the picture; coordination matters.\n\n"
+                "> The risk is the BoJ talks about wages "
+                "carefully without committing to action; this "
+                "would be **dovish at the margin**, fueling "
+                "another leg of yen weakness."),
+        },
+        {
+            "date": "2026-04-20",
+            "author": "M. Reyes",
+            "title": "5Y auction tail: what it tells us",
+            "topic": "Rates",
+            "tags": "UST, auction, 5Y",
+            "minutes": 3,
+            "summary": ("Today's 5Y stopped 0.4bp through. BTC "
+                         "2.42x vs 5-auction avg 2.45x. Modest "
+                         "concession; not a regime signal."),
+            "body": (
+                "## The print\n\n"
+                "$70bn 5Y stopped at **4.215%**, **0.4bp tail**. "
+                "Bid-to-cover 2.42x (5-auction avg 2.45x). "
+                "Indirect bid 62% (avg 65%).\n\n"
+                "## Read\n\n"
+                "1. Tail is **modest**; not a 2-bp+ regime "
+                "signal.\n"
+                "2. Indirect bid soft but within range.\n"
+                "3. Concession was visible 30min ahead in cash; "
+                "auction was *priced in*.\n\n"
+                "> No action; the auction was a non-event "
+                "wrapped in headline noise."),
+        },
+        {
+            "date": "2026-04-19",
+            "author": "K. Lim",
+            "title": "DXY's correlation with the front-end has flipped",
+            "topic": "FX",
+            "tags": "DXY, USD, correlation",
+            "minutes": 5,
+            "summary": ("60d rolling correlation between DXY and "
+                         "US 2Y has flipped negative for the "
+                         "first time since 2022. What it means "
+                         "for FX positioning."),
+            "body": (
+                "## The chart\n\n"
+                "60d rolling correlation between DXY (level) "
+                "and US 2Y (level) has flipped from +0.6 to "
+                "**-0.2** over the last six weeks. First "
+                "negative print since 2022.\n\n"
+                "## Why it might matter\n\n"
+                "1. The **rates-driven** USD trade weakens. "
+                "Currency now responds more to growth "
+                "differentials than rate differentials.\n"
+                "2. **Carry trades into USD** lose their "
+                "anchor; expect more two-way price action.\n"
+                "3. **EUR/USD vol** is mispricing this regime "
+                "shift; the curve is too flat in the 1m-3m "
+                "tenor.\n\n"
+                "## Trade\n\n"
+                "Long EUR/USD 1m-3m vol via calendar.\n\n"
+                "> Hedge with a digital strangle so the "
+                "carry into the position is contained."),
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def build_research_feed(out_dir: Path) -> Dict[str, Any]:
+    """Substack-style article feed: list of analyst notes with
+    truncated takeaway, click any row for full markdown body in a
+    drill-down modal. Curator commentary lives in note widgets up
+    top. Stress-tests the rich row-click pattern with markdown
+    sections at scale."""
+    df = pull_research_articles()
+    n_articles = len(df)
+    n_authors = df["author"].nunique()
+
+    manifest = {
+        "schema_version": 1,
+        "id": "research_feed",
+        "title": "Research feed",
+        "description": ("Substack-style aggregator: analyst notes "
+                         "as rows, full markdown bodies in row-click "
+                         "drilldown. Curator commentary in note "
+                         "widgets up top. Demonstrates how to package "
+                         "a reading-list as an interactive artifact."),
+        "theme": "gs_clean",
+        "palette": "gs_primary",
+        "metadata": {
+            "data_as_of": "2026-04-24T17:00:00Z",
+            "generated_at": "2026-04-24T17:05:00Z",
+            "sources": ["GS Research", "Curated external"],
+            "tags": ["research", "reading-list", "feed"],
+            "summary": {
+                "title": "Editor's read this week",
+                "body": (
+                    f"**{n_articles} pieces from {n_authors} authors** "
+                    "this week. The cohort is converging on a "
+                    "**carry-regime** narrative across rates and FX, "
+                    "with the equity desk arguing for **vol** as the "
+                    "expression rather than direction.\n\n"
+                    "1. **Burghardt** anchors the rates-carry view; "
+                    "his fly piece is the load-bearing read.\n"
+                    "2. **Lim** picks up the FX corollary -- short "
+                    "EUR/USD vol-of-vol play.\n"
+                    "3. **Singh** on AAPL: long vol via "
+                    "straddle, not outright.\n\n"
+                    "> Pick one Burghardt piece and one tactical "
+                    "trade idea; you'll have today covered."
+                ),
+            },
+            "methodology": (
+                "## Source\n\n"
+                "Synthetic feed for demo. Production version pulls "
+                "from the GS Research API + a curated external set "
+                "(buyside notes, blog posts, podcasts).\n\n"
+                "## Tagging\n\n"
+                "Tags are author-supplied; topic is curator-"
+                "assigned for filtering."
+            ),
+        },
+        "datasets": {
+            "articles": df,
+        },
+        "filters": [
+            {"id": "author_f", "type": "multiSelect",
+              "default": list(df["author"].unique()),
+              "options": list(df["author"].unique()),
+              "field": "author", "label": "Author",
+              "targets": ["articles_table"]},
+            {"id": "topic_f", "type": "radio", "default": "All",
+              "all_value": "All",
+              "options": (["All"]
+                           + sorted(df["topic"].unique().tolist())),
+              "field": "topic", "label": "Topic",
+              "targets": ["articles_table"]},
+            {"id": "search_f", "type": "text", "default": "",
+              "field": "title", "op": "contains",
+              "label": "Title contains",
+              "placeholder": "e.g. carry, AAPL, BoJ",
+              "targets": ["articles_table"]},
+        ],
+        "layout": {"kind": "grid", "rows": [
+            [
+                {"widget": "note", "id": "feat", "w": 12,
+                  "kind": "thesis",
+                  "title": "Featured: 'Rolling down the curve' (Burghardt)",
+                  "icon": "*",
+                  "body": (
+                      "Foundational read on butterflies in a "
+                      "carry-regime. Reframes the 2026 rates "
+                      "playbook: **the dominant factor is roll-"
+                      "down, not direction**. Eight-minute read; "
+                      "I'd put it on every desk.\n\n"
+                      "Three things to take away:\n\n"
+                      "1. The cleanest range expression is a fly, "
+                      "not a duration trade.\n"
+                      "2. Belly roll-down (+6bp/3M) is the highest "
+                      "since 2019.\n"
+                      "3. Skip the 5s30s flattener; negative carry "
+                      "eats the trade.\n\n"
+                      "> Click the row in the feed below for the "
+                      "full body, including DV01 sizing and the "
+                      "regime-rollover playbook from the companion "
+                      "piece.")},
+            ],
+            [
+                {"widget": "note", "id": "curator_carry", "w": 6,
+                  "kind": "insight",
+                  "title": "Theme: carry across asset classes",
+                  "body": (
+                      "Three pieces converge on the carry view:\n\n"
+                      "1. **Burghardt** -- rates-curve roll-down\n"
+                      "2. **Reyes** -- positioning vs price (front-"
+                      "end UST)\n"
+                      "3. **Burghardt** (companion) -- regime-"
+                      "rollover signals\n\n"
+                      "> The triangulation is rare. When three "
+                      "pieces with different framings reach the "
+                      "same conclusion, the conclusion is more "
+                      "load-bearing than any one piece.")},
+                {"widget": "note", "id": "curator_vol", "w": 6,
+                  "kind": "watch",
+                  "title": "Theme: vol > direction",
+                  "body": (
+                      "The cross-asset vol case is being made "
+                      "from three sides:\n\n"
+                      "1. **Lim** -- DXY-rates correlation flip "
+                      "argues for FX vol\n"
+                      "2. **Singh** -- AAPL straddle, not outright\n"
+                      "3. **Burghardt** -- payer ladder as the "
+                      "regime hedge\n\n"
+                      "Connector: each author argues against a "
+                      "**directional** expression. This is "
+                      "informative on its own.")},
+            ],
+            [
+                {"widget": "note", "id": "curator_skip", "w": 12,
+                  "kind": "context",
+                  "title": "What I would skip",
+                  "body": (
+                      "Three pieces I would not prioritize on a "
+                      "tight schedule:\n\n"
+                      "* **5Y auction read** -- non-event by the "
+                      "author's own admission; useful as a tape-"
+                      "reading reference but not actionable.\n"
+                      "* **Apple services** -- the bull/bear is "
+                      "well-trafficked; the trade idea is the "
+                      "value-add.\n"
+                      "* **BoJ June review** -- worth bookmarking "
+                      "for late May; the actionable date is the "
+                      "preview window, not now.\n\n"
+                      "> *Bookmark the BoJ piece for May 25; that's "
+                      "the read window for June.*")},
+            ],
+            [
+                {"widget": "table", "id": "articles_table", "w": 12,
+                  "dataset_ref": "articles",
+                  "title": "Article feed",
+                  "info": ("Click any row for the full markdown "
+                           "body in a drill-down panel. Filter by "
+                           "author / topic / title-search above."),
+                  "searchable": True, "sortable": True,
+                  "max_rows": 30, "row_height": "compact",
+                  "downloadable": False,
+                  "columns": [
+                      {"field": "date", "label": "Date",
+                        "align": "left", "format": "date"},
+                      {"field": "author", "label": "Author",
+                        "align": "left"},
+                      {"field": "title", "label": "Title",
+                        "align": "left",
+                        "tooltip": "Click row for full body"},
+                      {"field": "topic", "label": "Topic",
+                        "align": "left"},
+                      {"field": "tags", "label": "Tags",
+                        "align": "left"},
+                      {"field": "minutes", "label": "Minutes",
+                        "align": "right", "format": "integer",
+                        "tooltip": "Estimated read time"},
+                  ],
+                  "row_highlight": [
+                      {"field": "author", "op": "==",
+                        "value": "G. Burghardt", "class": "info"},
+                  ],
+                  "row_click": {
+                      "title_field": "title",
+                      "subtitle_template": (
+                          "{author} . {date} . {topic} . "
+                          "{minutes} min read"),
+                      "detail": {
+                          "wide": True,
+                          "sections": [
+                              {"type": "stats",
+                                "fields": [
+                                    {"field": "author",
+                                      "label": "Author"},
+                                    {"field": "topic",
+                                      "label": "Topic"},
+                                    {"field": "minutes",
+                                      "label": "Read time",
+                                      "format": "integer",
+                                      "suffix": " min"},
+                                    {"field": "date",
+                                      "label": "Date"},
+                                ]},
+                              {"type": "markdown",
+                                "title": "TL;DR",
+                                "template": "> {summary}"},
+                              {"type": "markdown",
+                                "title": "Full body",
+                                "template": "{body}"},
+                              {"type": "markdown",
+                                "title": "Filed under",
+                                "template":
+                                    "Tags: `{tags}`."},
+                          ],
+                      },
+                  }},
+            ],
+        ]},
+        "links": [],
+    }
+    r = compile_dashboard(manifest,
+                           output_path=str(out_dir / "dashboard.html"))
+    thumb = _thumbnail(r.html_path, out_dir / "thumbnail.png",
+                        width=1400, height=1500)
+    return _result(r, thumb)
+
+
+# =============================================================================
 # DEMO REGISTRY + SHARED HELPERS
 # =============================================================================
 
@@ -3292,6 +5696,49 @@ DEMO_REGISTRY: Dict[str, Dict[str, Any]] = {
                          "markdown / charts / sub-table sections)."),
         "kind": "dashboard",
         "build": build_screener_studio,
+    },
+    "bond_carry_roll": {
+        "title": "Bond carry & roll (chart click_popup)",
+        "description": ("Click any point on the carry/roll scatter "
+                         "to open a per-bond modal: stats, issuer "
+                         "blurb, spread + price history filtered to "
+                         "that CUSIP, and recent events. Plus simple-"
+                         "mode click popups on a top-10 bar and a "
+                         "sector summary chart."),
+        "kind": "dashboard",
+        "build": build_bond_carry_roll,
+    },
+    "news_wrap": {
+        "title": "News desk (intraday market wrap)",
+        "description": ("Text-heavy news desk dashboard: summary "
+                         "banner, six semantic note kinds, sortable "
+                         "headlines table with full-body markdown "
+                         "drilldown, per-asset commentary + intraday "
+                         "sparklines, calendar + reading list. "
+                         "Stress-tests the prose surfaces."),
+        "kind": "dashboard",
+        "build": build_news_wrap,
+    },
+    "fomc_brief": {
+        "title": "FOMC document brief",
+        "description": ("Document-first dashboard: statement diff "
+                         "with prose narrative, minutes excerpts "
+                         "(blockquotes by topic), recent speakers "
+                         "table + hawk-dove bar chart with "
+                         "row-click verbatim quote modal, dot plot "
+                         "panel with desk commentary."),
+        "kind": "dashboard",
+        "build": build_fomc_brief,
+    },
+    "research_feed": {
+        "title": "Research feed (Substack-style aggregator)",
+        "description": ("Reading-list-meets-aggregator: featured "
+                         "article note up top, curator commentary "
+                         "across themes, full article feed with "
+                         "row-click drilldown rendering each piece's "
+                         "full markdown body in a side panel."),
+        "kind": "dashboard",
+        "build": build_research_feed,
     },
 }
 

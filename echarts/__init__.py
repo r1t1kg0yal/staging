@@ -53,7 +53,13 @@ Layout (after consolidation):
     rendering.py           editor HTML + dashboard HTML + PNG export
     samples.py             chart + dashboard sample registry (test fixtures)
     demos.py               5 end-to-end demo scenarios + CLI + gallery
-    tests.py               all tests
+    tests.py               unit tests + stress tests (interactive +
+                            argparse CLI)
+    README.md              full reference (chart types, knobs, dashboards,
+                            refresh, anti-patterns)
+    DATA_SHAPES.md         DataFrame organisation philosophy: tidy vs wide,
+                            per-archetype templates, reuse, filter alignment,
+                            drill-down patterns
     archive/               legacy files kept for reference
 
 Design: the manifest.json is the source of truth. compile_dashboard() takes
