@@ -435,3 +435,202 @@ b. Is there a writer/reader pattern PRISM already uses for "single JSON
 End-of-prompt reminder: if anything cannot be answered, end with a
 `## Could not resolve` section. Exact paths, exact code, exact JSONs --
 no paraphrasing.
+
+
+
+
+
+
+# Context-extraction: community dashboards round 2
+
+Cursor is finalising the design for a Community Dashboards feature on
+the PRISM dashboards portal. The previous extraction round (filed at
+`staging/community-dashboards-prompts.md` on the staging side, folded
+into `prism/dashboards-portal.md` and `prism/dashboard-refresh.md`)
+covered the listing views, click-through views, identity model, and
+refresh API verbatim. Cursor now has eight residual gaps that decide
+URL grammar, runner discovery semantics, and where exactly to insert
+new code. Each section below asks for verbatim source -- exact bytes,
+exact line numbers, no paraphrasing. Use `list_ai_repo` to locate
+files and `execute_analysis_script` to read them on disk.
+
+If a section cannot be resolved (file moved, function removed,
+behaviour different than described), end the reply with a brief
+`## Could not resolve` section listing the bullet IDs that failed and
+why. Do NOT include a "Frictions" section.
+
+---
+
+## A. UserRegistry semantics
+
+a. Find the file that defines `UserRegistry` (likely under
+   `ai_development/core/common/` or sibling). Report the full file
+   path.
+
+b. Paste verbatim the full `UserRegistry` class body, including
+   `__init__`, `instance()` classmethod, and the `get_all_kerberos_ids`
+   method. Include the surrounding imports and module-level singleton
+   wiring. If the class is defined across multiple files, paste each
+   relevant chunk with its file path.
+
+c. Tell me literally how `get_all_kerberos_ids` produces its list:
+   - Does it `s3_manager.list(prefix='users/')` and parse kerberos
+     out of the prefix?
+   - Does it query a Django ORM model?
+   - Does it read a JSON file?
+   - Something else?
+
+d. Concrete behavioural question: if I create a fresh S3 prefix
+   `users/_prism_examples/dashboards/` (with valid registry +
+   artefacts) but DO NOT register `_prism_examples` anywhere else
+   in PRISM (no Django user object, no entry in any user-list
+   JSON), will `get_all_kerberos_ids()` include it on the next
+   call? Yes / no, with the exact reason from the source.
+
+---
+
+## B. Cross-user URL precedent
+
+a. Paste verbatim the FULL contents of `mysite/news/urls.py`. Include
+   `app_name`, every entry in `urlpatterns`, and the imports.
+
+b. Paste verbatim the FULL contents of `mysite/mysite/urls.py` (root).
+
+c. Repo-wide: are there ANY URL patterns today that contain another
+   user's kerberos (or analogous user identifier) in the path?
+   Specifically search for path strings containing `<kerberos>`,
+   `<author>`, `<user>`, `<owner>`, `users/<...>` (Django path
+   syntax), or similar. Paste verbatim every match found, with
+   the file path and line number. If none, say "no matches" and list
+   the search patterns you ran.
+
+d. Confirm yes / no with a one-sentence reason: as of right now, is
+   there ANY route in PRISM that lets user A's browser load
+   S3-stored content owned by user B?
+
+---
+
+## C. views.py specifics (gaps from round 1)
+
+a. In `mysite/news/views.py`, paste a table of EVERY view function
+   whose name contains "dashboard", "refresh", "share", or "community".
+   For each row: function name, decorators (one line), line range
+   (start-end), URL it serves (look up in news/urls.py).
+
+b. Paste verbatim the full body of `refresh_status_api` (the GET
+   endpoint that the polling loop hits). Include decorators and
+   surrounding imports if relevant.
+
+c. Find the `_get_prism_users` function. Paste verbatim its full
+   body and the file path. Also: how is the allowlist itself
+   sourced (env var, JSON file, hardcoded list, S3 read)? Paste
+   the source location verbatim.
+
+d. Total line count of `mysite/news/views.py`.
+
+e. Confirm verbatim the lines around `COMMUNITY_DASHBOARDS_CONFIG`
+   and `FRANCHISE_DASHBOARDS_CONFIG` -- I have the bodies, I just
+   need the line numbers (start-end) of each definition for
+   line-targeted edit instructions later.
+
+---
+
+## D. Templates: user_dashboards.html and base.html nav block
+
+a. Paste verbatim the full contents of
+   `mysite/news/templates/news/user_dashboards.html`. Include the
+   line count.
+
+b. Locate the nav-bar template that iterates
+   `nav_franchise_dashboards`, `nav_community_dashboards`, and
+   `nav_recent_observations`. (Likely `news/base.html` or an
+   include like `news/_nav.html`.) Report the file path and paste
+   verbatim ONLY the `<nav>` (or equivalent) block that contains
+   those three loops -- not the whole file. Include 3-5 lines of
+   surrounding context above and below.
+
+c. Confirm the file path of the dashboards listing template
+   (should be `mysite/news/templates/news/dashboards.html`,
+   49 lines per round 1).
+
+---
+
+## E. refresh_dashboards.py specifics
+
+a. Paste verbatim the full `main()` function of
+   `ai_development/jobs/hourly/refresh_dashboards.py`. Include
+   decorators, error handling, and the lines immediately following
+   the `refresh_all_user_dashboards(s3_mgr)` call (so I can see
+   exactly where to insert a new "build dashboards index" hook
+   after Phase 2 finishes).
+
+b. Paste verbatim the full body of `refresh_user_dashboards(s3_mgr,
+   kerberos)` -- the per-user iterator that round 1 referenced but
+   didn't quote. Include the per-dashboard loop where
+   `_should_refresh` is consulted and `refresh_enabled` is checked.
+
+c. Total line count of `refresh_dashboards.py`. Top-level function
+   index (just names + line numbers).
+
+---
+
+## F. refresh_runner.py
+
+a. Paste verbatim the FULL contents of
+   `ai_development/jobs/refresh_runner.py`. (This is the script
+   spawned by `refresh_dashboard_api` via `subprocess.Popen` --
+   should be short.)
+
+b. In particular: does it do anything beyond parse `--kerberos`,
+   `--dashboard-id`, `--dashboard-folder` and dispatch to the
+   refresh logic? Any S3 writes, status updates, or user-manifest
+   updates that happen INSIDE the runner (vs in
+   refresh_dashboards.py)?
+
+---
+
+## G. user_manifest.py: dashboard pointer path
+
+a. Paste verbatim the FULL body of
+   `UserManifestManager.update_dashboard_pointer` (round 1 has the
+   docstring + a behavioural summary but not the verbatim body).
+
+b. Paste verbatim the dispatcher `update_user_manifest(kerberos,
+   artifact_type=..., **kwargs)` -- specifically the branch handling
+   `artifact_type == 'dashboard'`.
+
+c. Confirm yes / no: does adding `shared` and `shared_at` fields to
+   the per-dashboard registry entry require ANY code change in
+   `user_manifest.py` (e.g. validation that rejects unknown fields,
+   schema enforcement, anything that would silently strip them)?
+   Read the relevant code and answer with a citation.
+
+---
+
+## H. Cross-cutting: existing share / community / public surface
+
+The round 1 search for `shared`, `public`, `community`, `visibility`,
+`discoverable`, `published` returned zero structural matches. This is
+a follow-up to confirm nothing has shifted since 2026-04-27 and to
+check three specific places:
+
+a. `ai_development/core/user_manifest.py` -- does the manifest
+   schema admit any sharing-adjacent fields under `pointers.*` or
+   any other top-level key? Grep for `shared`, `share_`, `public`,
+   `community`, `visibility` and paste any matches verbatim. If no
+   matches, say so.
+
+b. `mysite/news/urls.py` and `mysite/news/views.py` -- any view or
+   URL that hints at a previously-attempted share / publish /
+   community feature? Paste any matches verbatim.
+
+c. The S3 paths `secondary/community/` and `secondary/dashboards/`
+   -- do either of these prefixes exist on S3 today? List their
+   contents (or report "does not exist"). I want to know if I'm
+   greenfielding the index path or stepping on existing data.
+
+---
+
+End-of-prompt reminder: every answer must be grounded in source
+on disk. If introspection produces no result for a section, list
+the section ID under `## Could not resolve` rather than guessing.
