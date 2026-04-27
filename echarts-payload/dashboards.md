@@ -1018,9 +1018,12 @@ Tool 2: build.py       Compose the initial manifest (with embedded data, just
                        build.py as a string, persist to
                        {DASHBOARD_PATH}/scripts/build.py, then exec build.py
                        FROM S3. The exec writes manifest.json + dashboard.html.
-Tool 3: register       Upsert entry in dashboards_registry.json; call
-                       update_user_manifest(kerberos, artifact_type='dashboard');
-                       print portal URL.
+Tool 3: register       Load dashboards_registry.json (seed if missing),
+                       append/replace entry by id in registry['dashboards']
+                       (NOT as a top-level key — runner only iterates the
+                       list), save, verify by re-load, then call
+                       update_user_manifest(kerberos, artifact_type='dashboard')
+                       and print portal URL.
 ```
 
 **The persisted script is the source of truth — write it first, then run it from S3.** PRISM authors each script as a Python string, `s3_manager.put`s it to `{DASHBOARD_PATH}/scripts/<name>.py`, then `s3_manager.get`s it back and runs it via `exec(compile(src, ...), ns)` with the same namespace shape the refresh runner uses. The pull happens once (inside Tool 1's exec); the compile happens once (inside Tool 2's exec); build-time and refresh-time are byte-identical.
@@ -1146,7 +1149,73 @@ print('[Tool 2] complete; ready for Tool 3 (register)')
 
 #### Tool 3 — register
 
-Writes the per-dashboard pipeline manifest, upserts an entry into `users/{kerberos}/dashboards/dashboards_registry.json` (`id`, `name`, `description`, `created_at`, `last_refreshed`, `last_refresh_status`, `refresh_enabled`, `refresh_frequency`, `folder`, `html_path`, `data_path`, `tags`, `keep_history`, `history_retention_days`), then calls `update_user_manifest(kerberos, artifact_type='dashboard')`. Print the portal URL: `http://reports.prism-ai.url.gs.com:8501/profile/dashboards/{DASHBOARD_NAME}/`.
+**There is no `register_dashboard()` helper.** Neither the sandbox nor the refresh runner injects a registry-writing function — Tool 3 hand-rolls a load → list-append → save → pointer-update from scratch. The hourly refresh runner iterates `registry["dashboards"]`; a top-level-keyed entry (`registry[DASHBOARD_NAME] = {...}`) is invisible to it, returns 404 on every refresh, and never produces a `refresh_status.json`. Schema reference for the field shapes lives in `prism/dashboard-refresh.md` §6; the only fields a builder owns are below — `last_refreshed` and `last_refresh_status` are runner-owned and stay `null` until the first real refresh.
+
+```python
+import json
+from datetime import datetime, timezone
+
+REGISTRY_PATH = f'users/{KERBEROS}/dashboards/dashboards_registry.json'
+PORTAL_URL    = f'http://reports.prism-ai.url.gs.com:8501/profile/dashboards/{DASHBOARD_NAME}/'
+
+now_iso = datetime.now(timezone.utc).isoformat()
+
+try:
+    registry = json.loads(s3_manager.get(REGISTRY_PATH).rstrip(b'\x00').decode('utf-8'))
+except Exception:
+    registry = {'dashboards': [], 'last_updated': now_iso}
+
+if 'dashboards' not in registry or not isinstance(registry['dashboards'], list):
+    registry['dashboards'] = []
+
+new_entry = {
+    'id':                  DASHBOARD_NAME,
+    'name':                'Rates Monitor',
+    'description':         'Daily monitor of the US rates curve.',
+    'created_at':          now_iso,
+    'last_refreshed':      None,
+    'last_refresh_status': None,
+    'refresh_enabled':     True,
+    'refresh_frequency':   'daily',
+    'folder':              DASHBOARD_PATH,
+    'html_path':           f'{DASHBOARD_PATH}/dashboard.html',
+    'data_path':           f'{DASHBOARD_PATH}/data',
+    'tags':                ['rates'],
+    'keep_history':        False,
+}
+
+existing_ids = [d.get('id') for d in registry['dashboards']]
+if DASHBOARD_NAME in existing_ids:
+    idx = existing_ids.index(DASHBOARD_NAME)
+    new_entry['created_at'] = registry['dashboards'][idx].get('created_at', now_iso)
+    registry['dashboards'][idx] = new_entry
+else:
+    registry['dashboards'].append(new_entry)
+
+registry['last_updated'] = now_iso
+s3_manager.put(json.dumps(registry, indent=2).encode('utf-8'), REGISTRY_PATH)
+
+verify = json.loads(s3_manager.get(REGISTRY_PATH).rstrip(b'\x00').decode('utf-8'))
+if DASHBOARD_NAME not in [d.get('id') for d in verify.get('dashboards', [])]:
+    raise RuntimeError(f'[Tool 3] {DASHBOARD_NAME} not in registry["dashboards"] after write')
+
+update_user_manifest(KERBEROS, artifact_type='dashboard')
+print(f'[Tool 3] registered {DASHBOARD_NAME}; portal: {PORTAL_URL}')
+```
+
+Path conventions (verified against live registries): paths have **no leading slash** (`users/...`, not `/users/...`); `folder` has **no trailing slash**; `data_path` is the **`data/` directory**, not `manifest.json`. `data_path` is optional but the portal uses it to surface the dashboard's data folder, so set it.
+
+**Anti-pattern.** Do NOT write the new entry as a top-level key:
+
+```python
+# BROKEN — runner ignores this entry, refresh returns 404 forever
+registry[DASHBOARD_NAME] = new_entry
+s3_manager.put(json.dumps(registry).encode(), REGISTRY_PATH)
+```
+
+The resulting registry looks structurally fine (`{"dashboards": [], "last_updated": "...", "<id>": {...}}`) but the dashboard is invisible to `jobs/hourly/refresh_dashboards.py`, which iterates `registry["dashboards"]` only. Two real dashboards (`rates_fx_corr`, `bond_carry_roll`) hit this on 2026-04-27 and required hand-repair. The verify-by-re-load step in the canonical Tool 3 above catches this immediately.
+
+**`update_user_manifest` is NOT a registry-write step.** It only updates `users/{kerberos}/manifest.json`'s `pointers.dashboards` block (count, active_count, last_refreshed, registry_path). It reads the registry to compute those numbers but never writes the registry. The registry must already be saved on S3 with the new entry appended into `dashboards[]` before this call — which is why the canonical Tool 3 runs the put → verify → `update_user_manifest` sequence in that order.
 
 ### 9.2 Pull primitives + `save_artifact` cheat sheet
 
@@ -1387,6 +1456,11 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 | Pulling data and/or compiling in-session, *then* writing scripts to S3 as an afterthought — two divergent code paths | Write the script to S3 first, `s3_manager.get` it back, `exec` it |
 | Inlining data pull + manifest build into one tool call so neither `pull_data.py` nor `build.py` exist as standalone files | Use the three-tool model: Tool 1 persists+execs `pull_data.py`; Tool 2 persists+execs `build.py`; Tool 3 registers |
 | Saving scripts to `SESSION_PATH/scripts/` instead of `{DASHBOARD_PATH}/scripts/` | Refresh runner only looks at `{DASHBOARD_PATH}/scripts/` |
+| `registry[DASHBOARD_NAME] = entry` — writing the new dashboard as a TOP-LEVEL key in `dashboards_registry.json` | `registry['dashboards'].append(entry)` (or replace-by-id). The hourly refresh runner only iterates `registry['dashboards']`; a top-level-keyed entry is invisible → 404 → no `refresh_status.json`. There is no `register_dashboard()` helper; the canonical hand-rolled upsert lives in §9.1 Tool 3 |
+| Treating `update_user_manifest(kerberos, artifact_type='dashboard')` as the registry-write step | It only updates `users/{kerberos}/manifest.json`'s pointer block. Save the registry with `s3_manager.put(...)` FIRST, then call the wrapper |
+| Setting `last_refreshed` / `last_refresh_status` to the build timestamp at registration time | Leave both as `null` at registration; the refresh runner owns those fields and overwrites them on the first real refresh |
+| Writing `history_retention_days` into the registry entry | Field is not part of the live schema (2026-04-27); treat as planned/unimplemented, do not write it |
+| S3 paths with leading slash (`/users/...`) or `folder` with trailing slash | Live registry convention: no leading slash, no trailing slash on `folder`; `data_path` points to the `data/` directory, not `manifest.json` |
 
 **Data routing (Rule 5 + `pull_*_data` quirks):**
 
@@ -1416,7 +1490,8 @@ Run `s3_manager.list()` on `{DASHBOARD_PATH}` and verify each path:
 **Configuration:**
 
 - `metadata.kerberos` + `dashboard_id` + `data_as_of` set; `refresh_frequency` set; `refresh_enabled` defaults to `True`
-- Registry entry added; `update_user_manifest(kerberos, artifact_type='dashboard')` called
+- Registry entry **appended into `registry['dashboards']`** (not written as a top-level key); verify by re-loading and asserting `DASHBOARD_NAME in [d['id'] for d in registry['dashboards']]`
+- `update_user_manifest(kerberos, artifact_type='dashboard')` called AFTER the registry write succeeds (the wrapper updates the user manifest pointer block, it does not write the registry itself)
 
 **Data integrity:**
 
