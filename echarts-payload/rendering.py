@@ -5,7 +5,7 @@ Three concerns merged into one module:
 
     1. Single-chart editor HTML  (render_editor_html)
        Minimal-aesthetic interactive editor for one chart: knobs, spec-sheets,
-       raw JSON escape hatch. Used by make_echart() and the composites layer.
+       raw JSON escape hatch. Used by make_echart().
 
     2. Dashboard HTML            (render_dashboard_html)
        GS-branded self-contained dashboard: cards, tabs, grid, global filters,
@@ -50,14 +50,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 _here = Path(__file__).resolve().parent
 if str(_here) not in sys.path:
     sys.path.insert(0, str(_here))
-
-# Local-dev only: dev fixtures (samples.py) live under ``../dev/`` in
-# staging (sibling of this folder). In PRISM the payload lives at
-# ``ai_development/dashboards/`` and there is no ``dev/`` folder
-# anywhere up that path, so this branch is a no-op in production.
-_dev = _here.parent / "dev"
-if _dev.exists() and str(_dev) not in sys.path:
-    sys.path.insert(0, str(_dev))
 
 from config import (
     THEMES, PALETTES, DIMENSION_PRESETS, TYPOGRAPHY_OVERRIDES,
@@ -12040,125 +12032,3 @@ __all__ = [
     "save_dashboard_html_png",
     "find_chrome",
 ]
-
-
-# =============================================================================
-# CLI (smoke test)
-# =============================================================================
-
-def _cli_interactive() -> int:
-    print("""
-rendering -- interactive menu
-
-  1. render one chart sample to PNG
-  2. render all chart samples to PNG (gs_clean theme)
-  3. print Chrome binary path
-  q. quit
-""")
-    choice = input("choice [q]: ").strip().lower() or "q"
-    if choice == "q":
-        return 0
-    if choice == "3":
-        try:
-            print(f"chrome: {find_chrome()}")
-        except RuntimeError as e:
-            print(f"ERROR: {e}")
-        return 0
-    from samples import SAMPLES
-    out_dir = input("output dir [pngs_demo]: ").strip() or "pngs_demo"
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    if choice == "1":
-        names = sorted(SAMPLES.keys())
-        print("\n".join(f"  {i+1}. {n}" for i, n in enumerate(names)))
-        pick = input("sample [1]: ").strip() or "1"
-        name = names[int(pick) - 1] if pick.isdigit() else pick
-        path = save_chart_png(SAMPLES[name](), out / f"{name}.png",
-                                verbose=True)
-        print(f"wrote {path}")
-    else:
-        for name, fn in sorted(SAMPLES.items()):
-            try:
-                path = save_chart_png(fn(), out / f"{name}.png")
-                print(f"  ok  {name:24s} -> {path}")
-            except Exception as e:
-                print(f"  FAIL {name}: {e}")
-    return 0
-
-
-def main(argv: Optional[List[str]] = None) -> int:
-    import argparse
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv:
-        return _cli_interactive()
-    p = argparse.ArgumentParser(
-        "rendering",
-        description="HTML + PNG rendering smoke test.",
-    )
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    c1 = sub.add_parser("render",
-                          help="render one option JSON file to PNG")
-    c1.add_argument("input", help="path to JSON option file")
-    c1.add_argument("-o", "--output", required=True,
-                     help="output PNG path")
-    c1.add_argument("--width", type=int, default=900)
-    c1.add_argument("--height", type=int, default=520)
-    c1.add_argument("--theme", default="gs_clean")
-    c1.add_argument("--scale", type=int, default=2)
-    c1.add_argument("--background", default="#ffffff")
-    c1.add_argument("--verbose", action="store_true")
-
-    c2 = sub.add_parser("samples",
-                          help="render every chart sample to PNG")
-    c2.add_argument("--output-dir", default="pngs_demo")
-    c2.add_argument("--theme", default="gs_clean")
-    c2.add_argument("--scale", type=int, default=2)
-    c2.add_argument("--width", type=int, default=900)
-    c2.add_argument("--height", type=int, default=520)
-
-    c3 = sub.add_parser("chrome",
-                          help="print Chrome binary path")
-
-    args = p.parse_args(argv)
-    if args.cmd == "render":
-        option = json.loads(Path(args.input).read_text(encoding="utf-8"))
-        path = save_chart_png(
-            option, args.output,
-            width=args.width, height=args.height,
-            theme=args.theme, scale=args.scale,
-            background=args.background,
-            verbose=args.verbose,
-        )
-        print(f"wrote {path}")
-        return 0
-    if args.cmd == "samples":
-        from samples import SAMPLES
-        out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
-        ok = fail = 0
-        for name, fn in sorted(SAMPLES.items()):
-            try:
-                save_chart_png(
-                    fn(), out / f"{name}.png",
-                    width=args.width, height=args.height,
-                    theme=args.theme, scale=args.scale,
-                )
-                print(f"  ok   {name:24s}")
-                ok += 1
-            except Exception as e:
-                print(f"  FAIL {name}: {e}")
-                fail += 1
-        print(f"\n{ok} ok, {fail} failed. dir: {out.resolve()}")
-        return 0 if fail == 0 else 1
-    if args.cmd == "chrome":
-        try:
-            print(find_chrome())
-            return 0
-        except RuntimeError as e:
-            print(f"ERROR: {e}", file=sys.stderr)
-            return 1
-    return 2
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -5,11 +5,12 @@ Scope: dashboards only. ``compile_dashboard`` lowers a JSON manifest into
 an interactive HTML dashboard. ECharts is NOT the path PRISM uses for
 one-off charts in chat / email / report -- that surface lives in Altair
 (``ai_development/mcp/utils/chart_functions.py``). The two engines must
-not converge: do not surface ``make_echart``, ``EChartResult``,
-``ChartSpec``, or any ``make_2pack_*`` / ``make_3pack_*`` /
-``make_4pack_*`` / ``make_6pack_*`` symbol from this package as part of
-the PRISM-injected runtime namespace; they are internal substrate for
-``compile_dashboard``'s lowering pipeline only.
+not converge: do not surface ``make_echart`` or ``EChartResult`` from
+this package as part of the PRISM-injected runtime namespace; they are
+internal substrate for ``compile_dashboard``'s lowering pipeline only.
+Multi-panel composition is a manifest concern (rows / cols / tabs in
+the dashboard layout), not a separate one-off composite-canvas API --
+those n-pack composite helpers belong to Altair's static-PNG surface.
 
 PRISM-bound public surface (what ``execute_analysis_script`` should
 inject and what ``dashboards.md`` documents):
@@ -33,8 +34,6 @@ public injected surface):
     echart_studio.py     single-chart builder (used internally by the
                           dashboard compiler when lowering each
                           ``widget: chart`` in the manifest)
-    composites.py        multi-grid layouts (used internally by some
-                          dashboard rendering paths)
     rendering.py         editor HTML + dashboard HTML + headless-Chrome
                           PNG export (driven by ``compile_dashboard``)
 
