@@ -19,8 +19,7 @@ chart functions.
 | `make_6pack_grid()` | 3x2 composite |
 | `VLine`, `HLine`, `Segment`, `Band`, `Arrow` | Line/region annotations |
 | `PointLabel`, `PointHighlight`, `Callout` | Point/text annotations |
-| `LastValueLabel` | End-of-line direct labels for `multi_line` |
-| `Trendline` | Regression overlay for scatter charts |
+| `LastValueLabel`, `Trendline` | Series-aware annotations |
 
 `s3_manager`, `session_path`, and `user_id` are auto-injected at call time --
 never pass them explicitly.
@@ -167,8 +166,8 @@ mapping = {
 | `y_sort` | list | Explicit y-axis sort order (heatmap) |
 | `dual_axis_series` | list | Series names for right y-axis |
 | `invert_right_axis` | bool | Flip right y-axis (higher = bottom); standard rates pattern |
-| `trendline` | bool | Overall linear trendline (scatter only). Boolean shortcut. For `method=`, color, or label control use the `Trendline` annotation. |
-| `trendlines` | bool | Per-group linear trendlines (scatter_multi only). Boolean shortcut. Same fallback as above for fine control. |
+| `trendline` | bool | Overall trendline (scatter) |
+| `trendlines` | bool | Per-group trendlines (scatter_multi) |
 | `stack` | bool | Bar with color: `True` (default) = stacked, `False` = grouped |
 | `strokeDash` | str | Column for per-series line style |
 | `strokeDashScale` | dict | Explicit `{domain: [...], range: [...]}` for dash patterns |
@@ -179,27 +178,6 @@ mapping = {
 | `color_by` | str | Severity column (bullet only) |
 | `label` | str | Label column (bullet only) |
 | `type` | str | Bar-type column (waterfall only: `total` / `positive` / `negative`) |
-
-### Trendlines: Two Mechanisms (pick one)
-
-Scatter trendlines are reachable two ways. They produce the same family of
-overlay; pick based on how much control you want.
-
-| Mechanism | Use For | Method Choice | Color/Label/Style |
-|-----------|---------|---------------|-------------------|
-| `mapping['trendline'] = True` (scatter) | Quick linear regression on a single scatter | Linear only | Engine default |
-| `mapping['trendlines'] = True` (scatter_multi) | Quick per-group linear regression | Linear only | Engine default per-group |
-| `Trendline(...)` annotation | Anything beyond linear (`exp`, `log`, `pow`, `poly`, `quad`) OR custom color/label/dash | Full method palette | Full control |
-
-The boolean keys are a convenience for the dominant case. For a polynomial
-fit, an exponential fit, or a custom color / label, drop the mapping key and
-add `Trendline(...)` to `annotations=[...]` instead. The two mechanisms do
-not coordinate -- if both are present, both render and you get two trendlines
-overlaid. Choose one.
-
-```python
-annotations=[Trendline(method='quad', label='Quadratic fit', color='#C00000')]
-```
 
 ### strokeDash: Per-Series Line Styles
 

@@ -13,9 +13,9 @@ One visual style only -- the Goldman Sachs brand: GS Navy `#002F6C`, PMS 652 Sky
 
 ---
 
-## 0. The contract: real data only, no literals in JSON
+## 0. The contract: real data, no literals, canonical layout, scripts on disk
 
-Three rules; all three absolute.
+Four rules; all four absolute. A dashboard that violates any of them is broken even if `dashboard.html` renders.
 
 **Rule 1 -- real data only.** Every series traces to a real pull (`pull_market_data`, `pull_haver_data`, `pull_plottool_data`, `pull_fred_data`, Treasury / Bloomberg / FactSet / Refinitiv backends, registered scrapers, or a vetted CSV in S3). Forbidden: `np.random.*`, `np.linspace`/`np.arange` as data, hand-typed numeric arrays as "demo"/"placeholder", synthetic fill for missing values, invented dates or labels. If no source exists, do not build the panel -- add a data source first.
 
@@ -28,6 +28,10 @@ Three rules; all three absolute.
 | `datasets["rates"] = {"source": df_to_source(df)}` | When the manifest is saved/read before the compiler touches it. |
 
 **Rule 3 -- order is non-negotiable; remediation is the work.** `pull_data.py` (Section 12) must complete with real DataFrames -- printed `df.shape` / `df.head()` / `df.dtypes` -- before `build.py` is authored. Write the manifest *against verified shapes*, not imagined columns. If you inherit a non-compliant dashboard (bypasses `compile_dashboard()`, hand-writes HTML/CSS/JS, types numbers into `datasets[*].source`, or skips persistence), bringing it back to spec takes priority over whatever surface change was originally asked for. Surface the trade transparently.
+
+**Rule 4 -- canonical layout is non-negotiable; `scripts/` is required, not optional; the persisted script IS what runs.** Every persistent user dashboard MUST land at `users/{kerberos}/dashboards/{name}/` with the full set of artefacts shown in Section 2.2: `dashboard.html`, `manifest.json`, `manifest_template.json`, `scripts/pull_data.py`, `scripts/build.py`, and the raw CSVs in `data/`. The two `.py` files under `scripts/` are not "nice to have" -- they are exactly what the refresh runner re-executes on schedule (Section 12.3). A dashboard whose `scripts/` folder is empty or missing is a one-shot static snapshot: [Refresh] fails the moment the user clicks it, the registry flips to `last_refresh_status: error`, and the dashboard surfaces a `FileNotFoundError` directly in the in-browser error modal (Section 12.3a) -- the failure is loud and PRISM-recoverable, not silent.
+
+**The build flow IS the refresh path** (Section 12.1). PRISM does NOT pull data in the ephemeral session and then persist a script after the fact; PRISM does NOT compile in the ephemeral session and then persist a script after the fact. PRISM authors each script as a Python string, persists it to S3, and `exec`s it FROM S3 with the same namespace shape the refresh runner uses. This collapses two would-be-different code paths (build-time and refresh-time) into one: what runs during the initial build is byte-identical to what runs every refresh. No drift is possible, no double work happens, and the build itself doubles as the refresh smoke test (Section 12.6).
 
 ```python
 df_rates = pull_market_data(coordinates=['IR_USD_Swap_2Y_Rate', 'IR_USD_Swap_10Y_Rate'],
@@ -137,24 +141,26 @@ For **conversational (session-only)** dashboards:
 {SESSION_PATH}/dashboards/{id}.html     compiled dashboard
 ```
 
-For **persistent user dashboards** the unit of organisation is `users/{kerberos}/dashboards/{name}/`; everything that belongs to a dashboard lives inside it:
+For **persistent user dashboards** the unit of organisation is `users/{kerberos}/dashboards/{name}/`; everything that belongs to a dashboard lives inside it. **This layout is non-negotiable (Rule 4, Section 0).** Every artefact tagged `[REQUIRED]` below must be present on S3 by the end of the build, or the dashboard is broken even if `dashboard.html` renders:
 
 ```
 users/{kerberos}/dashboards/{dashboard_name}/
-  manifest_template.json    SOURCE OF TRUTH (LLM-editable spec, NO data)
-  manifest.json             BUILD ARTIFACT (template + fresh data, embedded)
-  dashboard.html            DELIVERABLE (compile_dashboard output)
+  manifest_template.json    [REQUIRED] SOURCE OF TRUTH (LLM-editable spec, NO data)
+  manifest.json             [REQUIRED] BUILD ARTIFACT (template + fresh data, embedded)
+  dashboard.html            [REQUIRED] DELIVERABLE (compile_dashboard output)
   refresh_status.json       STATE (status, started_at, errors[], pid, auto_healed)
   thumbnail.png             optional
-  scripts/
-    pull_data.py            data acquisition (~50-150 lines)
-    build.py                ~12 lines: load data, populate_template, compile
-  data/
-    rates_eod.csv           raw cache (pull_data.py outputs)
+  scripts/                  [REQUIRED] without these the refresh pipeline has nothing to run
+    pull_data.py            [REQUIRED] data acquisition (~50-150 lines). Refresh runner re-executes verbatim
+    build.py                [REQUIRED] ~12 lines: load data, populate_template, compile. Refresh runner re-executes verbatim
+  data/                     [REQUIRED] populated by pull_data.py
+    rates_eod.csv           raw cache (one CSV per dataset; build.py reads these back)
   history/                  optional snapshots when keep_history=true
 ```
 
-Forbidden: HTML / CSS / JS in any `.py` file (`rendering.py` owns it); `scripts/build_dashboard.py` (renamed to `build.py`); per-source folders (`haver/`, `market_data/` -- everything goes to `data/`); timestamped scripts (`20260424_*.py`); session-only artifacts at dashboard scope (`*_results.md`, `*_artifacts.json`); multiple data JSONs (only `manifest.json`); inline `<script>const DATA = {}` in HTML; legacy helpers (`sanitize_html_booleans()`).
+**Why every `[REQUIRED]` artefact actually has to be there.** Refresh works (Section 12.3) because the runner re-executes the persisted `scripts/pull_data.py` and `scripts/build.py` on a schedule -- it does not call PRISM, does not store any LLM state, does not have access to whatever was in the conversation that built the dashboard the first time. If `scripts/pull_data.py` is missing on S3, the runner has nothing to run, the [Refresh] button POSTs and immediately fails, the registry's `last_refresh_status` flips to `error`, and -- critically -- the dashboard surfaces this to the user via the in-browser error modal (Section 12.3a) with a `FileNotFoundError: ...scripts/pull_data.py` message and a one-click `[Copy markdown for PRISM]` button. The user pastes that report into PRISM and PRISM is expected to fix it on the spot (the manifest template is intact; only the missing script needs re-uploading). Same for `manifest_template.json`: `scripts/build.py` reads it back to know the structural shape; without it, build.py can't run. Same for `data/*.csv`: build.py reads CSVs that pull_data.py wrote; without them, build.py can't run. Skipping any one of these is **silent at build time, surfaced loudly the moment the user clicks Refresh, and PRISM-fixable from the modal output without rebuilding from scratch**.
+
+Forbidden: HTML / CSS / JS in any `.py` file (`rendering.py` owns it); `scripts/build_dashboard.py` (renamed to `build.py`); per-source folders (`haver/`, `market_data/` -- everything goes to `data/`); timestamped scripts (`20260424_*.py`); session-only artifacts at dashboard scope (`*_results.md`, `*_artifacts.json`); multiple data JSONs (only `manifest.json`); inline `<script>const DATA = {}` in HTML; legacy helpers (`sanitize_html_booleans()`); building a "persistent" dashboard whose `scripts/` folder is empty or missing on S3 (see "Why every `[REQUIRED]` artefact actually has to be there" above).
 
 ### 2.3 Metadata block
 
@@ -1212,27 +1218,94 @@ Both `compile_dashboard` and renderer are **resilient by design**: a chart that 
 
 ## 12. Persistence + refresh
 
-NON-NEGOTIABLE: every user-requested dashboard persists to `users/{kerberos}/dashboards/{name}/`. A dashboard living only in `SESSION_PATH` won't refresh, won't appear in the user's list, and is lost when the conversation ends.
+NON-NEGOTIABLE: every user-requested dashboard persists to `users/{kerberos}/dashboards/{name}/`, and that folder MUST contain `dashboard.html`, `manifest.json`, `manifest_template.json`, `scripts/pull_data.py`, `scripts/build.py`, and the raw CSVs in `data/` (Section 2.2, Rule 4 of Section 0). A dashboard living only in `SESSION_PATH` won't refresh, won't appear in the user's list, and is lost when the conversation ends. A dashboard at the right path but missing `scripts/` is equally broken: the [Refresh] button has nothing to call, the registry flips to `last_refresh_status: error`, and the user has no recovery path.
 
 ### 12.1 Three-tool-call build model
 
 ```
-Tool 1: pull_data.py     Pulls DataFrames, saves raw CSVs to {DASHBOARD_PATH}/data/
-Tool 2: build.py         Loads data, populates manifest template, compiles, uploads
-Tool 3: register         Updates registry + user manifest
+Tool 1: pull_data.py   Author pull_data.py as a string, persist to
+                       {DASHBOARD_PATH}/scripts/pull_data.py, then exec FROM S3
+                       with the refresh-runner namespace. The exec writes
+                       raw CSVs to {DASHBOARD_PATH}/data/. Read CSVs back
+                       to verify shapes/heads/dtypes for Tool 2.
+Tool 2: build.py       Compose the initial manifest (with embedded data, just
+                       to derive the template), persist
+                       {DASHBOARD_PATH}/manifest_template.json, author
+                       build.py as a string, persist to
+                       {DASHBOARD_PATH}/scripts/build.py, then exec build.py
+                       FROM S3. The exec writes manifest.json + dashboard.html.
+Tool 3: register       Upsert entry in dashboards_registry.json; call
+                       update_user_manifest(kerberos, artifact_type='dashboard');
+                       print portal URL.
 ```
 
-Each tool call uses `execute_analysis_script.script` to BOTH execute logic in the current session AND persist that same logic to S3 under `{DASHBOARD_PATH}/scripts/` for the refresh pipeline. Order is non-negotiable (Section 0): `pull_data.py` must complete with real DataFrames -- printed `df.shape` / `df.head()` / `df.dtypes` -- before `build.py` is authored. Write the manifest *against verified shapes*, never imagined columns.
+**The persisted script is the source of truth -- write it first, then run it from S3.** PRISM does NOT pull data in the ephemeral session and then write a script that "would do the same thing"; PRISM does NOT call `compile_dashboard` directly in the ephemeral session and then write a build script that "would re-compile". PRISM authors each script as a Python string, `s3_manager.put`s it to `{DASHBOARD_PATH}/scripts/<name>.py`, then `s3_manager.get`s it back and runs it via `exec(compile(src, ...), ns)` with the same namespace shape the refresh runner uses (Section 12.3). Two consequences:
 
-**Tool 1 -- `pull_data.py`** (~50-150 lines depending on sources): pulls DataFrames, writes raw CSVs to `{DASHBOARD_PATH}/data/`, persists itself to `{DASHBOARD_PATH}/scripts/pull_data.py`. Print informative log lines (`[pull_data.py] Starting at <ts>`, `EOD shape: ...`, `Intraday: available | NOT AVAILABLE (normal overnight)`).
+1. **No double work.** The pull happens once -- inside Tool 1's exec from S3. The compile happens once -- inside Tool 2's exec from S3. Pulling data in-session and then re-pulling at refresh would do the same work twice; same for compile.
+2. **No drift.** What runs at build time is byte-identical to what the refresh runner will execute every morning. If the persisted script would break tomorrow, it breaks during Tool 1 or Tool 2 today, while PRISM still has the build context in scope. PRISM fixes it before the user ever sees a refresh error modal (Section 12.3a). This is also why no separate "Tool 4 smoke test" is needed: the build flow IS the smoke test (Section 12.6).
 
-**Tool 2 -- `build.py` (one-shot first build):** compose the full manifest with DataFrames, derive a template (`manifest_template(initial_manifest)` strips data, keeps structure), compile + upload. From that point, the persisted refresh-time `build.py` only needs `populate_template(template, fresh_dfs)` -- the structural manifest never has to be rewritten.
+Order is still non-negotiable (Section 0): Tool 1 must complete with verified DataFrames -- read back from S3 CSVs after the exec, with `df.shape` / `df.head()` / `df.dtypes` printed -- before Tool 2 authors `build.py` against those columns.
+
+**Tool 1 -- author + persist + exec `pull_data.py` FROM S3.**
 
 ```python
-df = pd.read_csv(io.BytesIO(s3_manager.get(f'{DASHBOARD_PATH}/data/rates_eod.csv')),
-                 index_col=0, parse_dates=True)
+DASHBOARD_PATH = f"users/{KERBEROS}/dashboards/{DASHBOARD_NAME}"
 
-manifest = {
+# 1. Author pull_data.py as a string. THIS is the source of truth --
+#    the refresh runner will re-exec these exact bytes daily.
+pull_data_py = '''
+"""pull_data.py -- daily refresh of rates monitor data."""
+from datetime import datetime
+print(f"[pull_data.py] starting at {datetime.now().isoformat()}")
+
+pull_market_data(
+    coordinates=['IR_USD_Swap_2Y_Rate', 'IR_USD_Swap_10Y_Rate'],
+    start_date='2020-01-01',
+    name='rates_eod',
+)
+
+# Defensive intraday fallback (Section 12.4) goes here when needed.
+print("[pull_data.py] done")
+'''.lstrip()
+
+# 2. Persist verbatim
+s3_manager.put(pull_data_py.encode(), f'{DASHBOARD_PATH}/scripts/pull_data.py')
+
+# 3. Exec FROM S3 with the refresh-runner namespace. Writes CSVs to
+#    {DASHBOARD_PATH}/data/.
+import io as _io
+src = s3_manager.get(f'{DASHBOARD_PATH}/scripts/pull_data.py').decode('utf-8')
+ns = {
+    'pd': pd, 'np': np, 'io': _io, 'json': json, 'os': os,
+    'datetime': datetime,
+    's3_manager': s3_manager,
+    'SESSION_PATH': DASHBOARD_PATH.rstrip('/'),
+    'pull_haver_data':   pull_haver_data,
+    'pull_market_data':  pull_market_data,
+    'pull_plottool_data': pull_plottool_data,
+}
+exec(compile(src, f'{DASHBOARD_PATH}/scripts/pull_data.py', 'exec'), ns)
+
+# 4. Verify by reading the CSVs back from S3. PRISM uses these shapes
+#    when authoring build.py in Tool 2.
+df = pd.read_csv(_io.BytesIO(s3_manager.get(f'{DASHBOARD_PATH}/data/rates_eod.csv')),
+                  index_col=0, parse_dates=True)
+print(f'[verify] rates_eod: shape={df.shape}')
+print(df.head())
+print(df.dtypes)
+```
+
+**Tool 2 -- author + persist + exec `build.py` FROM S3.**
+
+```python
+import io
+df = pd.read_csv(io.BytesIO(s3_manager.get(f'{DASHBOARD_PATH}/data/rates_eod.csv')),
+                  index_col=0, parse_dates=True)
+
+# 1. Compose the initial manifest (with embedded data, just to derive
+#    the structural template). PRISM does NOT compile this manifest --
+#    build.py does, when it is exec'd from S3 below.
+initial_manifest = {
     "schema_version": 1, "id": DASHBOARD_NAME, "title": "Rates Monitor",
     "metadata": {"kerberos": KERBEROS, "dashboard_id": DASHBOARD_NAME,
                   "data_as_of": str(df.index.max().date()),
@@ -1240,24 +1313,66 @@ manifest = {
                   "sources": ["GS Market Data"], "refresh_frequency": "daily",
                   "refresh_enabled": True, "tags": ["rates"]},
     "datasets": {"rates": df.reset_index()},
-    "layout": {"rows": [[{"widget": "chart", "id": "curve", "w": 12, "title": "UST Curve",
+    "layout": {"rows": [[{"widget": "chart", "id": "curve", "w": 12,
+        "title": "UST Curve",
         "spec": {"chart_type": "multi_line", "dataset": "rates",
                   "mapping": {"x": "date",
-                               "y": ["IR_USD_Swap_2Y_Rate", "IR_USD_Swap_10Y_Rate"]}}}]]}}
+                               "y": ["IR_USD_Swap_2Y_Rate",
+                                     "IR_USD_Swap_10Y_Rate"]}}}]]}
+}
 
-tpl = manifest_template(manifest)
-s3_manager.put(json.dumps(tpl, indent=2).encode(), f'{DASHBOARD_PATH}/manifest_template.json')
+tpl = manifest_template(initial_manifest)
+s3_manager.put(json.dumps(tpl, indent=2).encode(),
+                f'{DASHBOARD_PATH}/manifest_template.json')
 
-r = compile_dashboard(manifest, write_html=False, write_json=False, strict=True)
-if not r.success: raise ValueError(f"COMPILE FAILED: {r.error_message}")
-s3_manager.put(r.html.encode('utf-8'), f'{DASHBOARD_PATH}/dashboard.html')
-s3_manager.put(json.dumps(manifest, indent=2).encode('utf-8'),
-                f'{DASHBOARD_PATH}/manifest.json')
+# 2. Author build.py as a string (~12 lines: load template + load CSVs +
+#    populate_template + compile + upload). THIS is the refresh-time
+#    build.py the runner will re-exec daily.
+build_py = '''import io, json, pandas as pd
+from datetime import datetime, timezone
+
+tpl = json.loads(s3_manager.get(f"{SESSION_PATH}/manifest_template.json"))
+df = pd.read_csv(io.BytesIO(s3_manager.get(f"{SESSION_PATH}/data/rates_eod.csv")),
+                  index_col=0, parse_dates=True)
+m = populate_template(tpl, {"rates": df.reset_index()},
+                       metadata={"data_as_of": str(df.index.max().date()),
+                                  "generated_at": datetime.now(timezone.utc).isoformat()},
+                       require_all_slots=True)
+r = compile_dashboard(m, write_html=False, write_json=False, strict=True)
+if not r.success:
+    raise ValueError(f"compile failed: {r.error_message}")
+s3_manager.put(r.html.encode("utf-8"), f"{SESSION_PATH}/dashboard.html")
+s3_manager.put(json.dumps(m, indent=2).encode("utf-8"), f"{SESSION_PATH}/manifest.json")
+print("[build.py] success")
+'''
+s3_manager.put(build_py.encode(), f'{DASHBOARD_PATH}/scripts/build.py')
+
+# 3. Exec build.py FROM S3 with the refresh-runner namespace. The exec
+#    writes manifest.json + dashboard.html as side effects.
+src = s3_manager.get(f'{DASHBOARD_PATH}/scripts/build.py').decode('utf-8')
+ns = {
+    'pd': pd, 'np': np, 'io': io, 'json': json, 'os': os,
+    'datetime': datetime, 'timezone': timezone,
+    's3_manager': s3_manager,
+    'SESSION_PATH': DASHBOARD_PATH.rstrip('/'),
+    'compile_dashboard': compile_dashboard,
+    'populate_template': populate_template,
+    'manifest_template': manifest_template,
+    'validate_manifest': validate_manifest,
+}
+exec(compile(src, f'{DASHBOARD_PATH}/scripts/build.py', 'exec'), ns)
+
+# 4. Confirm every required artefact landed on S3 (Rule 4 of Section 0).
+for sub in ['scripts/pull_data.py', 'scripts/build.py',
+            'manifest_template.json', 'manifest.json', 'dashboard.html']:
+    if not s3_manager.exists(f'{DASHBOARD_PATH}/{sub}'):
+        raise FileNotFoundError(f'[Tool 2] missing on S3: {sub}')
+print('[Tool 2] complete; ready for Tool 3 (register)')
 ```
 
-The persisted `scripts/build.py` (~12 lines) is the refresh-time variant -- loads the template + fresh CSVs, calls `populate_template`, compiles, uploads.
+A failure in either Tool 1 or Tool 2 surfaces the same exception the refresh runner would surface tomorrow morning. Iterate on the script string + re-run the tool until both Tool 1 and Tool 2 succeed end-to-end. There is no separate "verify the refresh works" step because the build IS that verification (Section 12.6).
 
-**Tool 3 -- register:** writes the per-dashboard pipeline manifest, upserts an entry into `users/{kerberos}/dashboards/dashboards_registry.json` (`id`, `name`, `description`, `created_at`, `last_refreshed`, `last_refresh_status`, `refresh_enabled`, `refresh_frequency`, `folder`, `html_path`, `data_path`, `tags`, `keep_history`, `history_retention_days`), then calls `update_user_manifest(kerberos, artifact_type='dashboard')`. Always print the portal URL (`http://reports.prism-ai.url.gs.com:8501/profile/dashboards/{DASHBOARD_NAME}/`) -- the persistent, auto-refreshing link.
+**Tool 3 -- register:** writes the per-dashboard pipeline manifest, upserts an entry into `users/{kerberos}/dashboards/dashboards_registry.json` (`id`, `name`, `description`, `created_at`, `last_refreshed`, `last_refresh_status`, `refresh_enabled`, `refresh_frequency`, `folder`, `html_path`, `data_path`, `tags`, `keep_history`, `history_retention_days`), then calls `update_user_manifest(kerberos, artifact_type='dashboard')`. Print the portal URL (`http://reports.prism-ai.url.gs.com:8501/profile/dashboards/{DASHBOARD_NAME}/`) -- the persistent, auto-refreshing link.
 
 ### 12.2 Templates: `manifest_template` + `populate_template`
 
@@ -1282,7 +1397,86 @@ Template is pure JSON (no pandas); safe to persist and diff. `require_all_slots=
 
 Browser [Refresh] → `POST /api/dashboard/refresh/` → Django spawns `refresh_runner.py` → runs `scripts/pull_data.py` then `scripts/build.py` in order → updates `dashboards_registry.json` + `refresh_status.json` → frontend polls `GET /api/dashboard/refresh/status/` every 3s up to 3 min → on success, `location.reload()`.
 
-API contract: HTTP 409 (already running) → switch to status polling; `status: "success"` → reload after ~1s; `status: "error"` → show error, restore button after 3s; `status: "partial"` → reload after 2s. `metadata.api_url` / `metadata.status_url` override the default endpoints.
+API contract: HTTP 409 (already running) → switch to status polling; `status: "success"` → reload after ~1s; `status: "error"` / `"partial"` → open the error modal (see 12.3a) and keep a persistent "Error details" pill in the header until the next successful refresh. `metadata.api_url` / `metadata.status_url` override the default endpoints.
+
+The dashboard also fires one `GET /api/dashboard/refresh/status/?dashboard_id=...` on initial page load. If `refresh_status.json` reports `error` / `partial`, the persistent "Error details" pill lights up immediately so a user landing on a stale dashboard sees the failure without having to click [Refresh] first.
+
+### 12.3a Refresh error modal (the contract)
+
+A refresh that fails is recoverable from the browser without a developer console. Every failure path -- runner-side error, runner-side partial, polling timeout, network error reaching the API, spawn-time rejection (4xx / 5xx) -- pops a modal carrying the full failure context plus a one-click `[Copy markdown for PRISM]` button that copies a self-contained markdown report for the user to paste back into PRISM. The same modal is reachable any time afterwards via the persistent "! Error details" pill the runtime parks next to the [Refresh] button.
+
+| Failure kind | Trigger | Modal pill |
+|---|---|---|
+| `runner_error` | `refresh_status.json.status == "error"` | red `REFRESH FAILED` |
+| `runner_partial` | `refresh_status.json.status == "partial"` -- some scripts succeeded, some failed | amber `PARTIAL REFRESH` (extra `[Reload anyway]` button alongside `[Try again]`) |
+| `timeout` | poll loop hit 60 polls × 3 s without a terminal status | red `POLLING TIMEOUT` |
+| `network` | browser `fetch` to `api_url` rejected before the server replied | red `NETWORK ERROR` |
+| `spawn_fail` | API responded 4xx / 5xx, or `result.status` neither `refreshing` nor `success` / `partial` | red `SPAWN FAILED` |
+
+The "Copy markdown for PRISM" payload is everything PRISM needs to triage the failure without round-trips. The exact structure (this is the **stable** template -- PRISM-side prompts can pattern-match against it):
+
+```
+## Dashboard refresh failure
+
+| Field | Value |
+| --- | --- |
+| Failure kind | `runner_error` (REFRESH FAILED) |
+| Dashboard ID | `<id>` |
+| Kerberos | `<kerberos>` |
+| Folder | `users/<kerberos>/dashboards/<id>/` |
+| `refresh_status.json` status | `error` |
+| HTTP status | `200` |
+| Started at | `2026-04-26T19:30:00Z` |
+| Completed at | `2026-04-26T19:30:14Z` |
+| Elapsed | 14.0s |
+| Runner PID | `12345` |
+| Server log | `/tmp/dashboard_refresh/<kerberos>_<id>_<ts>.log` |
+| Captured at | `<browser-now>` |
+| Page URL | `<dashboard URL>` |
+| User agent | `<UA string>` |
+
+### Errors (`refresh_status.json.errors[]`)
+
+**Error 1**
+- script: `pull_data.py`
+- classification: `data_pull_empty`
+
+```
+<error message>
+```
+
+(plus optional traceback block)
+
+### Raw response
+
+```json
+<full refresh_status.json or POST response>
+```
+
+### What PRISM should check
+
+1. `users/<kerberos>/dashboards/<id>/scripts/pull_data.py` exists on S3 and runs cleanly.
+2. `users/<kerberos>/dashboards/<id>/scripts/build.py` exists on S3 and runs cleanly.
+3. `users/<kerberos>/dashboards/<id>/manifest_template.json` exists.
+4. `users/<kerberos>/dashboards/<id>/data/*.csv` reflects the columns build.py expects.
+5. `users/<kerberos>/dashboards/<id>/refresh_status.json` matches the snapshot above.
+6. The dashboard is registered in `users/<kerberos>/dashboards/dashboards_registry.json` with `refresh_enabled: true`.
+```
+
+PRISM contract: when a user pastes a "Dashboard refresh failure" report, treat it as a triage prompt -- read the named scripts on S3, identify the failing line, fix the script (and only the script unless data shape changed), re-upload. The dashboard does not need to be rebuilt from scratch; the manifest template is intact.
+
+PRISM-side helpers driving the modal (the runtime relies on these existing in `refresh_status.json`):
+
+| Field | Required | Notes |
+|---|---|---|
+| `status` | yes | `"running"` / `"success"` / `"error"` / `"partial"` |
+| `errors` | error/partial | List of strings OR list of dicts. Dicts: `{script, classification, message, traceback?}`. Both shapes are rendered without code change |
+| `started_at` / `completed_at` | recommended | ISO-8601 UTC; the modal shows elapsed when both are present |
+| `pid` | recommended | Surfaced so PRISM can grep server logs |
+| `log_path` (alias `log`) | recommended | Filesystem path of the runner's log; surfaced verbatim. The browser cannot read it; this is for PRISM-side triage |
+| `auto_healed` | optional | When the polling endpoint replaces a stale "running" lock with an "error" status |
+
+The runtime also supports `errors` being a single string (legacy shape) or a single dict; both are normalised to the list shape before rendering.
 
 ### 12.4 Intraday data robustness
 
@@ -1311,18 +1505,65 @@ current = (iday_df.ffill().iloc[-1] if iday_df is not None and len(iday_df) > 0
 
 ### 12.5 Common failures → fix
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| "No data successfully fetched" | Intraday unavailable (overnight / weekend) | try/except + EOD fallback |
-| `KeyError: '<col>'` | Schema drift | check `col in df.columns` before access |
-| `IndexError: .iloc[-1]` | Empty frame | guard with `len(df) > 0` |
-| Empty after merge | Inner join dropped rows | outer join, handle NaNs |
-| Chart shows `(no data)` | One spec failed to bind | read `compile_dashboard().diagnostics` |
-| "Auto-healed stale lock" | Previous refresh hung | self-resolves; investigate slow pulls |
-| Refresh button absent | `metadata.kerberos` / `dashboard_id` missing | add to metadata block |
-| `FileNotFoundError` on script path | Scripts missing on S3 | rebuild scripts |
+What the user sees in the browser is the modal in 12.3a. The table below maps the most common error messages (rendered verbatim under "Errors" in that modal, also pasted into PRISM via "Copy markdown for PRISM") to root causes and fixes.
 
-When a refresh is broken: read the registry (`last_refresh_status`, `last_refreshed`), read `refresh_status.json` (`status`, `errors[]`, `pid`), confirm artifacts on S3, fix the failing script, re-upload. Don't rebuild from scratch.
+| Modal shows (`errors[].message` / classification) | Root cause | Fix |
+|---|---|---|
+| "No data successfully fetched" / `data_pull_empty` | Intraday unavailable (overnight / weekend) | `try/except` + EOD fallback in `pull_data.py` (12.4) |
+| `KeyError: '<col>'` / `data_schema_error` | Schema drift between `pull_data.py` writes and `build.py` reads | Defensive `col in df.columns` checks; resync the column rename in build.py |
+| `IndexError: .iloc[-1]` / `data_schema_error` | Empty DataFrame | Guard `len(df) > 0` before `.iloc[-1]` |
+| Empty DataFrame after merge | Inner-join dropped every row | Switch to outer join, handle NaNs |
+| `FileNotFoundError: ...scripts/pull_data.py` (or `.../scripts/build.py`) | The dashboard was built without persisting the scripts to `{DASHBOARD_PATH}/scripts/` (Rule 4 of Section 0). The runner has nothing to execute | Re-run the build flow with the **required** `s3_manager.put(SCRIPT_TEXT.encode(), '<...>/scripts/<name>.py')` step at the end of every `execute_analysis_script` call. See Section 12.1 |
+| `FileNotFoundError: ...manifest_template.json` | Tool 2's `s3_manager.put()` for the template was skipped | Re-run Tool 2; persist the template returned by `manifest_template(initial_manifest)` (Section 12.1) |
+| `FileNotFoundError: ...data/<name>.csv` | `pull_data.py` did not write a CSV that `build.py` then tried to read | Confirm `pull_data.py` writes one CSV per dataset to `{DASHBOARD_PATH}/data/`; confirm the names match what `build.py` reads back |
+| `Connection` / `Timeout` / `network_error` | Transient network failure to a vendor API | Retry the manual refresh; check vendor availability |
+| Modal shows `NETWORK ERROR` (browser-side fetch failed) | The PRISM web server is offline or the request was blocked at the network layer | Operations issue; report the URL + status |
+| Modal shows `SPAWN FAILED` with `Dashboard <id> not found` | The dashboard is missing from `dashboards_registry.json` (Tool 3 was skipped) | Add the registry entry with `refresh_enabled: true` and call `update_user_manifest(kerberos, artifact_type='dashboard')` |
+| Modal shows `POLLING TIMEOUT` after 3 minutes | Runner hung during a slow pull or compilation | Check the server log path the modal lists (`/tmp/dashboard_refresh/...`); usually self-resolves on the next attempt; `auto_healed: true` confirms the lock was reset |
+| `[Refresh]` button absent on the dashboard entirely | `metadata.kerberos` or `metadata.dashboard_id` missing, or `metadata.refresh_enabled: false` | Set both fields; redeploy `manifest.json` + `dashboard.html` |
+| Header pill says "! Error details" on a freshly loaded dashboard | A previous refresh failed; the on-load status check surfaced it | Click the pill to read the modal; the report is unchanged from the last failure |
+| Dashboard renders but a tile shows `(no data)` | A specific chart's `mapping` could not bind to the dataset (compile-time, not refresh-time) | Read `compile_dashboard().diagnostics` (Section 11.2); the diagnostic carries the exact column / dataset that's missing |
+
+When a refresh is broken: the user pastes the "Copy markdown for PRISM" report (12.3a) into PRISM and PRISM does the rest -- read the registry (`last_refresh_status`, `last_refreshed`), confirm `refresh_status.json` matches the snapshot, fix the failing script in `{DASHBOARD_PATH}/scripts/`, re-upload via `s3_manager.put`. **Do not rebuild from scratch** unless the scripts themselves are missing (in which case the modal will say `FileNotFoundError`).
+
+### 12.6 Why the build IS the refresh smoke test
+
+PRISM MUST be confident that when the user clicks [Refresh] tomorrow morning, the refresh will succeed. The Section 12.1 build flow guarantees that without a separate verification tool call.
+
+Tool 1 and Tool 2 don't just author and persist scripts -- they each `s3_manager.get` the persisted script and `exec(compile(...))` it with the same namespace shape the refresh runner uses (Section 12.3). The build-time exec and the refresh-time exec are running the same bytes from the same S3 path with the same injected helpers. Three things follow:
+
+1. **If the script would raise on tomorrow's cron, it raises during Tool 1 or Tool 2 today** -- missing column, NameError on a session-only variable PRISM forgot to inline, FileNotFoundError on a sibling artefact, schema drift between what `pull_data.py` writes and what `build.py` reads. PRISM sees the exception in the same `execute_analysis_script` invocation that authored the script, fixes the script string, and re-runs the tool until it succeeds.
+2. **There is no "PRISM ran the logic in-session but persisted something different" failure mode.** The exec reads from S3, not from PRISM's session variables. If you've never typed the words "the script would do this" but then written something else into S3, the exec catches it.
+3. **The refresh path is the only path.** Build-time and refresh-time are not two separate code paths that need to be kept in sync; they are the same path running on different schedules.
+
+So: if Tool 1's verify lines print and Tool 2 ends with `[Tool 2] complete`, the dashboard's refresh pipeline is provably stable. Tool 3 registers, prints the portal URL, and the dashboard is shipped. There is no Tool 4.
+
+**Anti-pattern (do not do this).** PRISM pulls data via `pull_market_data(...)` directly in the session, then composes a manifest, then calls `compile_dashboard(...)` directly in the session, then -- as an afterthought -- writes a `pull_data.py` and `build.py` string and `s3_manager.put`s them. Now the in-session execution and the on-S3 scripts are *two different things*, and only the in-session one has been exercised. The persisted scripts may compile cleanly but reference a session-only variable, write to a CSV name the build script doesn't read, or simply not exist. Any of those means the user sees the refresh error modal on their first [Refresh] click. The fix is structural: write the script first, exec it from S3, period.
+
+**Optional: live-API verification.** When the Django half of the contract is part of what you want to verify (the `/api/dashboard/refresh/` endpoint, the runner subprocess spawn, the `dashboards_registry.json` lookup, the auth path), POST to `metadata.api_url` and poll `metadata.status_url` for up to ~90 s:
+
+```python
+import json, time, urllib.request
+
+req = urllib.request.Request(
+    metadata.get('api_url', '/api/dashboard/refresh/'),
+    data=json.dumps({'kerberos': KERBEROS, 'dashboard_id': DASHBOARD_NAME}).encode(),
+    headers={'Content-Type': 'application/json'}, method='POST',
+)
+with urllib.request.urlopen(req, timeout=10) as r:
+    body = json.loads(r.read())
+
+status_url = metadata.get('status_url', '/api/dashboard/refresh/status/')
+for _ in range(30):  # ~90 s cap
+    time.sleep(3)
+    with urllib.request.urlopen(f"{status_url}?dashboard_id={DASHBOARD_NAME}") as r:
+        st = json.loads(r.read())
+    if st['status'] == 'success': break
+    if st['status'] in ('error', 'partial'):
+        raise RuntimeError(f'live-API smoke test failed: {st}')
+```
+
+This is the only way to verify the Django subprocess spawn and the registry-lookup-and-auth path exactly. It is OPTIONAL because the Django half is a stable PRISM deployment concern, not a per-dashboard build concern -- the in-tool exec-from-S3 pattern in 12.1 catches everything dashboard-specific. Add the live-API ping when you want extra paranoia, when you've changed something in the registry contract, or when you want to confirm the dashboard is reachable through the user-facing URL.
 
 ---
 
@@ -1440,23 +1681,53 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 | Annotating self-evident facts (zero on a spread) | Omit |
 | Hand-tuning `y_title_gap` / `grid.left` | Just set `x_title` / `y_title`; compiler sizes from real label widths |
 | Saving a user dashboard only to `SESSION_PATH`; skipping refresh button by editing HTML | Persist to `users/{kerberos}/dashboards/...`; set `metadata.kerberos` + `dashboard_id` |
+| Building a "persistent" dashboard whose `scripts/pull_data.py` and `scripts/build.py` aren't actually on S3 -- common silent failure where the dashboard ships fine but the [Refresh] button breaks 24h later | Tools 1 and 2 (Section 12.1) persist the scripts to `{DASHBOARD_PATH}/scripts/<name>.py` and then exec them FROM S3. The exec reads from S3, not from session variables, so missing-script bugs surface immediately during the build (a `NoSuchKey` / `FileNotFoundError` on `s3_manager.get`) rather than 24h later in the refresh modal |
+| Pulling data in the ephemeral session via `pull_market_data(...)` and *then* writing a `pull_data.py` string to S3 that's supposed to do the same thing -- two separate code paths that may diverge silently | Section 12.1's pattern: write `pull_data.py` to S3 FIRST, then `s3_manager.get` it back and `exec` it. The script is the source of truth; the in-session execution is just running that exact script. There is no "the LLM did one thing, the script does another" failure mode possible |
+| Calling `compile_dashboard(manifest)` directly in the session, then writing a `build.py` string that calls `compile_dashboard` again -- compiles twice, opens room for drift between the in-session manifest and the on-S3 build script | Section 12.1 Tool 2 pattern: derive the template once via `manifest_template(initial_manifest)`, write `build.py` to S3, exec build.py FROM S3. The compile happens exactly once -- inside the exec'd build.py -- using the on-S3 template + on-S3 CSVs. Refresh-time and build-time use the same code path |
+| Inlining data pull + manifest build into a single tool call so neither `pull_data.py` nor `build.py` exist as standalone files | Three-tool-call build model is the contract (Section 12.1). Tool 1 persists + execs `pull_data.py` from S3 (writes CSVs); Tool 2 persists + execs `build.py` from S3 (writes manifest + html); Tool 3 registers. The CSV handoff between Tools 1 and 2 is what makes the refresh runner able to re-execute build.py independently |
+| Saving `pull_data.py` / `build.py` to `SESSION_PATH/scripts/` instead of `{DASHBOARD_PATH}/scripts/` | Refresh runner only looks at `{DASHBOARD_PATH}/scripts/`. SESSION_PATH artefacts are gone the moment the conversation ends |
 
 ---
 
 ## 17. Pre-flight checklist
 
-- `dashboard.html` persisted to `users/{kerberos}/dashboards/{name}/`
-- `metadata.kerberos` + `dashboard_id` + `data_as_of` set; `refresh_frequency` set
-- `manifest_template.json` + `manifest.json` saved alongside; `scripts/pull_data.py` + `scripts/build.py` saved
-- Registry entry added; `update_user_manifest(kerberos, artifact_type='dashboard')` called
+**Canonical layout (Rule 4, Section 0) -- every line MUST be verifiable on S3 before the dashboard ships. Run an `s3_manager.list()` on `{DASHBOARD_PATH}` and confirm each path concretely; do not assume the build flow wrote them:**
+
+- `users/{kerberos}/dashboards/{name}/dashboard.html` -- compiled HTML (the file rendered to the user)
+- `users/{kerberos}/dashboards/{name}/manifest.json` -- compiled manifest with embedded data (drives the dashboard's runtime state)
+- `users/{kerberos}/dashboards/{name}/manifest_template.json` -- structural template, no data (read by `scripts/build.py` on every refresh)
+- `users/{kerberos}/dashboards/{name}/scripts/pull_data.py` -- exact verbatim of Tool 1's script (refresh runner re-executes this; missing → `FileNotFoundError` in the modal)
+- `users/{kerberos}/dashboards/{name}/scripts/build.py` -- exact verbatim of Tool 2's refresh-time script (~12 lines: load template, load CSVs, populate, compile, upload)
+- `users/{kerberos}/dashboards/{name}/data/<name>.csv` -- one CSV per dataset, written by `pull_data.py`, read back by `build.py`
+
+`refresh_status.json` is **not** a build-time artefact -- the refresh runner writes it on the first refresh attempt, and the in-browser status check (Section 12.3) tolerates its absence (treated as "no prior refresh"). Do not pre-create it.
+
+**Configuration:**
+
+- `metadata.kerberos` + `dashboard_id` + `data_as_of` set; `refresh_frequency` set; `refresh_enabled` defaults to `True`
+- Registry entry added to `users/{kerberos}/dashboards/dashboards_registry.json`; `update_user_manifest(kerberos, artifact_type='dashboard')` called
+
+**Data integrity:**
+
 - Every dataset traces to a real pull (Rule 1, Section 0); zero `np.random` / `np.linspace`-as-data / hand-typed arrays
 - `pull_data.py` printed real shapes/heads/dtypes before `build.py` was authored; handles intraday failures defensively
 - Every dataset cleaned: `df.reset_index()` for DTI-keyed frames, plain English columns, no MultiIndex
 - Every dataset backing a chart/table carries `field_provenance` (per-column `system` + `symbol`)
 - Every dataset under budget: <50K rows, <2 MB; total manifest <5 MB
-- `build.py` is thin (loads data + `populate_template` + `compile_dashboard`)
-- `compile_dashboard(..., strict=True)`; `write_html=False, write_json=False` + manual `s3_manager.put()` for persistent dashboards
-- Download link + portal URL delivered to the user
+- Time-series pulls preserve full back-history (Section 19); never clip to "just the visible window"
+
+**Build mechanics (Section 12.1):**
+
+- Tool 1 authored `pull_data.py` as a string, `s3_manager.put`-ed it to `{DASHBOARD_PATH}/scripts/pull_data.py`, then `s3_manager.get`-ed it back and `exec`-ed it from S3 with the refresh-runner namespace -- the in-session pull happened *via* the persisted script, not before it
+- Tool 1 read CSVs back from S3 and printed shapes/heads/dtypes against which Tool 2 then authored the manifest
+- Tool 2 derived the template once (via `manifest_template(initial_manifest)`), authored `build.py` as a string, persisted it to `{DASHBOARD_PATH}/scripts/build.py`, then exec-ed it from S3 -- the compile happened *via* the persisted script, not directly via `compile_dashboard()` in the session
+- `build.py` is thin (~12 lines: load template + load CSVs + `populate_template` + `compile_dashboard(..., write_html=False, write_json=False, strict=True)` + `s3_manager.put`)
+- Both Tool 1 and Tool 2 ran cleanly to completion -- the build IS the refresh smoke test (Section 12.6); no separate verification step is required
+
+**Hand-off:**
+
+- Portal URL (`http://reports.prism-ai.url.gs.com:8501/profile/dashboards/{name}/`) printed only after Tool 3 (registration) succeeds
+- Download link delivered to the user
 
 ---
 
@@ -1525,11 +1796,13 @@ If a column is opaquely named (`JCXFE@USECON`, `IR_USD_Swap_2Y_Rate`), rename to
 
 ## 19. Time horizons
 
-| Frequency | Default lookback | Rationale |
-|-----------|-----------------|-----------|
+**Pull deep history. The defaults below are initial zoom windows, not data-layer caps.** Every time-series chart ships with a per-chart `dataZoom` slider (5.1) carrying the full dataset, and `dateRange` filters operate in view-mode by default (5) with selectable intervals (`1M/3M/6M/YTD/1Y/2Y/5Y/All`) -- but both reach back only as far as the data goes. If `pull_data.py` clips a 30-year FRED series to 2 years before persisting (or `build.py` slices / resamples / inner-joins it post-merge), those extra years are gone for good; the slider can't scroll into history that was never pulled. Loss of back-history at the PRISM data transformation layer is irreversible from the dashboard side. Pull the full series (or as far back as the source allows), keep transformations non-destructive on the time axis, and let the lookback below pick the *initial* visible window.
+
+| Frequency | Initial zoom (default) | Rationale |
+|-----------|------------------------|-----------|
 | Quarterly/monthly | 10 years | Full business cycle |
 | Weekly | 5 years | Trend + cycle |
 | Daily | 2 years | Regime without noise |
 | Intraday | 5 trading days | Event reaction window |
 
-Override: if narrative references "highest since X", chart must include X. For pre-pandemic comparisons start ≥ 2015. Don't show 12 months of monthly (hides cycle), 30 years of daily (noise), or different ranges for charts meant to be compared.
+Override: if narrative references "highest since X", the chart's initial window must include X (data still extends back as far as the source allows). For pre-pandemic comparisons set initial start ≥ 2015. Don't open at 12 months of monthly (hides cycle), 30 years of daily (noise), or different ranges for charts meant to be compared.

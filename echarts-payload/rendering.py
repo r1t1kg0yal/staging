@@ -1608,14 +1608,14 @@ html, body {
    the renderer falls back to the .gs-mark span above, so these rules
    simply have nothing to style and stay inert. */
 .prism-mark {
-  display: inline-flex; align-items: center; gap: 10px;
+  display: inline-flex; align-items: center; gap: 12px;
 }
 .prism-mark img {
-  height: 28px; width: auto; display: block;
+  height: 44px; width: auto; display: block;
 }
 .prism-mark .prism-wordmark {
   font-family: var(--gs-font-sans); font-weight: 600;
-  font-size: 18px; color: var(--gs-ink);
+  font-size: 22px; color: var(--gs-ink);
   letter-spacing: 0.02em; white-space: nowrap;
 }
 
@@ -1657,6 +1657,132 @@ header.app-header {
 .header-actions .icon-btn.refresh-error {
   background: var(--neg); color: #fff; border-color: var(--neg);
 }
+.header-actions .icon-btn.refresh-error:hover {
+  background: var(--neg); color: #fff; border-color: var(--neg);
+  filter: brightness(1.05);
+}
+/* Persistent "(i)" error pill rendered next to the Refresh button when
+   the last refresh attempt failed. Stays visible after the Refresh
+   button label resets so the user can re-open the error modal at any
+   time, paste the contents into PRISM, and have the dashboard fixed. */
+.header-actions .icon-btn.refresh-err-info {
+  background: var(--neg); color: #fff; border-color: var(--neg);
+  padding: 6px 9px; font-weight: 600; letter-spacing: 0.04em;
+  font-size: 11px; text-transform: uppercase;
+}
+.header-actions .icon-btn.refresh-err-info:hover {
+  background: var(--neg); color: #fff; border-color: var(--neg);
+  filter: brightness(1.10);
+}
+/* Refresh-error modal -- surfaces full error context (status,
+   classification, errors[], timestamps, pid, log path, dashboard
+   metadata) and a one-click "Copy for PRISM" markdown dump so the
+   user can hand the failure straight to PRISM for a fix. */
+.refresh-err-summary {
+  display: grid; grid-template-columns: max-content 1fr;
+  column-gap: 14px; row-gap: 6px;
+  margin: 0 0 14px;
+  font-family: var(--gs-font-sans); font-size: 12px;
+}
+.refresh-err-summary dt {
+  color: var(--text-faint); text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 10px; align-self: center;
+}
+.refresh-err-summary dd {
+  margin: 0; color: var(--text);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+.refresh-err-summary dd code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+              Consolas, monospace;
+  font-size: 11px;
+}
+.refresh-err-pill {
+  display: inline-block; padding: 2px 9px; border-radius: 11px;
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  font-family: var(--gs-font-sans);
+}
+.refresh-err-pill.kind-error,
+.refresh-err-pill.kind-spawn_fail,
+.refresh-err-pill.kind-network,
+.refresh-err-pill.kind-timeout,
+.refresh-err-pill.kind-runner_error {
+  background: var(--neg); color: #fff;
+}
+.refresh-err-pill.kind-partial,
+.refresh-err-pill.kind-runner_partial {
+  background: var(--gs-amber, #B08D3F); color: #fff;
+}
+.refresh-err-section-h {
+  font-family: var(--gs-font-sans); font-size: 11px; font-weight: 600;
+  color: var(--gs-navy); text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 14px 0 6px;
+}
+.refresh-err-list {
+  margin: 0 0 14px; padding: 0; list-style: none;
+}
+.refresh-err-list li {
+  padding: 8px 10px; margin: 0 0 6px;
+  background: var(--gs-grey-05); border: 1px solid var(--border);
+  border-left: 3px solid var(--neg);
+  border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo,
+              Consolas, monospace;
+  font-size: 11.5px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word;
+  color: var(--text);
+}
+.refresh-err-list li.partial {
+  border-left-color: var(--gs-amber, #B08D3F);
+}
+.refresh-err-list li .err-meta {
+  display: block; font-family: var(--gs-font-sans); font-size: 10px;
+  font-weight: 600; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin: 0 0 4px;
+}
+.refresh-err-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin: 16px 0 4px; padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.refresh-err-actions button {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 12px;
+  cursor: pointer; color: var(--text); font-size: 12px;
+  font-family: var(--gs-font-sans); font-weight: 500;
+}
+.refresh-err-actions button:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent-2); color: var(--accent);
+}
+.refresh-err-actions button.primary {
+  background: var(--gs-navy); color: #fff; border-color: var(--gs-navy);
+}
+.refresh-err-actions button.primary:hover {
+  background: var(--gs-navy); color: #fff; border-color: var(--gs-navy);
+  filter: brightness(1.10);
+}
+.refresh-err-copy-status {
+  display: inline-flex; align-items: center;
+  font-size: 11px; color: var(--pos);
+  font-family: var(--gs-font-sans); font-weight: 600;
+  margin-left: auto; opacity: 0;
+  transition: opacity 0.15s var(--ease);
+}
+.refresh-err-copy-status.visible { opacity: 1; }
+.refresh-err-tip {
+  margin: 12px 0 0; padding: 10px 12px;
+  background: rgba(115, 153, 198, 0.08);
+  border-left: 3px solid var(--accent-2);
+  border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--text-dim);
+  font-family: var(--gs-font-sans); line-height: 1.55;
+}
+.refresh-err-tip strong { color: var(--text); }
 .badge {
   padding: 3px 9px; font-size: 10px; border-radius: 2px;
   background: var(--gs-navy); color: #fff;
@@ -2981,6 +3107,12 @@ footer.app-footer .gs-mark .gs-wordmark { font-size: 12px; }
         <button class="icon-btn" id="refresh-btn"
                 title="Refresh dashboard data" style="display:none">
           <span id="refresh-btn-label">Refresh</span>
+        </button>
+        <button class="icon-btn refresh-err-info" id="refresh-err-btn"
+                title="Last refresh failed -- click for full error details + copy-for-PRISM"
+                aria-label="Refresh error details"
+                style="display:none">
+          ! Error details
         </button>
         <button class="icon-btn" id="export-all"
                 title="Download all charts as PNG (2x)">
@@ -9905,13 +10037,47 @@ DASHBOARD_APP_JS = r"""
     });
   })();
 
-  // ----- refresh button -----
+  // ----- refresh button + error surfacing -----
+  //
   // Shown when metadata.kerberos + metadata.dashboard_id are set AND
-  // metadata.refresh_enabled !== false. POSTs to metadata.api_url (default
-  // /api/dashboard/refresh/) and polls metadata.status_url for completion.
+  // metadata.refresh_enabled !== false. POSTs to metadata.api_url
+  // (default /api/dashboard/refresh/) and polls metadata.status_url
+  // for completion.
+  //
+  // Refresh failures must be RECOVERABLE FROM THE BROWSER. A console
+  // warning is not enough; the user typically does not have a
+  // developer console open and shouldn't need one. So every failure
+  // mode (network, 4xx/5xx spawn-fail, runner-side error, runner-side
+  // partial, polling timeout) populates a dashboard-scoped error
+  // record and pops a modal that lays out:
+  //
+  //   - the failure kind (runner_error / runner_partial / timeout /
+  //     network / spawn_fail) with a coloured pill
+  //   - dashboard context (kerberos, dashboard_id, S3 folder)
+  //   - timestamps (started / completed / elapsed) when present
+  //   - server-side resources (pid, log path) when present
+  //   - the full errors[] array verbatim, one card per entry
+  //   - a "Copy markdown for PRISM" button that copies a
+  //     self-contained markdown report covering everything above so
+  //     the user can paste it straight into PRISM and have the
+  //     dashboard fixed without context-stitching
+  //   - a "Try again" button (re-POSTs the refresh) and, on partial,
+  //     a "Reload anyway" button (because some scripts succeeded)
+  //
+  // The persistent "Error details" pill next to the Refresh button
+  // remains visible after the refresh-button label resets, until a
+  // subsequent refresh succeeds. This is the load-bearing UX
+  // affordance: even if the user navigates away and comes back, they
+  // can re-open the modal and copy the failure into PRISM.
+  //
+  // On dashboard load we also fire one GET against status_url -- if
+  // the most recent refresh was an error/partial, the persistent pill
+  // appears immediately so users with stale data have a one-click
+  // path to get it fixed.
   (function(){
     var btn = document.getElementById('refresh-btn');
     var label = document.getElementById('refresh-btn-label');
+    var errBtn = document.getElementById('refresh-err-btn');
     if (!btn || !label) return;
     var kerberos = MD.kerberos;
     var dashboardId = MD.dashboard_id || MANIFEST.id;
@@ -9921,44 +10087,420 @@ DASHBOARD_APP_JS = r"""
     var statusUrl = MD.status_url || '/api/dashboard/refresh/status/';
     btn.style.display = 'inline-flex';
 
+    var KIND_LABEL = {
+      runner_error:   'REFRESH FAILED',
+      runner_partial: 'PARTIAL REFRESH',
+      timeout:        'POLLING TIMEOUT',
+      network:        'NETWORK ERROR',
+      spawn_fail:     'SPAWN FAILED'
+    };
+    var KIND_HINT = {
+      runner_error: 'The Django runner spawned, but pull_data.py or build.py raised before completing. ' +
+                    'The dashboard.html below is stale. Paste this report into PRISM to identify the failing script and fix it.',
+      runner_partial: 'Some refresh scripts succeeded and some failed. The dashboard reflects whatever artefacts were re-written; ' +
+                      'others are stale. Paste this report into PRISM to identify which scripts to fix.',
+      timeout: 'The refresh runner started but did not finish within the 3-minute polling window. ' +
+               'It may still be running on the server. Paste this report into PRISM to investigate.',
+      network: 'The browser could not reach the refresh API. The PRISM web server is offline, the URL is wrong, or ' +
+               'CORS / auth blocked the request. Paste this report into PRISM (or copy to operations).',
+      spawn_fail: 'The refresh API responded but rejected the request -- usually because the dashboard is not ' +
+                  'registered in dashboards_registry.json, the user has no permissions, or the runner subprocess ' +
+                  'failed to spawn. Paste this report into PRISM to triage.'
+    };
+
+    var LAST_ERROR = null;       // populated each time we hit a failure
+    var modalContainer = null;
+    var copyTimer = null;
+
+    function pillHtml(kind){
+      return '<span class="refresh-err-pill kind-' + kind + '">' +
+             _he(KIND_LABEL[kind] || kind.toUpperCase()) + '</span>';
+    }
+
+    function fmtTs(t){
+      if (!t) return '';
+      try {
+        var d = new Date(t);
+        if (isNaN(d.getTime())) return String(t);
+        return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+      } catch(e){ return String(t); }
+    }
+
+    function fmtElapsed(a, b){
+      if (!a || !b) return '';
+      try {
+        var ms = (new Date(b)).getTime() - (new Date(a)).getTime();
+        if (!isFinite(ms) || ms < 0) return '';
+        var s = ms / 1000;
+        if (s < 60) return s.toFixed(1) + 's';
+        var m = Math.floor(s / 60), r = Math.round(s % 60);
+        return m + 'm ' + r + 's';
+      } catch(e){ return ''; }
+    }
+
+    // Errors come in two shapes: a list of strings, or a list of
+    // dicts with at least a message. Normalise to objects so the
+    // modal can render uniformly.
+    function normalizeErrors(errors){
+      if (!errors) return [];
+      if (typeof errors === 'string') errors = [errors];
+      if (!Array.isArray(errors)) errors = [errors];
+      return errors.map(function(e){
+        if (e == null) return {message: '(empty error)'};
+        if (typeof e === 'string') return {message: e};
+        if (typeof e === 'object'){
+          var out = {};
+          out.script         = e.script || e.script_name || e.path || '';
+          out.classification = e.classification || e.code || e.type || e.kind || '';
+          out.message        = e.message || e.error || e.detail ||
+                               e.exception || JSON.stringify(e);
+          out.traceback      = e.traceback || e.stacktrace || '';
+          return out;
+        }
+        return {message: String(e)};
+      });
+    }
+
+    // Self-contained markdown report. The user pastes this into PRISM
+    // and PRISM has everything it needs to triage without round-trips.
+    function buildPrismMarkdown(rec){
+      var lines = [];
+      lines.push('## Dashboard refresh failure');
+      lines.push('');
+      lines.push('| Field | Value |');
+      lines.push('| --- | --- |');
+      lines.push('| Failure kind | `' + (rec.kind || 'unknown') + '` (' +
+                  (KIND_LABEL[rec.kind] || rec.kind || 'unknown') + ') |');
+      lines.push('| Dashboard ID | `' + (rec.dashboard_id || '') + '` |');
+      lines.push('| Kerberos | `' + (rec.kerberos || '') + '` |');
+      if (rec.folder)
+        lines.push('| Folder | `' + rec.folder + '` |');
+      if (rec.status)
+        lines.push('| `refresh_status.json` status | `' + rec.status + '` |');
+      if (rec.http_code != null)
+        lines.push('| HTTP status | `' + rec.http_code + '` |');
+      if (rec.started_at)
+        lines.push('| Started at | `' + rec.started_at + '` |');
+      if (rec.completed_at)
+        lines.push('| Completed at | `' + rec.completed_at + '` |');
+      var elapsed = fmtElapsed(rec.started_at, rec.completed_at);
+      if (elapsed)
+        lines.push('| Elapsed | ' + elapsed + ' |');
+      if (rec.pid != null)
+        lines.push('| Runner PID | `' + rec.pid + '` |');
+      if (rec.log_path)
+        lines.push('| Server log | `' + rec.log_path + '` |');
+      if (rec.auto_healed)
+        lines.push('| Auto-healed | yes |');
+      lines.push('| Captured at | `' + rec.captured_at + '` |');
+      lines.push('| Page URL | ' + rec.page_url + ' |');
+      lines.push('| User agent | ' + rec.user_agent + ' |');
+      lines.push('');
+
+      var errs = normalizeErrors(rec.errors);
+      if (errs.length){
+        lines.push('### Errors (`refresh_status.json.errors[]`)');
+        lines.push('');
+        errs.forEach(function(e, i){
+          lines.push('**Error ' + (i + 1) + '**');
+          if (e.script)         lines.push('- script: `' + e.script + '`');
+          if (e.classification) lines.push('- classification: `' + e.classification + '`');
+          lines.push('');
+          lines.push('```');
+          lines.push((e.message || '').toString());
+          lines.push('```');
+          if (e.traceback){
+            lines.push('');
+            lines.push('```');
+            lines.push(String(e.traceback));
+            lines.push('```');
+          }
+          lines.push('');
+        });
+      }
+
+      if (rec.kind === 'network' && rec.exception){
+        lines.push('### Browser-side exception');
+        lines.push('');
+        lines.push('```');
+        lines.push(String(rec.exception));
+        lines.push('```');
+        lines.push('');
+      }
+      if (rec.kind === 'spawn_fail' && rec.spawn_error){
+        lines.push('### Spawn-time error from `' + apiUrl + '`');
+        lines.push('');
+        lines.push('```');
+        lines.push(String(rec.spawn_error));
+        lines.push('```');
+        lines.push('');
+      }
+
+      lines.push('### Raw response');
+      lines.push('');
+      lines.push('```json');
+      try {
+        lines.push(JSON.stringify(rec.raw, null, 2));
+      } catch(e){
+        lines.push('(could not serialise -- ' + e + ')');
+      }
+      lines.push('```');
+      lines.push('');
+
+      lines.push('### What PRISM should check');
+      lines.push('');
+      lines.push('1. `users/' + (rec.kerberos || '<kerberos>') + '/dashboards/' +
+                  (rec.dashboard_id || '<id>') + '/scripts/pull_data.py` exists on S3 and runs cleanly.');
+      lines.push('2. `users/' + (rec.kerberos || '<kerberos>') + '/dashboards/' +
+                  (rec.dashboard_id || '<id>') + '/scripts/build.py` exists on S3 and runs cleanly.');
+      lines.push('3. `users/' + (rec.kerberos || '<kerberos>') + '/dashboards/' +
+                  (rec.dashboard_id || '<id>') + '/manifest_template.json` exists.');
+      lines.push('4. `users/' + (rec.kerberos || '<kerberos>') + '/dashboards/' +
+                  (rec.dashboard_id || '<id>') + '/data/*.csv` reflects the columns build.py expects.');
+      lines.push('5. `users/' + (rec.kerberos || '<kerberos>') + '/dashboards/' +
+                  (rec.dashboard_id || '<id>') + '/refresh_status.json` matches the snapshot above.');
+      lines.push('6. The dashboard is registered in `users/' + (rec.kerberos || '<kerberos>') +
+                  '/dashboards/dashboards_registry.json` with `refresh_enabled: true`.');
+      return lines.join('\n');
+    }
+
+    function buildModalBody(rec){
+      var errs = normalizeErrors(rec.errors);
+      var elapsed = fmtElapsed(rec.started_at, rec.completed_at);
+      var folder = rec.folder ||
+                   ('users/' + rec.kerberos + '/dashboards/' + rec.dashboard_id + '/');
+      var rows = [];
+      rows.push(pillHtml(rec.kind));
+
+      var summary = '<dl class="refresh-err-summary">';
+      summary += '<dt>Dashboard</dt><dd><code>' + _he(rec.dashboard_id || '') + '</code></dd>';
+      summary += '<dt>Kerberos</dt><dd><code>' + _he(rec.kerberos || '') + '</code></dd>';
+      summary += '<dt>S3 folder</dt><dd><code>' + _he(folder) + '</code></dd>';
+      if (rec.status)
+        summary += '<dt>Status</dt><dd><code>' + _he(rec.status) + '</code></dd>';
+      if (rec.http_code != null)
+        summary += '<dt>HTTP</dt><dd><code>' + _he(String(rec.http_code)) + '</code></dd>';
+      if (rec.started_at)
+        summary += '<dt>Started</dt><dd>' + _he(fmtTs(rec.started_at)) + '</dd>';
+      if (rec.completed_at)
+        summary += '<dt>Completed</dt><dd>' + _he(fmtTs(rec.completed_at)) + '</dd>';
+      if (elapsed)
+        summary += '<dt>Elapsed</dt><dd>' + _he(elapsed) + '</dd>';
+      if (rec.pid != null)
+        summary += '<dt>Runner PID</dt><dd><code>' + _he(String(rec.pid)) + '</code></dd>';
+      if (rec.log_path)
+        summary += '<dt>Server log</dt><dd><code>' + _he(rec.log_path) + '</code></dd>';
+      if (rec.auto_healed)
+        summary += '<dt>Auto-healed</dt><dd>yes</dd>';
+      summary += '</dl>';
+
+      var listHtml = '';
+      if (errs.length){
+        listHtml += '<div class="refresh-err-section-h">' +
+                    'Errors (' + errs.length + ')</div>';
+        listHtml += '<ul class="refresh-err-list">';
+        errs.forEach(function(e){
+          var cls = (rec.kind === 'runner_partial') ? ' class="partial"' : '';
+          var meta = [];
+          if (e.script)         meta.push('script: ' + e.script);
+          if (e.classification) meta.push('class: ' + e.classification);
+          listHtml += '<li' + cls + '>';
+          if (meta.length){
+            listHtml += '<span class="err-meta">' +
+                        _he(meta.join(' \u00B7 ')) + '</span>';
+          }
+          listHtml += _he((e.message || '').toString());
+          if (e.traceback){
+            listHtml += '\n\n' + _he(String(e.traceback));
+          }
+          listHtml += '</li>';
+        });
+        listHtml += '</ul>';
+      } else {
+        listHtml += '<div class="refresh-err-section-h">Errors</div>';
+        listHtml += '<ul class="refresh-err-list"><li>' +
+                    _he(rec.exception || rec.spawn_error || 'No structured errors returned.') +
+                    '</li></ul>';
+      }
+
+      var tipHtml = '<div class="refresh-err-tip"><strong>What to do:</strong> ' +
+                    _he(KIND_HINT[rec.kind] || '') +
+                    '<br><br><strong>Fastest path to a fix:</strong> click ' +
+                    '<em>Copy markdown for PRISM</em> and paste it into your PRISM session. ' +
+                    'PRISM has all the context it needs to identify the failing script ' +
+                    'and re-upload it to S3 -- you do not need to rebuild the dashboard ' +
+                    'from scratch.</div>';
+
+      var actionsHtml = '<div class="refresh-err-actions">';
+      actionsHtml += '<button type="button" class="primary" id="refresh-err-copy">' +
+                     'Copy markdown for PRISM</button>';
+      actionsHtml += '<button type="button" id="refresh-err-retry">Try again</button>';
+      if (rec.kind === 'runner_partial'){
+        actionsHtml += '<button type="button" id="refresh-err-reload">' +
+                       'Reload anyway (some scripts succeeded)</button>';
+      }
+      actionsHtml += '<span class="refresh-err-copy-status" id="refresh-err-copy-status">' +
+                     'Copied -- paste into PRISM</span>';
+      actionsHtml += '</div>';
+
+      return rows.join('') + summary + listHtml + tipHtml + actionsHtml;
+    }
+
+    function showErrorModal(rec){
+      var title = 'Dashboard refresh failed';
+      if (rec.kind === 'runner_partial') title = 'Dashboard refresh: partial success';
+      if (rec.kind === 'timeout')        title = 'Dashboard refresh timed out';
+      if (rec.kind === 'network')        title = 'Dashboard refresh: network error';
+      if (rec.kind === 'spawn_fail')     title = 'Dashboard refresh could not start';
+      var subtitle = (rec.dashboard_id || '') +
+                     (rec.kerberos ? '  \u00B7  ' + rec.kerberos : '');
+
+      showModal(title, buildModalBody(rec), {wide: true, subtitle: subtitle});
+
+      // Wire action buttons after innerHTML lands.
+      var copyBtn   = document.getElementById('refresh-err-copy');
+      var retryBtn  = document.getElementById('refresh-err-retry');
+      var reloadBtn = document.getElementById('refresh-err-reload');
+      var copyStatus = document.getElementById('refresh-err-copy-status');
+      if (copyBtn){
+        copyBtn.addEventListener('click', function(){
+          var md = buildPrismMarkdown(rec);
+          var done = function(){
+            if (!copyStatus) return;
+            copyStatus.classList.add('visible');
+            if (copyTimer) clearTimeout(copyTimer);
+            copyTimer = setTimeout(function(){
+              copyStatus.classList.remove('visible');
+            }, 3500);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(md).then(done, function(){
+              fallbackCopy(md); done();
+            });
+          } else {
+            fallbackCopy(md); done();
+          }
+        });
+      }
+      if (retryBtn){
+        retryBtn.addEventListener('click', function(){
+          hideModal(); doRefresh();
+        });
+      }
+      if (reloadBtn){
+        reloadBtn.addEventListener('click', function(){
+          hideModal(); location.reload();
+        });
+      }
+    }
+
+    function fallbackCopy(text){
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed'; ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch(e){ console.warn('[refresh] clipboard fallback failed:', e); }
+    }
+
+    function persistErrorPill(){
+      if (!errBtn) return;
+      errBtn.style.display = 'inline-flex';
+    }
+    function clearErrorPill(){
+      if (!errBtn) return;
+      errBtn.style.display = 'none';
+    }
+
+    function recordError(rec){
+      rec.captured_at = new Date().toISOString();
+      rec.page_url = window.location.href;
+      rec.user_agent = navigator.userAgent;
+      rec.kerberos = rec.kerberos || kerberos;
+      rec.dashboard_id = rec.dashboard_id || dashboardId;
+      LAST_ERROR = rec;
+      window.LAST_REFRESH_ERROR = rec;   // for scripted access
+      persistErrorPill();
+    }
+
     function setLabel(cls, txt){
       btn.classList.remove('refreshing','refresh-success','refresh-error');
       if (cls) btn.classList.add(cls);
       label.textContent = txt;
     }
     function resetLabel(){ setLabel('', 'Refresh'); btn.disabled = false; }
+
     function pollStatus(){
       var polls = 0, maxPolls = 60; // 3s x 60 = 3 min
       var timer = setInterval(function(){
         polls++;
         if (polls > maxPolls){
-          clearInterval(timer); setLabel('refresh-error', 'Timeout');
-          setTimeout(resetLabel, 3000); return;
+          clearInterval(timer);
+          setLabel('refresh-error', 'Timeout');
+          recordError({
+            kind: 'timeout',
+            status: 'running',
+            errors: ['Polling /api/dashboard/refresh/status/ timed out after ' +
+                     (maxPolls * 3) + 's. The runner may still be in flight on ' +
+                     'the server -- check the PID / log path before retrying.'],
+            raw: {polled_for_seconds: polls * 3, max_polls: maxPolls}
+          });
+          showErrorModal(LAST_ERROR);
+          setTimeout(resetLabel, 5000);
+          return;
         }
         fetch(statusUrl + '?dashboard_id=' + encodeURIComponent(dashboardId))
-          .then(function(r){ return r.json(); })
-          .then(function(st){
+          .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
+          .then(function(pair){
+            var code = pair[0], st = pair[1] || {};
             if (st.status === 'success'){
               clearInterval(timer);
               setLabel('refresh-success', 'Done -- reloading...');
+              clearErrorPill();
               setTimeout(function(){ location.reload(); }, 900);
             } else if (st.status === 'error'){
               clearInterval(timer);
               setLabel('refresh-error', 'Error');
-              var msg = (st.errors && st.errors.length) ? st.errors[0] : 'Unknown error';
-              console.warn('[refresh] error:', msg);
-              setTimeout(resetLabel, 3500);
+              recordError({
+                kind: 'runner_error', status: 'error', http_code: code,
+                errors: st.errors || [], started_at: st.started_at,
+                completed_at: st.completed_at, pid: st.pid,
+                log_path: st.log_path || st.log,
+                auto_healed: st.auto_healed, raw: st
+              });
+              showErrorModal(LAST_ERROR);
+              setTimeout(resetLabel, 5000);
             } else if (st.status === 'partial'){
               clearInterval(timer);
               setLabel('refresh-error', 'Partial');
-              setTimeout(function(){ location.reload(); }, 2000);
+              recordError({
+                kind: 'runner_partial', status: 'partial', http_code: code,
+                errors: st.errors || [], started_at: st.started_at,
+                completed_at: st.completed_at, pid: st.pid,
+                log_path: st.log_path || st.log,
+                auto_healed: st.auto_healed, raw: st
+              });
+              showErrorModal(LAST_ERROR);
+              // No auto-reload: the user reads the modal first, then
+              // chooses Reload-anyway. Reset the button label after a
+              // beat so they can also re-attempt.
+              setTimeout(resetLabel, 5000);
             }
             // still running -> keep polling
           })
-          .catch(function(e){ console.warn('[refresh] poll network error:', e); });
+          .catch(function(e){
+            console.warn('[refresh] poll network error:', e);
+            // Don't kill the timer on a single transient -- only on
+            // sustained failure. The maxPolls cap above provides the
+            // upper bound.
+          });
       }, 3000);
     }
-    btn.addEventListener('click', function(){
+
+    function doRefresh(){
       if (window.location.protocol === 'file:'){
         alert('Refresh is not available when viewing the dashboard offline. ' +
               'Open the dashboard from the PRISM portal to refresh.');
@@ -9976,21 +10518,100 @@ DASHBOARD_APP_JS = r"""
           if (code === 409){ pollStatus(); return; }
           if (result.status === 'refreshing'){ pollStatus(); return; }
           if (result.status === 'success' || result.status === 'partial'){
+            // The synchronous-finish branch is rare in PRISM (the API
+            // typically returns 200 + {status:"refreshing"} and the
+            // runner finishes async), but if it does we still want the
+            // partial UX to surface what failed.
+            if (result.status === 'partial'){
+              setLabel('refresh-error', 'Partial');
+              recordError({
+                kind: 'runner_partial', status: 'partial', http_code: code,
+                errors: result.errors || [], started_at: result.started_at,
+                completed_at: result.completed_at, pid: result.pid,
+                log_path: result.log_path || result.log,
+                auto_healed: result.auto_healed, raw: result
+              });
+              showErrorModal(LAST_ERROR);
+              setTimeout(resetLabel, 5000);
+              return;
+            }
             setLabel('refresh-success', 'Done -- reloading...');
+            clearErrorPill();
             setTimeout(function(){ location.reload(); }, 900);
           } else {
+            // 4xx / 5xx / explicit {error: ...} body. The runner never
+            // even ran -- usually because the dashboard is not in the
+            // registry, the user is unauthenticated, or the spawn
+            // itself failed.
             setLabel('refresh-error', 'Error');
-            var msg = result.errors || result.error || 'Unknown error';
-            console.warn('[refresh] failed:', msg);
-            setTimeout(resetLabel, 3500);
+            recordError({
+              kind: 'spawn_fail', status: result.status || null,
+              http_code: code,
+              errors: result.errors || (result.error ? [result.error] : []),
+              spawn_error: result.error || result.message || null,
+              raw: result
+            });
+            showErrorModal(LAST_ERROR);
+            setTimeout(resetLabel, 5000);
           }
         })
         .catch(function(err){
+          // Network-level failure: the browser couldn't reach the API
+          // at all. Distinct from spawn_fail (which means the API
+          // responded with a rejection).
           setLabel('refresh-error', 'Error');
-          console.warn('[refresh] network error:', err);
-          setTimeout(resetLabel, 3500);
+          recordError({
+            kind: 'network',
+            errors: ['fetch ' + apiUrl + ' failed: ' + (err && err.message ? err.message : err)],
+            exception: (err && err.stack) ? err.stack : String(err),
+            raw: {api_url: apiUrl, status_url: statusUrl}
+          });
+          showErrorModal(LAST_ERROR);
+          setTimeout(resetLabel, 5000);
         });
-    });
+    }
+
+    btn.addEventListener('click', doRefresh);
+    if (errBtn){
+      errBtn.addEventListener('click', function(){
+        if (LAST_ERROR) showErrorModal(LAST_ERROR);
+      });
+    }
+
+    // On dashboard load, surface the most recent failure (if any) so
+    // users coming back to a stale dashboard see the failure in the
+    // header without having to click Refresh again. We don't auto-pop
+    // the modal -- that would be too noisy on every reload -- we just
+    // light up the persistent pill.
+    if (window.location.protocol !== 'file:'){
+      try {
+        fetch(statusUrl + '?dashboard_id=' + encodeURIComponent(dashboardId), {
+          method: 'GET'
+        }).then(function(r){
+          if (!r.ok) return null;
+          return r.json();
+        }).then(function(st){
+          if (!st) return;
+          if (st.status === 'error'){
+            recordError({
+              kind: 'runner_error', status: 'error',
+              errors: st.errors || [], started_at: st.started_at,
+              completed_at: st.completed_at, pid: st.pid,
+              log_path: st.log_path || st.log,
+              auto_healed: st.auto_healed, raw: st
+            });
+          } else if (st.status === 'partial'){
+            recordError({
+              kind: 'runner_partial', status: 'partial',
+              errors: st.errors || [], started_at: st.started_at,
+              completed_at: st.completed_at, pid: st.pid,
+              log_path: st.log_path || st.log,
+              auto_healed: st.auto_healed, raw: st
+            });
+          }
+        }).catch(function(){ /* status endpoint optional */ });
+      } catch(e){ /* swallow -- the manual refresh path still works */ }
+    }
   })();
 
   // ----- URL state (shareable views) -----
