@@ -4108,13 +4108,25 @@ def apply_beautification_to_spec(
         # ---- x-axis ------------------------------------------------------
         if "x" in enc and "x" in axis_configs and isinstance(enc["x"], dict):
             x_config = axis_configs["x"]
+            # Critical: ``axis_configs['x']`` is computed from the original
+            # ``mapping['x']`` field (e.g. ``'date'``). Some builder paths
+            # rewrite ``enc['x']`` to a different field with a different
+            # type -- notably the grouped-bar (``stack=False``) path,
+            # which swaps ``enc['x']`` to the color field with
+            # ``type='nominal'`` and column-facets by the original x.
+            # Applying temporal-flavored format / tickCount to a nominal
+            # scale produces the Vega "Only time and utc scales accept
+            # interval strings" rendering error and a blank PNG. Gate
+            # temporal-specific knobs on the actual encoded type.
+            enc_x_type = enc["x"].get("type")
+            x_is_temporal_or_quant = enc_x_type in ("temporal", "quantitative")
             if "axis" not in enc["x"]:
                 enc["x"]["axis"] = {}
             if x_config.label_angle != 0:
                 enc["x"]["axis"]["labelAngle"] = x_config.label_angle
-            if x_config.format:
+            if x_config.format and x_is_temporal_or_quant:
                 enc["x"]["axis"]["format"] = x_config.format
-                if enc["x"].get("type") == "temporal":
+                if enc_x_type == "temporal":
                     enc["x"]["axis"]["formatType"] = "time"
             # Prefer the explicit interval/step pair when provided
             # (forces Vega-Lite to land on semi-annual / annual /
@@ -4124,7 +4136,10 @@ def apply_beautification_to_spec(
             # for N >= 12 (defense in depth: ``determine_date_format``
             # already does this, but downstream callers may set their
             # own tick_step).
-            if x_config.tick_step:
+            #
+            # Interval-string tick steps are only valid on temporal
+            # scales -- never push them onto a nominal x.
+            if x_config.tick_step and x_is_temporal_or_quant:
                 ts = x_config.tick_step
                 if (
                     isinstance(ts, dict)
@@ -4134,7 +4149,7 @@ def apply_beautification_to_spec(
                 ):
                     ts = _temporal_tick_step("month", ts["step"])
                 enc["x"]["axis"]["tickCount"] = ts
-            elif x_config.tick_count:
+            elif x_config.tick_count and x_is_temporal_or_quant:
                 enc["x"]["axis"]["tickCount"] = x_config.tick_count
             if x_config.label_limit:
                 enc["x"]["axis"]["labelLimit"] = x_config.label_limit
@@ -4146,7 +4161,7 @@ def apply_beautification_to_spec(
             # so neighbouring labels don't visually merge. Applied to
             # temporal and quantitative axes only -- categorical /
             # nominal axes need every label intact.
-            if enc["x"].get("type") in ("temporal", "quantitative"):
+            if x_is_temporal_or_quant:
                 enc["x"]["axis"].setdefault("labelOverlap", "greedy")
                 enc["x"]["axis"].setdefault("labelSeparation", 8)
 
@@ -6594,17 +6609,47 @@ def _build_bar(
             n_x_cats, facet_width,
         )
 
-        # Stringify any datetime columns for safe spec embedding.
+        # Stringify any datetime columns so they round-trip cleanly
+        # through the JSON spec without becoming auto-coerced unix-ms
+        # ticks under the column facet's nominal scale.
         df_grouped = df.copy()
         for col in df_grouped.columns:
             if pd.api.types.is_datetime64_any_dtype(df_grouped[col]):
-                df_grouped[col] = df_grouped[col].dt.strftime("%Y-%m-%dT%H:%M:%S")
+                df_grouped[col] = df_grouped[col].dt.strftime(
+                    "%Y-%m-%dT%H:%M:%S"
+                )
+
+        # When the original x is a datetime, build a friendly facet-label
+        # column (e.g. ``"Jan '23"``) on a separate field so the tooltip
+        # can keep showing the original temporal ``date`` while the
+        # facet header shows a compact human-readable label.
+        x_is_datetime = pd.api.types.is_datetime64_any_dtype(df[x_field])
+        if x_is_datetime:
+            x_dt = pd.to_datetime(df[x_field])
+            unique_sorted = pd.Series(x_dt.unique()).sort_values()
+            n_unique = len(unique_sorted)
+            span_days = (
+                (unique_sorted.iloc[-1] - unique_sorted.iloc[0]).days
+                if n_unique > 1 else 0
+            )
+            if span_days <= 7:
+                fmt = "%b %d"
+            elif span_days <= 365 * 2:
+                fmt = "%b '%y"
+            else:
+                fmt = "%Y"
+            facet_field = "__facet_label"
+            df_grouped[facet_field] = x_dt.dt.strftime(fmt)
+            sort_order = unique_sorted.dt.strftime(fmt).tolist()
+        else:
+            facet_field = x_field
+            sort_order = list(df_grouped[x_field].unique())
 
         # Per-facet header label angle: use the per-facet width (not the
         # global chart width) so we don't wastefully rotate short labels
         # that would fit horizontally inside one facet column.
         facet_label_angle = calculate_optimal_label_angle(
-            [str(v) for v in df_grouped[x_field].unique()],
+            [str(v) for v in sort_order],
             facet_width,
             estimated_tick_count=1,
         )
@@ -6621,7 +6666,7 @@ def _build_bar(
             )
             .encode(
                 column=alt.Column(
-                    x_field,
+                    facet_field,
                     type="nominal",
                     title=None,
                     header=alt.Header(
@@ -6633,7 +6678,7 @@ def _build_bar(
                             "labelFontSize", 14,
                         ),
                     ),
-                    sort=list(df_grouped[x_field].unique()),
+                    sort=sort_order,
                 ),
                 x=alt.X(
                     color_field,
@@ -6662,7 +6707,13 @@ def _build_bar(
             .properties(width=facet_width, height=height)
         )
 
-    chart = _force_data_embedding(chart, df)
+    # On the grouped (``stack=False``) path, ``df_grouped`` carries
+    # the synthetic ``__facet_label`` column for the column-facet
+    # encoding. Stacked / single-series paths fall through with the
+    # original ``df`` (datetimes are ISO-stringified by
+    # ``_force_data_embedding`` itself).
+    embed_df = df_grouped if "df_grouped" in locals() else df
+    chart = _force_data_embedding(chart, embed_df)
     logger.debug("[_build_bar] DONE")
     return chart
 
@@ -10812,6 +10863,10 @@ __all__ = [
     "Band",
     "Arrow",
     "PointLabel",
+    "Segment",
+    "PointHighlight",
+    "Callout",
+    "LastValueLabel",
     "Trendline",
     # Skins / dimensions
     "AVAILABLE_SKINS",
