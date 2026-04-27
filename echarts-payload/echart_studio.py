@@ -58,6 +58,7 @@ from config import (
     get_theme, list_themes,
     get_palette, list_palettes, palette_colors,
     get_dimension_preset, get_typography_override, list_dimensions,
+    MAX_DASHBOARD_DECIMALS, clamp_decimals,
 )
 from rendering import render_editor_html
 
@@ -221,6 +222,72 @@ def _apply_typography_to_axes(opt: Dict[str, Any], ctx: BuilderContext):
             nt = ax.setdefault("nameTextStyle", {})
             if ts.get("axisTitleSize") is not None:
                 nt["fontSize"] = ts["axisTitleSize"]
+
+
+# JS body for the default value-axis tick-label formatter. Mirrors
+# ECharts' "nice" default (no thousands separators on integers,
+# trailing zeros stripped on decimals) but caps fractional digits at
+# ``MAX_DASHBOARD_DECIMALS`` so a tightly-zoomed value axis can never
+# render a tick like "0.001234". Generated with a Python f-string so the
+# cap is single-source-of-truth (config.MAX_DASHBOARD_DECIMALS).
+_DEFAULT_VALUE_AXIS_FORMATTER_JS: str = (
+    "function(v){"
+    "  if (v == null) return '';"
+    "  var n = +v;"
+    "  if (isNaN(n)) return String(v);"
+    "  var a = Math.abs(n);"
+    "  if (a === 0) return '0';"
+    f" if (a >= 1 && Math.round(n) === n) return n.toString();"
+    f" var s = n.toFixed({MAX_DASHBOARD_DECIMALS});"
+    "  if (s.indexOf('.') >= 0) {"
+    "    s = s.replace(/0+$/, '').replace(/\\.$/, '');"
+    "  }"
+    "  return s;"
+    "}"
+)
+
+
+def _install_default_axis_decimal_cap(opt: Dict[str, Any]) -> None:
+    """Install a default ``axisLabel.formatter`` on every value/log axis
+    that doesn't already have one, capping rendered tick precision at
+    ``MAX_DASHBOARD_DECIMALS``.
+
+    Idempotent: if a builder, preset, or user-supplied option already
+    set an ``axisLabel.formatter``, we leave it alone -- the assumption
+    is the explicit formatter knows what it's doing (and the JS-runtime
+    layer caps any user-supplied ``decimals``-style options through
+    ``__capDec`` regardless). Category axes never need the cap because
+    they don't render numeric ticks.
+
+    This is called once per chart at the tail of ``make_echart`` and
+    once per chart-widget after dashboards' ``_apply_post_build_polish``
+    so dashboards inherit the cap as well.
+    """
+    for axis_key in ("xAxis", "yAxis"):
+        axes = opt.get(axis_key)
+        if axes is None:
+            continue
+        if isinstance(axes, dict):
+            axis_list = [axes]
+        elif isinstance(axes, list):
+            axis_list = axes
+        else:
+            continue
+        for ax in axis_list:
+            if not isinstance(ax, dict):
+                continue
+            ax_type = ax.get("type")
+            if ax_type not in ("value", "log"):
+                continue
+            label = ax.get("axisLabel")
+            if not isinstance(label, dict):
+                label = {}
+                ax["axisLabel"] = label
+            if "formatter" in label and label.get("formatter") not in (
+                None, "", False,
+            ):
+                continue
+            label["formatter"] = _DEFAULT_VALUE_AXIS_FORMATTER_JS
 
 
 # ---------------------------------------------------------------------------
@@ -2548,7 +2615,12 @@ def _heatmap_auto_contrast_formatter(decimals: int, value_idx: int = 2) -> str:
     Handles ``[xIdx, yIdx, val]`` arrays (regular heatmap), ``[date,
     val]`` arrays (calendar_heatmap via ``value_idx=1``), and
     ``{value: [...]}`` cell-data wrappers.
+
+    ``decimals`` is clamped to ``MAX_DASHBOARD_DECIMALS`` so callers
+    that thread an oversized ``value_decimals`` still produce a
+    formatter capped at 2 decimals.
     """
+    decimals = clamp_decimals(decimals, default=decimals)
     return (
         "function(p){"
         "var v=null;var d=p&&p.data;"
@@ -2662,7 +2734,10 @@ def _resolve_heatmap_value_range(
 def _auto_value_decimals(vals: Sequence[Any]) -> int:
     """Pick a sensible default decimal count for heatmap cell labels
     based on the magnitude of the values. Large counts -> 0 decimals;
-    sub-unit values -> 3 decimals.
+    sub-unit values lose precision but stay within the global
+    ``MAX_DASHBOARD_DECIMALS`` cap (any "natural" 3rd decimal would
+    silently get rounded off downstream anyway, so we surface the cap
+    here instead of pretending we have more precision).
     """
     finite = [abs(float(v)) for v in vals if _is_finite(v)]
     if not finite:
@@ -2672,9 +2747,7 @@ def _auto_value_decimals(vals: Sequence[Any]) -> int:
         return 0
     if m >= 10:
         return 1
-    if m >= 1:
-        return 2
-    return 3
+    return clamp_decimals(2, default=2)
 
 
 def _heatmap_value_formatter(decimals: int, value_idx: int = 2) -> str:
@@ -2685,7 +2758,10 @@ def _heatmap_value_formatter(decimals: int, value_idx: int = 2) -> str:
     ``value_idx``. Resilient to ``{value: [...]}`` cell-data wrappers.
     Returns an empty string for null / NaN values so blank cells look
     intentionally empty rather than printing ``"NaN"``.
+
+    ``decimals`` is clamped to ``MAX_DASHBOARD_DECIMALS``.
     """
+    decimals = clamp_decimals(decimals, default=decimals)
     return (
         "function(p){"
         "var v=null;var d=p&&p.data;"
@@ -2738,9 +2814,11 @@ def _resolve_heatmap_label_block(
     if not show_values:
         return label_block
 
-    decimals = mapping.get("value_decimals")
-    if decimals is None:
+    raw_decimals = mapping.get("value_decimals")
+    if raw_decimals is None:
         decimals = _auto_value_decimals(vals)
+    else:
+        decimals = clamp_decimals(raw_decimals, default=raw_decimals)
 
     custom_fmt = mapping.get("value_formatter")
     label_color = mapping.get("value_label_color", "auto")
@@ -2947,7 +3025,7 @@ def build_correlation_matrix(df, mapping: Dict[str, Any],
         )
     transform = (mapping.get("transform") or "raw").lower()
     show_values = bool(mapping.get("show_values", True))
-    decimals = int(mapping.get("value_decimals", 2))
+    decimals = clamp_decimals(mapping.get("value_decimals"), default=2)
     min_periods = int(mapping.get("min_periods", 5))
 
     # Resolve the order column once: only used for order-aware transforms.
@@ -5378,6 +5456,8 @@ def make_echart(
         combined_annotations.extend(list(annotations))
     if combined_annotations:
         _apply_annotations(opt, combined_annotations)
+
+    _install_default_axis_decimal_cap(opt)
 
     ok, warnings = validate_option(opt)
     chart_id = _compute_chart_id(opt)

@@ -17,7 +17,7 @@ One visual style only -- the Goldman Sachs brand: GS Navy `#002F6C`, PMS 652 Sky
 
 Four rules; all four absolute. A dashboard that violates any of them is broken even if `dashboard.html` renders.
 
-**Rule 1 -- real data only.** Every series traces to a real pull (`pull_market_data`, `pull_haver_data`, `pull_plottool_data`, `pull_fred_data`, Treasury / Bloomberg / FactSet / Refinitiv backends, registered scrapers, or a vetted CSV in S3). Forbidden: `np.random.*`, `np.linspace`/`np.arange` as data, hand-typed numeric arrays as "demo"/"placeholder", synthetic fill for missing values, invented dates or labels. If no source exists, do not build the panel -- add a data source first.
+**Rule 1 -- real data only.** Every series traces to a real pull. The four auto-saving primitives are `pull_market_data`, `pull_haver_data`, `pull_plottool_data`, `pull_fred_data`. Everything else (FDIC, SEC EDGAR, BIS, Treasury, Treasury Direct, NY Fed, prediction markets, OpenFIGI, Substack, Wikipedia, Pure / Alloy, Coalition, Inquiry, hand-built DataFrames from scrapers) lands via `save_artifact()` (Section 12.1a). Forbidden: `np.random.*`, `np.linspace`/`np.arange` as data, hand-typed numeric arrays as "demo"/"placeholder", synthetic fill for missing values, invented dates or labels. If no source exists, do not build the panel -- add a data source first.
 
 **Rule 2 -- no literal data inside the manifest JSON.** Pass DataFrames; the compiler converts them to the canonical on-disk shape. PRISM never types numbers into the JSON. Three accepted dataset entry shapes, all normalised:
 
@@ -31,16 +31,22 @@ Four rules; all four absolute. A dashboard that violates any of them is broken e
 
 **Rule 4 -- canonical layout is non-negotiable; `scripts/` is required, not optional; the persisted script IS what runs.** Every persistent user dashboard MUST land at `users/{kerberos}/dashboards/{name}/` with the full set of artefacts shown in Section 2.2: `dashboard.html`, `manifest.json`, `manifest_template.json`, `scripts/pull_data.py`, `scripts/build.py`, and the raw CSVs in `data/`. The two `.py` files under `scripts/` are not "nice to have" -- they are exactly what the refresh runner re-executes on schedule (Section 12.3). A dashboard whose `scripts/` folder is empty or missing is a one-shot static snapshot: [Refresh] fails the moment the user clicks it, the registry flips to `last_refresh_status: error`, and the dashboard surfaces a `FileNotFoundError` directly in the in-browser error modal (Section 12.3a) -- the failure is loud and PRISM-recoverable, not silent.
 
+**Rule 5 -- every CSV lives at `{DASHBOARD_PATH}/data/<dataset>.csv`, period.** Inside `pull_data.py`, every pull-function call and every `save_artifact(...)` call MUST pass `output_path=f'{SESSION_PATH}/data'`. The refresh runner injects `SESSION_PATH = dashboard_folder` (= `{DASHBOARD_PATH}`) into the script's namespace at exec time, so `f'{SESSION_PATH}/data'` resolves to the same S3 folder both at build time (Tool 1's exec from S3) and at refresh time (Section 12.1a). That is the only routing that lands the CSVs in the flat `data/` folder where `build.py` reads them back. Without `output_path`, `pull_market_data` writes to `{DASHBOARD_PATH}/market_data/`, `pull_haver_data` to `{DASHBOARD_PATH}/haver/`, `pull_plottool_data` to `{DASHBOARD_PATH}/plottool_data/` -- subfolders that `build.py` does not look in, so refresh fails on `FileNotFoundError`.
+
+The dataset key in `manifest.datasets` matches the on-disk CSV stem byte-for-byte. For `pull_market_data` the function ALWAYS appends `_eod` (or `_intraday`) to the CSV filename; pass `name='rates'` (no suffix), get `data/rates_eod.csv` on disk, and use `'rates_eod'` as the dataset key in the manifest. Pass `name='rates_eod'` and you get the doubly-suffixed `data/rates_eod_eod.csv`, which is uniformly the wrong answer. Section 12.1a has the full per-source pattern.
+
 **The build flow IS the refresh path** (Section 12.1). PRISM does NOT pull data in the ephemeral session and then persist a script after the fact; PRISM does NOT compile in the ephemeral session and then persist a script after the fact. PRISM authors each script as a Python string, persists it to S3, and `exec`s it FROM S3 with the same namespace shape the refresh runner uses. This collapses two would-be-different code paths (build-time and refresh-time) into one: what runs during the initial build is byte-identical to what runs every refresh. No drift is possible, no double work happens, and the build itself doubles as the refresh smoke test (Section 12.6).
 
 ```python
-df_rates = pull_market_data(coordinates=['IR_USD_Swap_2Y_Rate', 'IR_USD_Swap_10Y_Rate'],
-                             start_date='2020-01-01', name='rates')
+df_rates_eod, _ = pull_market_data(
+    coordinates=['IR_USD_Swap_2Y_Rate', 'IR_USD_Swap_10Y_Rate'],
+    start='2020-01-01', name='rates', mode='eod')
+df_rates_eod.columns = ['us_2y', 'us_10y']            # plain English (Rule 1)
 manifest = {
     "schema_version": 1, "id": "rates", "title": "US Rates",
-    "datasets": {"rates": df_rates},
+    "datasets": {"rates_eod": df_rates_eod.reset_index()},
     "layout": {"rows": [[{"widget": "chart", "id": "curve", "w": 12,
-        "spec": {"chart_type": "multi_line", "dataset": "rates",
+        "spec": {"chart_type": "multi_line", "dataset": "rates_eod",
                   "mapping": {"x": "date", "y": ["us_2y", "us_10y"]}}}]]}
 }
 compile_dashboard(manifest, session_path=SESSION_PATH)
@@ -153,8 +159,15 @@ users/{kerberos}/dashboards/{dashboard_name}/
   scripts/                  [REQUIRED] without these the refresh pipeline has nothing to run
     pull_data.py            [REQUIRED] data acquisition (~50-150 lines). Refresh runner re-executes verbatim
     build.py                [REQUIRED] ~12 lines: load data, populate_template, compile. Refresh runner re-executes verbatim
-  data/                     [REQUIRED] populated by pull_data.py
-    rates_eod.csv           raw cache (one CSV per dataset; build.py reads these back)
+  data/                     [REQUIRED] populated by pull_data.py via output_path=f'{SESSION_PATH}/data' (Rule 5; SESSION_PATH = DASHBOARD_PATH at refresh time)
+    rates_eod.csv           one CSV per dataset; build.py reads these back. Stem matches manifest dataset key
+    rates_intraday.csv      pull_market_data ALWAYS appends _eod / _intraday to the filename
+    rates_metadata.json     metadata sidecar; same name= base, NO _eod / _intraday suffix
+    cpi.csv                 pull_haver_data: no suffix
+    cpi_metadata.json
+    swap_curve.csv          pull_plottool_data: no suffix
+    swap_curve_metadata.json
+    fdic_gs_bank.csv        save_artifact (alt-data): no suffix
   history/                  optional snapshots when keep_history=true
 ```
 
@@ -312,7 +325,7 @@ Edge cases: `n<2` → `n<2 -- regression unavailable`; zero X-variance suppresse
 | `transform` | Per-column transform before correlation (default `'raw'`; same names as scatter_studio) |
 | `order_by` | Required when `transform` is order-aware. Default: first datetime-like col |
 | `min_periods` | Min overlapping non-null pairs to report a correlation (default 5); below threshold renders blank |
-| `show_values` / `value_decimals` | Print correlation in each cell (default `True` / `2`) |
+| `show_values` / `value_decimals` | Print correlation in each cell (default `True` / `2`; values clamped to the global decimal cap, see Section 3.3) |
 | `value_label_color` | `"auto"` (B/W contrast), hex, or `False` |
 | `colors` / `color_palette` | Override palette (default `gs_diverging`) |
 
@@ -351,7 +364,7 @@ Cell tooltip prints `<row name> × <col name>: r=0.xx`. The diagonal is always `
 | `parallel_coords` | `dims` (list), optional `color` |
 | `tree` | `name`, `parent` |
 
-**Heatmap-style charts** (`heatmap`, `correlation_matrix`, `calendar_heatmap`) accept these cell-label / color keys: `show_values` (default `True` for heatmap / correlation_matrix, `False` for calendar_heatmap), `value_decimals` (auto-picked from data magnitude), `value_formatter` (raw ECharts function string -- suppresses auto-contrast), `value_label_color` (`"auto"` / hex / `False`), `value_label_size` (default 11), `colors`, `color_palette`, `color_scale` (`sequential` / `diverging` / `auto` -- diverging when data crosses zero), `value_min` / `value_max` (pin visualMap range so colors stay interpretable across reruns).
+**Heatmap-style charts** (`heatmap`, `correlation_matrix`, `calendar_heatmap`) accept these cell-label / color keys: `show_values` (default `True` for heatmap / correlation_matrix, `False` for calendar_heatmap), `value_decimals` (auto-picked from data magnitude; clamped to the global decimal cap, Section 3.3), `value_formatter` (raw ECharts function string -- suppresses auto-contrast and the cap; you author what renders), `value_label_color` (`"auto"` / hex / `False`), `value_label_size` (default 11), `colors`, `color_palette`, `color_scale` (`sequential` / `diverging` / `auto` -- diverging when data crosses zero), `value_min` / `value_max` (pin visualMap range so colors stay interpretable across reruns).
 
 Auto-contrast routes through ECharts rich-text styles (`label.rich.l` for dark text on light cells, `label.rich.d` for light on dark) plus a JS formatter that picks the right style from cell luminance -- the heatmap series doesn't evaluate `label.color` as a callback, which is why rich text is used.
 
@@ -395,6 +408,8 @@ When to use: 2 axes → prefer `dual_axis_series`. 3+ across asset classes/units
 **Layout-aware sizing.** Compiler truncates long category labels to `category_label_max_px`; sizes `nameGap` from real label widths; bumps `grid.left`/`grid.bottom` for rotated axis names; auto-rotates vertical-bar / boxplot x-labels when crowded; bumps heatmap `grid.right` to 76px for visualMap clearance.
 
 **Per-spec overrides.** `palette`, `theme`, `annotations` may live on `spec` to override manifest defaults. Required keys: `chart_type`, `dataset`, `mapping`. Titles / subtitles live at the widget level only -- `spec.title` / `spec.subtitle` are rejected by the validator (Section 4.1).
+
+**Global decimal cap.** Every numeric value rendered anywhere in a dashboard -- value-axis tick labels, tooltips, KPI tiles, table cells, heatmap cell labels, correlation coefficients, regression statistics, the "View raw data" modal -- is hard-capped at 2 decimal places. Author-supplied precision options (`value_decimals`, `decimals`, `delta_decimals`, `tooltip.decimals`, table format suffixes like `"number:5"`) are silently coerced down to the cap; passing `value_decimals: 5` produces the same output as `value_decimals: 2`. Value axes that the builder didn't already attach an explicit `axisLabel.formatter` to inherit a default formatter capped at 2 decimals so tightly-zoomed axes can't bleed extra digits. The cap is a non-negotiable house rule (config.MAX_DASHBOARD_DECIMALS); raise it in `config.py` if the policy ever changes. Author-supplied raw JS function strings (`value_formatter`, `tooltip.formatter`, `axisLabel.formatter`) are NOT inspected -- if you hand-write a formatter that emits 4 decimals it will render 4 decimals. Use the structured `value_decimals` / `tooltip.decimals` knobs and the cap protects you.
 
 ### 3.4 Annotations
 
@@ -553,8 +568,8 @@ manifest['datasets']['kpis'] = kpi_df
 | `value` / `source` | Direct override (skips `source`); dotted `<dataset>.<agg>.<column>` |
 | `sub` | Subtext under the value |
 | `delta` / `delta_source` / `delta_pct` | Direct delta or dotted source (delta = current - prev); `delta_pct` auto-computed from `delta_source` if absent |
-| `delta_label` / `delta_decimals` | Label after delta / precision (default 2) |
-| `prefix` / `suffix` / `decimals` | Prepended / appended (`$`, `%`, `bp`); precision for value (default 2 for <1000, else 0) |
+| `delta_label` / `delta_decimals` | Label after delta / precision (default 2; clamped to the global cap, Section 3.3) |
+| `prefix` / `suffix` / `decimals` | Prepended / appended (`$`, `%`, `bp`); precision for value (default 2 for <1000, else 0; clamped to the global cap) |
 | `sparkline_source` | Dotted: `<dataset>.<column>` for inline sparkline (no aggregator) |
 | `format` | `"auto"` (default; `2820` → `2,820`), `"compact"` (K/M/B/T), `"comma"`, `"percent"`, `"raw"` |
 
@@ -593,7 +608,7 @@ Pass `dataset_ref` and the table renders every column by default. For production
 | Key | Purpose |
 |-----|---------|
 | `field` (req) / `label` | Column name in dataset; header label (defaults to field) |
-| `format` | `text` / `number[:d]` / `integer` / `percent[:d]` / `currency[:d]` / `bps[:d]` / `signed[:d]` / `delta[:d]` / `date` / `datetime` / `link` |
+| `format` | `text` / `number[:d]` / `integer` / `percent[:d]` / `currency[:d]` / `bps[:d]` / `signed[:d]` / `delta[:d]` / `date` / `datetime` / `link`. The `:d` suffix is clamped to the global decimal cap (Section 3.3) -- `"number:5"` renders identically to `"number:2"` |
 | `align` / `sortable` / `tooltip` | `left` / `center` / `right` (auto-right for numeric); defaults to table-level; hover text on header + cells |
 | `conditional` | First-match-wins rules: `{op, value, background?, color?, bold?}` (op from filter ops set) |
 | `color_scale` | Continuous heatmap: `{min, max, palette}` (`gs_diverging` / `gs_blues`) |
@@ -804,7 +819,7 @@ Long-form dataset → interactive crosstab where the viewer picks row dim, col d
 | `dataset_ref` | yes | Long-form dataset (one row per `(row_cat, col_cat, value)`) |
 | `row_dim_columns` / `col_dim_columns` / `value_columns` | yes | Whitelists |
 | `agg_options` | no | Default `["mean", "sum", "median", "min", "max", "count"]` |
-| `row_default` / `col_default` / `value_default` / `agg_default` / `decimals` | no | Initial selections; cell precision (default 2) |
+| `row_default` / `col_default` / `value_default` / `agg_default` / `decimals` | no | Initial selections; cell precision (default 2; clamped to the global cap, Section 3.3) |
 | `color_scale` / `show_totals` | no | `"sequential"` / `"diverging"` / `"auto"` (diverging when crosses 0) / `false`; append row/col totals (recomputed, not summed from cells; default `True`) |
 
 Filters targeting `dataset_ref` flow through naturally. User's last dropdown selections survive URL state encoding (`#p.<id>.r=...&p.<id>.c=...`).
@@ -1220,6 +1235,8 @@ Both `compile_dashboard` and renderer are **resilient by design**: a chart that 
 
 NON-NEGOTIABLE: every user-requested dashboard persists to `users/{kerberos}/dashboards/{name}/`, and that folder MUST contain `dashboard.html`, `manifest.json`, `manifest_template.json`, `scripts/pull_data.py`, `scripts/build.py`, and the raw CSVs in `data/` (Section 2.2, Rule 4 of Section 0). A dashboard living only in `SESSION_PATH` won't refresh, won't appear in the user's list, and is lost when the conversation ends. A dashboard at the right path but missing `scripts/` is equally broken: the [Refresh] button has nothing to call, the registry flips to `last_refresh_status: error`, and the user has no recovery path.
 
+NON-NEGOTIABLE: every CSV referenced by `build.py` lives at `{DASHBOARD_PATH}/data/<dataset>.csv`. Inside `pull_data.py`, every `pull_*_data(...)` and `save_artifact(...)` call MUST pass `output_path=f'{SESSION_PATH}/data'` (Rule 5 of Section 0); the refresh runner pins `SESSION_PATH = {DASHBOARD_PATH}` so the same string resolves correctly at build time and refresh time. The dataset key in `manifest.datasets` matches the on-disk CSV stem. Section 12.1a is the per-source pattern for the four pull primitives plus `save_artifact()` for everything else.
+
 ### 12.1 Three-tool-call build model
 
 ```
@@ -1253,15 +1270,24 @@ DASHBOARD_PATH = f"users/{KERBEROS}/dashboards/{DASHBOARD_NAME}"
 
 # 1. Author pull_data.py as a string. THIS is the source of truth --
 #    the refresh runner will re-exec these exact bytes daily.
+#    Every pull function call passes output_path=f'{SESSION_PATH}/data'
+#    (Rule 5 of Section 0). At refresh time SESSION_PATH IS DASHBOARD_PATH
+#    -- the refresh runner injects DASHBOARD_PATH as SESSION_PATH so the
+#    same string resolves to the same S3 folder.
 pull_data_py = '''
 """pull_data.py -- daily refresh of rates monitor data."""
 from datetime import datetime
 print(f"[pull_data.py] starting at {datetime.now().isoformat()}")
 
+# pass name='rates' (no _eod suffix); pull_market_data appends it.
+# Resulting on-disk: {SESSION_PATH}/data/rates_eod.csv
+#                    {SESSION_PATH}/data/rates_metadata.json
 pull_market_data(
     coordinates=['IR_USD_Swap_2Y_Rate', 'IR_USD_Swap_10Y_Rate'],
-    start_date='2020-01-01',
-    name='rates_eod',
+    start='2020-01-01',
+    name='rates',
+    mode='eod',
+    output_path=f'{SESSION_PATH}/data',
 )
 
 # Defensive intraday fallback (Section 12.4) goes here when needed.
@@ -1283,11 +1309,14 @@ ns = {
     'pull_haver_data':   pull_haver_data,
     'pull_market_data':  pull_market_data,
     'pull_plottool_data': pull_plottool_data,
+    'pull_fred_data':    pull_fred_data,
+    'save_artifact':     save_artifact,
 }
 exec(compile(src, f'{DASHBOARD_PATH}/scripts/pull_data.py', 'exec'), ns)
 
 # 4. Verify by reading the CSVs back from S3. PRISM uses these shapes
-#    when authoring build.py in Tool 2.
+#    when authoring build.py in Tool 2. The read path here is the
+#    SAME path the refresh-time build.py will read tomorrow morning.
 df = pd.read_csv(_io.BytesIO(s3_manager.get(f'{DASHBOARD_PATH}/data/rates_eod.csv')),
                   index_col=0, parse_dates=True)
 print(f'[verify] rates_eod: shape={df.shape}')
@@ -1301,10 +1330,12 @@ print(df.dtypes)
 import io
 df = pd.read_csv(io.BytesIO(s3_manager.get(f'{DASHBOARD_PATH}/data/rates_eod.csv')),
                   index_col=0, parse_dates=True)
+df.columns = ['us_2y', 'us_10y']      # plain English (Rule 1)
 
 # 1. Compose the initial manifest (with embedded data, just to derive
 #    the structural template). PRISM does NOT compile this manifest --
-#    build.py does, when it is exec'd from S3 below.
+#    build.py does, when it is exec'd from S3 below. Dataset key
+#    'rates_eod' matches the on-disk CSV stem (Rule 5).
 initial_manifest = {
     "schema_version": 1, "id": DASHBOARD_NAME, "title": "Rates Monitor",
     "metadata": {"kerberos": KERBEROS, "dashboard_id": DASHBOARD_NAME,
@@ -1312,13 +1343,12 @@ initial_manifest = {
                   "generated_at": datetime.now(timezone.utc).isoformat(),
                   "sources": ["GS Market Data"], "refresh_frequency": "daily",
                   "refresh_enabled": True, "tags": ["rates"]},
-    "datasets": {"rates": df.reset_index()},
+    "datasets": {"rates_eod": df.reset_index()},
     "layout": {"rows": [[{"widget": "chart", "id": "curve", "w": 12,
         "title": "UST Curve",
-        "spec": {"chart_type": "multi_line", "dataset": "rates",
+        "spec": {"chart_type": "multi_line", "dataset": "rates_eod",
                   "mapping": {"x": "date",
-                               "y": ["IR_USD_Swap_2Y_Rate",
-                                     "IR_USD_Swap_10Y_Rate"]}}}]]}
+                               "y": ["us_2y", "us_10y"]}}}]]}
 }
 
 tpl = manifest_template(initial_manifest)
@@ -1327,14 +1357,17 @@ s3_manager.put(json.dumps(tpl, indent=2).encode(),
 
 # 2. Author build.py as a string (~12 lines: load template + load CSVs +
 #    populate_template + compile + upload). THIS is the refresh-time
-#    build.py the runner will re-exec daily.
+#    build.py the runner will re-exec daily. The CSV path it reads
+#    (`{SESSION_PATH}/data/rates_eod.csv`) is byte-identical to what
+#    Tool 1's pull_data.py wrote.
 build_py = '''import io, json, pandas as pd
 from datetime import datetime, timezone
 
 tpl = json.loads(s3_manager.get(f"{SESSION_PATH}/manifest_template.json"))
 df = pd.read_csv(io.BytesIO(s3_manager.get(f"{SESSION_PATH}/data/rates_eod.csv")),
                   index_col=0, parse_dates=True)
-m = populate_template(tpl, {"rates": df.reset_index()},
+df.columns = ["us_2y", "us_10y"]
+m = populate_template(tpl, {"rates_eod": df.reset_index()},
                        metadata={"data_as_of": str(df.index.max().date()),
                                   "generated_at": datetime.now(timezone.utc).isoformat()},
                        require_all_slots=True)
@@ -1373,6 +1406,132 @@ print('[Tool 2] complete; ready for Tool 3 (register)')
 A failure in either Tool 1 or Tool 2 surfaces the same exception the refresh runner would surface tomorrow morning. Iterate on the script string + re-run the tool until both Tool 1 and Tool 2 succeed end-to-end. There is no separate "verify the refresh works" step because the build IS that verification (Section 12.6).
 
 **Tool 3 -- register:** writes the per-dashboard pipeline manifest, upserts an entry into `users/{kerberos}/dashboards/dashboards_registry.json` (`id`, `name`, `description`, `created_at`, `last_refreshed`, `last_refresh_status`, `refresh_enabled`, `refresh_frequency`, `folder`, `html_path`, `data_path`, `tags`, `keep_history`, `history_retention_days`), then calls `update_user_manifest(kerberos, artifact_type='dashboard')`. Print the portal URL (`http://reports.prism-ai.url.gs.com:8501/profile/dashboards/{DASHBOARD_NAME}/`) -- the persistent, auto-refreshing link.
+
+### 12.1a Data sources for `pull_data.py`
+
+Five primitives cover every dashboard. Inside `pull_data.py` they all
+land their CSVs in the same flat folder by passing `output_path=
+f'{SESSION_PATH}/data'`. At refresh time the runner injects
+`SESSION_PATH = {DASHBOARD_PATH}` into `pull_data.py`'s namespace, so
+the same string resolves to the same S3 folder both at build time
+(Tool 1's exec from S3) and at refresh time. There is no separate
+`DASHBOARD_PATH` reference inside `pull_data.py` -- it uses
+`SESSION_PATH`, the runner injects the right value.
+
+#### Pull primitive cheat sheet
+
+| Function              | Call                                                                                                                  | On-disk CSV                          | Metadata sidecar                       | Manifest dataset key |
+|-----------------------|-----------------------------------------------------------------------------------------------------------------------|--------------------------------------|----------------------------------------|----------------------|
+| `pull_haver_data`     | `pull_haver_data(codes=[...], start='YYYY-MM-DD', name='cpi', output_path=f'{SESSION_PATH}/data')`                    | `data/cpi.csv`                       | `data/cpi_metadata.json`               | `'cpi'`              |
+| `pull_market_data`    | `pull_market_data(coordinates=[...], start='YYYY-MM-DD', name='rates', mode='eod', output_path=f'{SESSION_PATH}/data')` | `data/rates_eod.csv` (always `_eod` suffix) | `data/rates_metadata.json` (no suffix) | `'rates_eod'`        |
+| `pull_market_data` (intraday) | same but `mode='iday'`                                                                                          | `data/rates_intraday.csv`            | `data/rates_metadata.json`             | `'rates_intraday'`   |
+| `pull_plottool_data`  | `pull_plottool_data(expressions=[...], labels=[...], start='YYYY-MM-DD', name='swap_curve', output_path=f'{SESSION_PATH}/data')` | `data/swap_curve.csv` | `data/swap_curve_metadata.json` | `'swap_curve'` |
+| `pull_fred_data`      | `pull_fred_data(series=[...], start='YYYY-MM-DD', name='unrate', output_path=f'{SESSION_PATH}/data')`                 | `data/unrate.csv`                    | `data/unrate_metadata.json`            | `'unrate'`           |
+| `save_artifact` (alt-data, see below) | `save_artifact(data, name='gs_bank', output_path=f'{SESSION_PATH}/data')`                              | `data/gs_bank.csv` (or `.json` if dict) | (no sidecar)                        | `'gs_bank'`          |
+
+Three rules from the table that are easy to get wrong:
+
+1. **`name=` does NOT include `_eod` / `_intraday`.** `pull_market_data` appends them. Pass `name='rates'` -> `data/rates_eod.csv`. Pass `name='rates_eod'` -> `data/rates_eod_eod.csv` (broken).
+2. **`pull_market_data` metadata sidecar uses the bare `name`,** not the suffixed CSV stem. So `name='rates'` produces `data/rates_metadata.json` (one file even when both eod and intraday CSVs exist).
+3. **`mode='eod'` is the default** but pass it explicitly anyway. The intraday CSV is only written when `mode in ('iday', 'both')`. See Section 12.4 for the defensive try/except wrap that handles overnight / weekend intraday gaps.
+
+#### Reading the CSVs back in `build.py`
+
+```python
+import io
+df = pd.read_csv(io.BytesIO(s3_manager.get(f'{SESSION_PATH}/data/rates_eod.csv')),
+                 index_col=0, parse_dates=True)
+df.columns = ['us_2y', 'us_10y']        # rename to plain English (Rule 1)
+
+# repeat for each other CSV the manifest needs
+```
+
+The path `{SESSION_PATH}/data/rates_eod.csv` is byte-identical to what
+`pull_data.py` wrote because both scripts reference `SESSION_PATH`,
+which the refresh runner pins to `{DASHBOARD_PATH}` for both execs.
+The dataset key (`rates_eod`) matches the CSV stem; `populate_template`
+maps the cleaned DataFrame back into the template by that key.
+
+#### `save_artifact()` for alternative data sources
+
+The four pull primitives only cover Haver / GS Market Data / TSDB
+expressions / FRED. For everything else (FDIC, SEC EDGAR, BIS,
+Treasury, Treasury Direct, NY Fed, prediction markets, OpenFIGI,
+Substack, Wikipedia, Pure / Alloy, scraped tables, hand-built
+DataFrames) -- `save_artifact()` is the universal save helper. Same
+`output_path` semantics as the pulls; it lands a CSV (or JSON for
+`dict` payloads) at `{output_path}/{name}.{ext}` and is idempotent on
+re-run.
+
+```python
+# inside pull_data.py
+fdic_records = fdic_client.get_bank_financials(cert=33124, quarters=8)
+save_artifact(
+    fdic_records,
+    name='gs_bank',
+    output_path=f'{SESSION_PATH}/data',
+)
+# -> {SESSION_PATH}/data/gs_bank.csv
+
+sec_data = sec_edgar_client.cmd_company_financials('AAPL', 'default')
+save_artifact(
+    sec_data,
+    name='aapl_financials',
+    output_path=f'{SESSION_PATH}/data',
+)
+# dict -> {SESSION_PATH}/data/aapl_financials.json (build.py reads json.loads(...))
+
+ny_df = pull_nyfed_data('rates')   # not auto-saving; returns a DataFrame
+save_artifact(ny_df, name='nyfed_rates', output_path=f'{SESSION_PATH}/data')
+# DataFrame -> {SESSION_PATH}/data/nyfed_rates.csv
+```
+
+`save_artifact()`'s output extension follows the input type:
+`pandas.DataFrame` / `list[dict]` / object-with-`.to_frame()` -> CSV;
+`dict` (or empty list) -> JSON. `build.py` reads JSON via
+`json.loads(s3_manager.get(...).decode('utf-8'))` and converts to a
+DataFrame at populate time. See `prism/data-functions.md` Section 9
+for the full polymorphism table.
+
+#### Refresh-runner namespace caveat
+
+The refresh runner's `_build_exec_namespace` (per
+`prism/dashboard-refresh.md` Section 5.3) injects `pd`, `np`, `io`,
+`json`, `os`, `datetime`, `s3_manager`, `SESSION_PATH`, the four pull
+primitives, `compile_dashboard`, `populate_template`,
+`manifest_template`, `validate_manifest`. Anything else used in
+`pull_data.py` or `build.py` -- including `save_artifact`, the
+alt-data clients (`fdic_client`, `sec_edgar_client`, `bis_client`,
+`treasury_client`, `treasury_direct_client`, `nyfed_client`,
+`prediction_markets_client`, `openfigi_client`, `substack_client`,
+`wikipedia_client`), `pull_nyfed_data`, `pull_pure_data`,
+`pull_stacked_data`, and the Coalition / Inquiry helpers -- has to
+also be in the refresh-runner namespace. **As of 2026-04-27, the
+runner does NOT inject these.** A dashboard whose `pull_data.py`
+calls `save_artifact()` or `fdic_client.get_bank_financials()`
+builds cleanly (those names ARE in the build-time
+`execute_analysis_script` namespace), but the daily refresh raises
+`NameError` against the missing helper. The browser then renders the
+modal in Section 12.3a with `errors[].classification ==
+'unknown'`.
+
+Until the PRISM-side runner namespace catches up, dashboards that
+need alt-data are session-only safe but refresh-fragile. Two work-
+arounds while the gap closes:
+
+1. **Single-source dashboards using only the four pull primitives**
+   refresh cleanly with no caveat. Build those when the user wants a
+   persistent auto-refresh.
+2. **Multi-source dashboards that need alt-data** can still be built
+   today (the build flow runs in the sandbox where `save_artifact` +
+   alt-data clients are injected), but `metadata.refresh_enabled`
+   should be `False` until the runner namespace is expanded. Surface
+   this trade-off explicitly to the user.
+
+The structural fix is PRISM-side: add `save_artifact` and the
+alt-data client modules to `_build_exec_namespace` in
+`jobs/hourly/refresh_dashboards.py`. Tracked as a known gap in
+`prism/_changelog.md` (entry C25 / 2026-04-27).
 
 ### 12.2 Templates: `manifest_template` + `populate_template`
 
@@ -1480,28 +1639,44 @@ The runtime also supports `errors` being a single string (legacy shape) or a sin
 
 ### 12.4 Intraday data robustness
 
-Intraday data is unavailable overnight / weekends / holidays. Every `pull_data.py` that fetches intraday MUST wrap it in `try/except` with EOD fallback. Every `build.py` must handle missing intraday file defensively.
+Intraday data is unavailable overnight / weekends / holidays. Every `pull_data.py` that fetches intraday MUST wrap it in `try/except` with EOD fallback. Every `build.py` must handle missing intraday file defensively. The convention from Section 12.1a still applies: `name='rates'` (no suffix), `output_path=f'{SESSION_PATH}/data'`, dataset keys `'rates_eod'` / `'rates_intraday'` matching the on-disk CSV stems.
 
 ```python
 # pull_data.py
-eod_df, _ = pull_market_data(coordinates=[...], start_date='2020-01-01', name='rates_eod')
+pull_market_data(
+    coordinates=[...], start='2020-01-01',
+    name='rates', mode='eod',
+    output_path=f'{SESSION_PATH}/data',
+)
+# -> {SESSION_PATH}/data/rates_eod.csv
 try:
-    iday_df = pull_market_data(coordinates=[...], mode='iday',
-                                start_date=datetime.now().strftime('%Y-%m-%d'),
-                                name='rates_intraday')
+    pull_market_data(
+        coordinates=[...], mode='iday',
+        start=datetime.now().strftime('%Y-%m-%d'),
+        name='rates',
+        output_path=f'{SESSION_PATH}/data',
+    )
+    # -> {SESSION_PATH}/data/rates_intraday.csv (only on success)
 except Exception as e:
     print(f"Intraday unavailable (normal overnight/weekends): {e}")
-    iday_df = None
 
 # build.py
+eod_df = pd.read_csv(io.BytesIO(s3_manager.get(f'{SESSION_PATH}/data/rates_eod.csv')),
+                      index_col=0, parse_dates=True)
 try:
-    iday_df = pd.read_csv(io.BytesIO(s3_manager.get(f'{DASHBOARD_PATH}/data/rates_intraday.csv')),
+    iday_df = pd.read_csv(io.BytesIO(s3_manager.get(f'{SESSION_PATH}/data/rates_intraday.csv')),
                           index_col=0, parse_dates=True)
 except Exception:
     iday_df = None
 current = (iday_df.ffill().iloc[-1] if iday_df is not None and len(iday_df) > 0
            else eod_df.iloc[-1])
 ```
+
+Both `pull_market_data` calls share `name='rates'`, so the metadata
+sidecar (`{SESSION_PATH}/data/rates_metadata.json`) is written /
+overwritten by whichever call wrote last. That is the intended shape;
+both calls describe the same coordinates, so a single sidecar is
+correct.
 
 ### 12.5 Common failures → fix
 
@@ -1516,6 +1691,10 @@ What the user sees in the browser is the modal in 12.3a. The table below maps th
 | `FileNotFoundError: ...scripts/pull_data.py` (or `.../scripts/build.py`) | The dashboard was built without persisting the scripts to `{DASHBOARD_PATH}/scripts/` (Rule 4 of Section 0). The runner has nothing to execute | Re-run the build flow with the **required** `s3_manager.put(SCRIPT_TEXT.encode(), '<...>/scripts/<name>.py')` step at the end of every `execute_analysis_script` call. See Section 12.1 |
 | `FileNotFoundError: ...manifest_template.json` | Tool 2's `s3_manager.put()` for the template was skipped | Re-run Tool 2; persist the template returned by `manifest_template(initial_manifest)` (Section 12.1) |
 | `FileNotFoundError: ...data/<name>.csv` | `pull_data.py` did not write a CSV that `build.py` then tried to read | Confirm `pull_data.py` writes one CSV per dataset to `{DASHBOARD_PATH}/data/`; confirm the names match what `build.py` reads back |
+| `FileNotFoundError: ...data/<name>.csv` AND the CSV exists at `{DASHBOARD_PATH}/market_data/<name>_eod.csv` (or `haver/<name>.csv`, `plottool_data/<name>.csv`) | `pull_*_data` was called WITHOUT `output_path=f'{SESSION_PATH}/data'`, so the CSV landed in the per-source default subfolder (Rule 5 of Section 0) | Add `output_path=f'{SESSION_PATH}/data'` to the pull call; rerun Tool 1; confirm CSV moves to `data/`. The previous file in the per-source subfolder is harmless but can be deleted or left as is |
+| `FileNotFoundError: ...data/<name>_eod.csv` AND `data/<name>_eod_eod.csv` exists | `pull_market_data` was called with `name='<name>_eod'` -- the function appended `_eod` again, producing the doubly-suffixed filename | Drop the `_eod` suffix from `name=`. Pass `name='<base>'` -> on-disk `data/<base>_eod.csv`. Manifest dataset key stays `'<base>_eod'` |
+| `NameError: name 'save_artifact' is not defined` (during refresh; the build worked) | `pull_data.py` uses `save_artifact` but the refresh runner's `_build_exec_namespace` doesn't inject it (Section 12.1a) | Either (a) wait for the PRISM-side runner namespace expansion (tracked in `prism/_changelog.md` 2026-04-27), (b) flip `metadata.refresh_enabled = False` until then, or (c) replace the `save_artifact` calls with one of the four pull primitives if the data source supports it |
+| `NameError: name 'fdic_client' is not defined` (or `sec_edgar_client`, `bis_client`, `treasury_client`, `nyfed_client`, `prediction_markets_client`, `pull_nyfed_data`, etc.) | Same shape as the `save_artifact` case: the alt-data client is not in the refresh-runner namespace as of 2026-04-27 | Same options |
 | `Connection` / `Timeout` / `network_error` | Transient network failure to a vendor API | Retry the manual refresh; check vendor availability |
 | Modal shows `NETWORK ERROR` (browser-side fetch failed) | The PRISM web server is offline or the request was blocked at the network layer | Operations issue; report the URL + status |
 | Modal shows `SPAWN FAILED` with `Dashboard <id> not found` | The dashboard is missing from `dashboards_registry.json` (Tool 3 was skipped) | Add the registry entry with `refresh_enabled: true` and call `update_user_manifest(kerberos, artifact_type='dashboard')` |
@@ -1686,6 +1865,11 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 | Calling `compile_dashboard(manifest)` directly in the session, then writing a `build.py` string that calls `compile_dashboard` again -- compiles twice, opens room for drift between the in-session manifest and the on-S3 build script | Section 12.1 Tool 2 pattern: derive the template once via `manifest_template(initial_manifest)`, write `build.py` to S3, exec build.py FROM S3. The compile happens exactly once -- inside the exec'd build.py -- using the on-S3 template + on-S3 CSVs. Refresh-time and build-time use the same code path |
 | Inlining data pull + manifest build into a single tool call so neither `pull_data.py` nor `build.py` exist as standalone files | Three-tool-call build model is the contract (Section 12.1). Tool 1 persists + execs `pull_data.py` from S3 (writes CSVs); Tool 2 persists + execs `build.py` from S3 (writes manifest + html); Tool 3 registers. The CSV handoff between Tools 1 and 2 is what makes the refresh runner able to re-execute build.py independently |
 | Saving `pull_data.py` / `build.py` to `SESSION_PATH/scripts/` instead of `{DASHBOARD_PATH}/scripts/` | Refresh runner only looks at `{DASHBOARD_PATH}/scripts/`. SESSION_PATH artefacts are gone the moment the conversation ends |
+| Calling `pull_market_data` / `pull_haver_data` / `pull_plottool_data` / `pull_fred_data` inside `pull_data.py` WITHOUT `output_path=f'{SESSION_PATH}/data'` | Always pass `output_path` (Rule 5 of Section 0). Without it, the CSV lands in the per-source subfolder (`market_data/`, `haver/`, `plottool_data/`) and `build.py`'s read at `data/<name>.csv` raises `FileNotFoundError` on every refresh |
+| Passing `name='rates_eod'` to `pull_market_data` (function appends another `_eod`, producing `data/rates_eod_eod.csv`) | Pass `name='rates'` (no suffix). `pull_market_data` ALWAYS appends `_eod` / `_intraday`. The same convention applies to the metadata sidecar -- `name='rates'` -> `data/rates_metadata.json` (one file across both modes). See Section 12.1a |
+| Hand-rolling `s3_manager.put(df.to_csv().encode(), '...')` for FDIC / SEC EDGAR / BIS / Treasury / NY Fed / scraper output instead of `save_artifact()` | Use `save_artifact(data, name='...', output_path=f'{SESSION_PATH}/data')`. `save_artifact` is polymorphic (DataFrame -> CSV, dict -> JSON, list[dict] -> CSV), idempotent on re-run, and follows the same convention as the four pull primitives |
+| Letting `manifest.datasets` keys NOT match the on-disk CSV stems (e.g. dataset key `'rates'` while the CSV is `data/rates_eod.csv`) | Make the dataset key the CSV stem: `'rates_eod'` for `data/rates_eod.csv`, `'rates_intraday'` for `data/rates_intraday.csv`, `'cpi'` for `data/cpi.csv`. `populate_template` looks up by exact key match |
+| Using `pull_data.py` namespace names that the refresh runner does not inject (`save_artifact`, `fdic_client`, `sec_edgar_client`, `bis_client`, `treasury_client`, `nyfed_client`, `pull_nyfed_data`, etc.) and shipping the dashboard with `refresh_enabled: True` | Either restrict `pull_data.py` to the four pull primitives the runner knows (Section 12.1a's caveat), or set `metadata.refresh_enabled = False` until the runner namespace expands (tracked in `prism/_changelog.md` 2026-04-27) |
 
 ---
 
@@ -1698,7 +1882,7 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 - `users/{kerberos}/dashboards/{name}/manifest_template.json` -- structural template, no data (read by `scripts/build.py` on every refresh)
 - `users/{kerberos}/dashboards/{name}/scripts/pull_data.py` -- exact verbatim of Tool 1's script (refresh runner re-executes this; missing → `FileNotFoundError` in the modal)
 - `users/{kerberos}/dashboards/{name}/scripts/build.py` -- exact verbatim of Tool 2's refresh-time script (~12 lines: load template, load CSVs, populate, compile, upload)
-- `users/{kerberos}/dashboards/{name}/data/<name>.csv` -- one CSV per dataset, written by `pull_data.py`, read back by `build.py`
+- `users/{kerberos}/dashboards/{name}/data/<dataset>.csv` -- one CSV per dataset, flat folder, written by `pull_data.py` via `output_path=f'{SESSION_PATH}/data'` (Rule 5), read back by `build.py`. Stem matches `manifest.datasets` key. For `pull_market_data` the on-disk stems carry the `_eod` / `_intraday` suffix the function auto-appends; pass `name='<base>'` so the suffix lands cleanly
 
 `refresh_status.json` is **not** a build-time artefact -- the refresh runner writes it on the first refresh attempt, and the in-browser status check (Section 12.3) tolerates its absence (treated as "no prior refresh"). Do not pre-create it.
 
@@ -1710,7 +1894,11 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 **Data integrity:**
 
 - Every dataset traces to a real pull (Rule 1, Section 0); zero `np.random` / `np.linspace`-as-data / hand-typed arrays
+- Every `pull_*_data(...)` call in `pull_data.py` passes `output_path=f'{SESSION_PATH}/data'` (Rule 5, Section 0); every `save_artifact(...)` call passes the same
+- Every `pull_market_data` `name=` argument is the bare base (no `_eod` / `_intraday` suffix); the function appends them
+- Every `manifest.datasets` key matches the on-disk CSV stem byte-for-byte (`rates_eod` for `data/rates_eod.csv`, `cpi` for `data/cpi.csv`, etc.)
 - `pull_data.py` printed real shapes/heads/dtypes before `build.py` was authored; handles intraday failures defensively
+- If `pull_data.py` uses `save_artifact` or any alt-data client, `metadata.refresh_enabled = False` until the runner namespace catches up (Section 12.1a caveat)
 - Every dataset cleaned: `df.reset_index()` for DTI-keyed frames, plain English columns, no MultiIndex
 - Every dataset backing a chart/table carries `field_provenance` (per-column `system` + `symbol`)
 - Every dataset under budget: <50K rows, <2 MB; total manifest <5 MB
@@ -1719,6 +1907,7 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 **Build mechanics (Section 12.1):**
 
 - Tool 1 authored `pull_data.py` as a string, `s3_manager.put`-ed it to `{DASHBOARD_PATH}/scripts/pull_data.py`, then `s3_manager.get`-ed it back and `exec`-ed it from S3 with the refresh-runner namespace -- the in-session pull happened *via* the persisted script, not before it
+- Tool 1's `pull_data.py` lands every CSV in `{DASHBOARD_PATH}/data/` (Section 12.1a): `pull_*_data(..., output_path=f'{SESSION_PATH}/data')` for the four pull primitives, `save_artifact(..., output_path=f'{SESSION_PATH}/data')` for everything else
 - Tool 1 read CSVs back from S3 and printed shapes/heads/dtypes against which Tool 2 then authored the manifest
 - Tool 2 derived the template once (via `manifest_template(initial_manifest)`), authored `build.py` as a string, persisted it to `{DASHBOARD_PATH}/scripts/build.py`, then exec-ed it from S3 -- the compile happened *via* the persisted script, not directly via `compile_dashboard()` in the session
 - `build.py` is thin (~12 lines: load template + load CSVs + `populate_template` + `compile_dashboard(..., write_html=False, write_json=False, strict=True)` + `s3_manager.put`)

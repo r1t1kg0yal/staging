@@ -586,6 +586,56 @@ def list_dimensions() -> List[Dict[str, Any]]:
     ]
 
 
+# =============================================================================
+# SECTION 4 -- NUMERIC FORMATTING POLICY
+# =============================================================================
+#
+# Hard global cap on decimal places anywhere a dashboard renders a number:
+# axis tick labels, tooltips, KPI values, table cells, heatmap cell labels,
+# correlation-matrix coefficients, regression statistics, etc.
+#
+# This is a non-negotiable house rule. Author-supplied options like
+# ``value_decimals``, ``decimals``, ``delta_decimals``, ``tooltip.decimals``,
+# and table format suffixes (``"number:3"``) are clamped to this cap before
+# they reach a formatter. Hard-coded ``toFixed(...)`` literals in the
+# runtime JS are also bounded by this cap. Callers asking for more
+# precision are silently coerced down -- a number rendered to 4 decimals
+# implies precision the data rarely supports and forces a reader to decode
+# digits that don't change behaviour.
+#
+# To raise the cap (e.g. to 3) update this constant; the JS-side mirror in
+# ``rendering.py`` is generated from this value at compile time so the two
+# halves can never drift.
+
+MAX_DASHBOARD_DECIMALS: int = 2
+
+
+def clamp_decimals(value: Any, default: int = 2) -> int:
+    """Coerce ``value`` to an int and clamp to ``[0, MAX_DASHBOARD_DECIMALS]``.
+
+    Used at every Python-side boundary that accepts a user-supplied
+    decimals/precision option. ``default`` covers ``None`` / non-numeric
+    input. The default itself is also clamped so callers can pass any
+    historical default without re-introducing a > 2 decimal path.
+    """
+    cap = MAX_DASHBOARD_DECIMALS
+    fb = max(0, min(cap, int(default)))
+    if value is None:
+        return fb
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        try:
+            n = int(float(value))
+        except (TypeError, ValueError):
+            return fb
+    if n < 0:
+        return 0
+    if n > cap:
+        return cap
+    return n
+
+
 __all__ = [
     # brand tokens -- downstream modules (dashboard_html, editor_html,
     # png_export) import these directly so the CSS/HTML chrome stays in
@@ -609,4 +659,6 @@ __all__ = [
     "get_palette", "palette_colors", "list_palettes",
     "get_theme", "list_themes",
     "get_dimension_preset", "get_typography_override", "list_dimensions",
+    # numeric formatting policy
+    "MAX_DASHBOARD_DECIMALS", "clamp_decimals",
 ]

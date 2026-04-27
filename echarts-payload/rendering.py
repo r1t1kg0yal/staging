@@ -59,6 +59,7 @@ from config import (
     GS_DARK_BG, GS_DARK_SURFACE, GS_DARK_SURFACE_2, GS_DARK_SURFACE_HOV,
     GS_DARK_TEXT, GS_DARK_TEXT_DIM, GS_DARK_TEXT_FAINT,
     GS_DARK_BORDER, GS_DARK_BORDER_STR,
+    MAX_DASHBOARD_DECIMALS,
 )
 
 
@@ -339,6 +340,27 @@ APP_JS = r"""
 (function(){
   'use strict';
 
+  // Global decimal-precision cap for the single-chart editor. Mirror of
+  // config.MAX_DASHBOARD_DECIMALS injected by render_editor_html. See
+  // the matching helper at the top of DASHBOARD_APP_JS for the full
+  // policy doc -- both halves of the runtime route their toFixed
+  // arguments through __capDec so author-supplied precision options
+  // can never exceed the cap, and so raising the cap is a one-place
+  // edit (config.MAX_DASHBOARD_DECIMALS).
+  var __MAX_DEC = __MAX_DECIMALS__;
+  function __capDec(d, fb){
+    var cap = __MAX_DEC;
+    var fbn = (fb == null) ? 0 : (+fb | 0);
+    if (fbn < 0) fbn = 0; if (fbn > cap) fbn = cap;
+    if (d == null) return fbn;
+    var n = +d;
+    if (isNaN(n)) return fbn;
+    n = n | 0;
+    if (n < 0) return 0;
+    if (n > cap) return cap;
+    return n;
+  }
+
   // Revive string-encoded JS functions into real functions before any
   // setOption call. The editor uses this for every mutation + reset path.
   function _isFnStr(s) {
@@ -586,13 +608,16 @@ APP_JS = r"""
   // a single color (the built-in label.color or the ECharts default).
   function _heatmapValueDecimalsFor(s){
     // Heuristic: detect from the existing formatter string; default 1.
+    // Cap at the global decimal limit so a user-supplied formatter that
+    // accidentally encodes more precision than the runtime allows still
+    // produces a label-block within bounds when we re-render it.
     var f = s && s.label && s.label.formatter;
     if (typeof f === 'function') f = f.toString();
     if (typeof f === 'string'){
       var m = f.match(/toFixed\(\s*(\d+)\s*\)/);
-      if (m) return +m[1];
+      if (m) return __capDec(+m[1], 1);
     }
-    return 1;
+    return __capDec(1, 1);
   }
   function _heatmapValueIndexFor(s){
     // Calendar heatmap data is [date, value] (idx 1); regular heatmap
@@ -601,6 +626,7 @@ APP_JS = r"""
     return s && s.coordinateSystem === 'calendar' ? 1 : 2;
   }
   function _heatmapMakeContrastFormatter(decimals, valueIdx){
+    var dec = __capDec(decimals, 1);
     return function(p){
       var v = null; var d = p && p.data;
       if (d != null && d.value != null){
@@ -630,10 +656,11 @@ APP_JS = r"""
         : Math.pow((x + 0.055) / 1.055, 2.4); }
       var L = 0.2126 * _L(r) + 0.7152 * _L(g) + 0.0722 * _L(b);
       var s = L > 0.5 ? 'l' : 'd';
-      return '{' + s + '|' + (+v).toFixed(decimals) + '}';
+      return '{' + s + '|' + (+v).toFixed(dec) + '}';
     };
   }
   function _heatmapMakePlainFormatter(decimals, valueIdx){
+    var dec = __capDec(decimals, 1);
     return function(p){
       var v = null; var d = p && p.data;
       if (d != null && d.value != null){
@@ -642,7 +669,7 @@ APP_JS = r"""
         v = d[valueIdx];
       } else if (d != null){ v = d; }
       if (v == null || isNaN(+v)) return '';
-      return (+v).toFixed(decimals);
+      return (+v).toFixed(dec);
     };
   }
   APPLY.setHeatmapShowLabels = function(v){ seriesOfType('heatmap').forEach(function(s){ s.label = s.label || {}; s.label.show = !!v; }); };
@@ -1280,13 +1307,16 @@ def render_editor_html(
         "var PAYLOAD = " + json.dumps(payload, default=_json_default) + ";\n"
         "var ESSENTIAL_NAMES = " + json.dumps(essential_map) + ";\n"
     )
+    app_js = APP_JS.replace(
+        "__MAX_DECIMALS__", str(int(MAX_DASHBOARD_DECIMALS))
+    )
     html = (HTML_SHELL
             .replace("__TITLE__", _html_escape(title))
             .replace("__CHART_ID__", chart_id)
             .replace("__CHART_TYPE__", chart_type)
             .replace("__VERSION__", VERSION)
             .replace("__PAYLOAD__", payload_js)
-            .replace("__APP__", APP_JS)
+            .replace("__APP__", app_js)
             .replace("__GS_FONT_SANS__", GS_FONT_SANS)
             .replace("__GS_NAVY__", GS_NAVY)
             .replace("__GS_INK__", GS_INK)
@@ -3174,6 +3204,30 @@ DASHBOARD_APP_JS = r"""
   var SPECS    = PAYLOAD.specs;       // id -> ECharts option dict
   var DATASETS = PAYLOAD.datasets;    // name -> {source: [...rows]}
 
+  // Global decimal-precision cap. Mirror of config.MAX_DASHBOARD_DECIMALS;
+  // injected by render_dashboard_html so the two halves can never drift.
+  // Every formatter helper in this runtime (formatNumber, formatValue,
+  // _pivotFmt, _stripFmtNumber, _ccFmt, heatmap label formatters, etc.)
+  // funnels its decimals input through __capDec so author-supplied
+  // precision options (table format suffixes like "number:5", widget
+  // decimals=4, value_decimals=3) get silently coerced down to the cap.
+  // Hard-coded toFixed() literals in this file are also bounded by the
+  // cap. Raise the cap by editing config.MAX_DASHBOARD_DECIMALS in
+  // staging; both sides regenerate next render.
+  var __MAX_DEC = __MAX_DECIMALS__;
+  function __capDec(d, fb){
+    var cap = __MAX_DEC;
+    var fbn = (fb == null) ? 0 : (+fb | 0);
+    if (fbn < 0) fbn = 0; if (fbn > cap) fbn = cap;
+    if (d == null) return fbn;
+    var n = +d;
+    if (isNaN(n)) return fbn;
+    n = n | 0;
+    if (n < 0) return 0;
+    if (n > cap) return cap;
+    return n;
+  }
+
   // Revive string-encoded JS functions (renderItem, formatter, filter)
   // into real functions. Python emits them as strings because JSON cannot
   // carry code; ECharts needs real functions at setOption() time.
@@ -3561,7 +3615,7 @@ DASHBOARD_APP_JS = r"""
     var d = decimals != null ? decimals
                                   : (Math.abs(v) >= 1000 ? 0
                                     : (Math.abs(v) >= 100 ? 1 : 2));
-    return Number(v).toFixed(d);
+    return Number(v).toFixed(__capDec(d, 2));
   }
 
   function _stripFmtCurrent(v, deltaFormat){
@@ -5390,8 +5444,8 @@ DASHBOARD_APP_JS = r"""
   function _ccFmt(v, d){
     if (v == null || isNaN(+v)) return '\u2014';
     var n = +v;
-    var dec = (d != null) ? d : (Math.abs(n) >= 100 ? 1 : 3);
-    return n.toFixed(dec);
+    var dec = (d != null) ? d : (Math.abs(n) >= 100 ? 1 : 2);
+    return n.toFixed(__capDec(dec, 2));
   }
 
   function _ccApplyStudio(cid, opt, state){
@@ -5631,8 +5685,8 @@ DASHBOARD_APP_JS = r"""
       + 'if (!Array.isArray(v)) return ""; '
       + 'var lab = (p.data && p.data._label != null) '
       + '            ? (\"<b>\" + p.data._label + \"</b><br/>\") : \"\"; '
-      + 'return lab + \"' + xName.replace(/"/g, '\\"') + ': \" + (+v[0]).toFixed(3) + \"<br/>\"'
-      + ' + \"' + yName.replace(/"/g, '\\"') + ': \" + (+v[1]).toFixed(3); }'
+      + 'return lab + \"' + xName.replace(/"/g, '\\"') + ': \" + (+v[0]).toFixed(2) + \"<br/>\"'
+      + ' + \"' + yName.replace(/"/g, '\\"') + ': \" + (+v[1]).toFixed(2); }'
     );
     opt.series = series;
     if (opt.legend){
@@ -5710,12 +5764,12 @@ DASHBOARD_APP_JS = r"""
     var stars = _ccPStars(os.p_slope);
     var fmt = function(v, d){ return _ccFmt(v, d); };
     var html = '<span class="cc-stat">n=<b>' + os.n + '</b></span>'
-      + '<span class="cc-stat">r=<b>' + fmt(os.r, 3) + '</b>' + stars + '</span>'
-      + '<span class="cc-stat">R\u00B2=<b>' + fmt(os.r2, 3) + '</b></span>'
-      + '<span class="cc-stat">\u03B2=<b>' + fmt(os.slope, 4)
-      + '</b> (SE ' + fmt(os.se_slope, 4) + ')</span>'
-      + '<span class="cc-stat">\u03B1=<b>' + fmt(os.intercept, 4) + '</b></span>'
-      + '<span class="cc-stat">RMSE=<b>' + fmt(os.rmse, 4) + '</b></span>'
+      + '<span class="cc-stat">r=<b>' + fmt(os.r, 2) + '</b>' + stars + '</span>'
+      + '<span class="cc-stat">R\u00B2=<b>' + fmt(os.r2, 2) + '</b></span>'
+      + '<span class="cc-stat">\u03B2=<b>' + fmt(os.slope, 2)
+      + '</b> (SE ' + fmt(os.se_slope, 2) + ')</span>'
+      + '<span class="cc-stat">\u03B1=<b>' + fmt(os.intercept, 2) + '</b></span>'
+      + '<span class="cc-stat">RMSE=<b>' + fmt(os.rmse, 2) + '</b></span>'
       + '<span class="cc-stat">p=<b>' + (os.p_slope == null
           ? '\u2014' : (+os.p_slope).toExponential(2)) + '</b></span>';
     if ((bundle.perGroup || []).length > 1){
@@ -5728,7 +5782,7 @@ DASHBOARD_APP_JS = r"""
           : '';
         return '<span class="cc-stat-group">' + sw + (pg.name || '')
           + ': r=' + fmt(s.r, 2) + ', R\u00B2=' + fmt(s.r2, 2)
-          + ', \u03B2=' + fmt(s.slope, 3)
+          + ', \u03B2=' + fmt(s.slope, 2)
           + ' (n=' + s.n + ')</span>';
       }).filter(function(x){ return !!x; }).join('');
       if (pgHtml) html += '<div class="cc-stats-groups">' + pgHtml + '</div>';
@@ -6564,7 +6618,7 @@ DASHBOARD_APP_JS = r"""
     var bodyRows = rows.slice(1, 1001).map(function(r){
       return '<tr>' + r.map(function(v){
         var t = (v == null) ? '' : (typeof v === 'number'
-          ? v.toLocaleString(undefined, {maximumFractionDigits: 4})
+          ? v.toLocaleString(undefined, {maximumFractionDigits: __MAX_DEC})
           : String(v));
         return '<td>' + _he(t) + '</td>';
       }).join('') + '</tr>';
@@ -6960,7 +7014,7 @@ DASHBOARD_APP_JS = r"""
         var v = r[j];
         var cell = (v == null) ? '' :
           (typeof v === 'number' ?
-            v.toLocaleString(undefined, {maximumFractionDigits: 4})
+            v.toLocaleString(undefined, {maximumFractionDigits: __MAX_DEC})
             : String(v));
         html.push('<td>' + _he(cell) + '</td>');
       }
@@ -7673,37 +7727,43 @@ DASHBOARD_APP_JS = r"""
     var d = opts.decimals;
     function _apply(formatted){ return prefix + formatted + suffix; }
     if (mode === 'raw'){
-      return _apply(String(n));
+      // 'raw' historically meant Number(v).toString() with no
+      // formatting at all. Round through toFixed(__capDec) first so
+      // even raw mode honours the global decimal cap when v has more
+      // fractional digits than allowed (e.g. 0.123456 -> 0.12).
+      var rd = __capDec(d, 2);
+      return _apply(Number(n.toFixed(rd)).toString());
     }
     if (mode === 'percent'){
       if (d == null) d = 2;
-      return _apply((n * 100).toFixed(d) + '%');
+      return _apply((n * 100).toFixed(__capDec(d, 2)) + '%');
     }
     if (mode === 'comma'){
       if (d == null) d = (abs >= 1000 ? 0 : 2);
-      var parts = n.toFixed(d).split('.');
+      var parts = n.toFixed(__capDec(d, 2)).split('.');
       parts[0] = _commaGroup(parts[0]);
       return _apply(parts.join('.'));
     }
     if (mode === 'compact'){
       if (d == null) d = 1;
+      var cd = __capDec(d, 1);
       var f;
-      if (abs >= 1e12) f = (n/1e12).toFixed(d) + 'T';
-      else if (abs >= 1e9)  f = (n/1e9).toFixed(d) + 'B';
-      else if (abs >= 1e6)  f = (n/1e6).toFixed(d) + 'M';
-      else if (abs >= 1e3)  f = (n/1e3).toFixed(d) + 'K';
-      else                   f = n.toFixed(d);
+      if (abs >= 1e12) f = (n/1e12).toFixed(cd) + 'T';
+      else if (abs >= 1e9)  f = (n/1e9).toFixed(cd) + 'B';
+      else if (abs >= 1e6)  f = (n/1e6).toFixed(cd) + 'M';
+      else if (abs >= 1e3)  f = (n/1e3).toFixed(cd) + 'K';
+      else                   f = n.toFixed(cd);
       return _apply(f);
     }
     // auto: commas below 1M, compact above
     if (abs >= 1e12) { if (d == null) d = 1;
-      return _apply((n/1e12).toFixed(d) + 'T'); }
+      return _apply((n/1e12).toFixed(__capDec(d, 1)) + 'T'); }
     if (abs >= 1e9)  { if (d == null) d = 1;
-      return _apply((n/1e9).toFixed(d) + 'B'); }
+      return _apply((n/1e9).toFixed(__capDec(d, 1)) + 'B'); }
     if (abs >= 1e6)  { if (d == null) d = 1;
-      return _apply((n/1e6).toFixed(d) + 'M'); }
+      return _apply((n/1e6).toFixed(__capDec(d, 1)) + 'M'); }
     if (d == null) d = (abs >= 1000 ? 0 : 2);
-    var parts2 = n.toFixed(d).split('.');
+    var parts2 = n.toFixed(__capDec(d, 2)).split('.');
     parts2[0] = _commaGroup(parts2[0]);
     return _apply(parts2.join('.'));
   }
@@ -7915,13 +7975,16 @@ DASHBOARD_APP_JS = r"""
 
   // ----- table widgets -----
   // Column formatters. Token is the prefix before ':' in the format string;
-  // the suffix (if any) is decimals / precision.
+  // the suffix (if any) is decimals / precision. The precision suffix is
+  // always coerced through __capDec so a column declared as "number:5"
+  // renders the same as "number:2" -- the global cap wins.
   function formatValue(v, fmt){
     if (v == null || v === '') return '';
     if (fmt == null || fmt === 'text') return String(v);
     var parts = String(fmt).split(':');
     var kind = parts[0];
-    var prec = parts.length > 1 ? Number(parts[1]) : 2;
+    var rawPrec = parts.length > 1 ? Number(parts[1]) : 2;
+    var prec = __capDec(rawPrec, 2);
     var n = Number(v);
     if (kind === 'integer') {
       if (isNaN(n)) return String(v);
@@ -7936,7 +7999,7 @@ DASHBOARD_APP_JS = r"""
       if (isNaN(n)) return String(v);
       // Accept both fractional (0.12) and percent (12) forms
       var pct = Math.abs(n) <= 1 ? n * 100 : n;
-      return pct.toFixed(isNaN(prec) ? 1 : prec) + '%';
+      return pct.toFixed(isNaN(rawPrec) ? __capDec(1, 1) : prec) + '%';
     }
     if (kind === 'currency') {
       if (isNaN(n)) return String(v);
@@ -7945,17 +8008,17 @@ DASHBOARD_APP_JS = r"""
     }
     if (kind === 'bps') {
       if (isNaN(n)) return String(v);
-      return n.toFixed(isNaN(prec) ? 0 : prec) + 'bp';
+      return n.toFixed(isNaN(rawPrec) ? 0 : prec) + 'bp';
     }
     if (kind === 'signed') {
       if (isNaN(n)) return String(v);
       var sign = n > 0 ? '+' : '';
-      return sign + n.toFixed(isNaN(prec) ? 2 : prec);
+      return sign + n.toFixed(isNaN(rawPrec) ? __capDec(2, 2) : prec);
     }
     if (kind === 'delta') {
       if (isNaN(n)) return String(v);
       var arrow = n > 0 ? '\u25B2' : n < 0 ? '\u25BC' : '\u25AC';
-      return arrow + ' ' + Math.abs(n).toFixed(isNaN(prec) ? 2 : prec);
+      return arrow + ' ' + Math.abs(n).toFixed(isNaN(rawPrec) ? __capDec(2, 2) : prec);
     }
     if (kind === 'date') {
       var d = new Date(v);
@@ -8079,7 +8142,7 @@ DASHBOARD_APP_JS = r"""
   function _pivotFmt(v, decimals){
     if (v == null || isNaN(v)) return '--';
     var d = (decimals == null) ? 2 : decimals;
-    return Number(v).toFixed(d);
+    return Number(v).toFixed(__capDec(d, 2));
   }
 
   function _pivotColorScale(value, min, max, scale){
@@ -12164,6 +12227,10 @@ def render_dashboard_html(
             '</span>'
         )
 
+    app_js = DASHBOARD_APP_JS.replace(
+        "__MAX_DECIMALS__", str(int(MAX_DASHBOARD_DECIMALS))
+    )
+
     html = DASHBOARD_SHELL
     for k, v in GS_TOKENS.items():
         html = html.replace(k, v)
@@ -12180,7 +12247,7 @@ def render_dashboard_html(
             .replace("__TIMESTAMP__", _html_escape(ts))
             .replace("__VERSION__", VERSION)
             .replace("__PAYLOAD__", payload_js)
-            .replace("__APP__", DASHBOARD_APP_JS))
+            .replace("__APP__", app_js))
     return html
 
 

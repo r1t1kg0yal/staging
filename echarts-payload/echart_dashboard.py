@@ -100,6 +100,7 @@ if str(_here) not in sys.path:
     sys.path.insert(0, str(_here))
 
 from rendering import render_dashboard_html
+from config import MAX_DASHBOARD_DECIMALS, clamp_decimals
 
 # =============================================================================
 # MANIFEST SCHEMA + VALIDATOR
@@ -2770,7 +2771,10 @@ def _spec_to_option(
         raise TypeError("spec.mapping must be a dict")
 
     # Lazy imports: keep the manifest module light and avoid import cycles
-    from echart_studio import _BUILDER_DISPATCH, _build_context, _apply_annotations
+    from echart_studio import (
+        _BUILDER_DISPATCH, _build_context, _apply_annotations,
+        _install_default_axis_decimal_cap,
+    )
 
     if chart_type not in _BUILDER_DISPATCH:
         raise ValueError(
@@ -2822,6 +2826,12 @@ def _spec_to_option(
     # applied uniformly across every chart type so individual builders
     # don't all need to grow the same cosmetic knobs.
     _apply_post_build_polish(opt, spec, mapping)
+
+    # Cap value-axis tick precision at MAX_DASHBOARD_DECIMALS for any
+    # axis the builder + polish + per-spec overrides left without an
+    # explicit formatter. Idempotent and tolerant of axes already
+    # carrying a custom formatter.
+    _install_default_axis_decimal_cap(opt)
     return opt
 
 
@@ -3139,7 +3149,7 @@ def _apply_post_build_polish(opt: Dict[str, Any],
             if "formatter" in tip_cfg:
                 tt["formatter"] = tip_cfg["formatter"]
             if "decimals" in tip_cfg:
-                d = int(tip_cfg["decimals"])
+                d = clamp_decimals(tip_cfg["decimals"], default=2)
                 tt["valueFormatter"] = (
                     "function(v){"
                     f" if (v == null) return '';"
@@ -5213,13 +5223,18 @@ def _format_kpi_number(n: float, opts: Dict[str, Any]) -> str:
     browser would, given the same number + format options
     (``decimals`` / ``format`` / ``prefix`` / ``suffix``).
 
+    ``decimals`` is clamped to ``MAX_DASHBOARD_DECIMALS`` so a
+    server-rendered stat-grid value can never exceed the global cap.
+
     Only used by :func:`_resolve_stat_grid_sources` (KPI uses JS at
     runtime). Pinned to JS via ``TestKPIResolution``.
     """
     prefix = opts.get("prefix") or ""
     suffix = opts.get("suffix") or ""
     mode = opts.get("format") or "auto"
-    decimals = opts.get("decimals")
+    raw_decimals = opts.get("decimals")
+    decimals = (None if raw_decimals is None
+                else clamp_decimals(raw_decimals, default=raw_decimals))
     abs_n = abs(n)
 
     def _comma(int_str: str) -> str:
