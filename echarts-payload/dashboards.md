@@ -177,11 +177,11 @@ users/{kerberos}/dashboards/{dashboard_name}/
 
 ### 2.3 Metadata block
 
-Drives the data-freshness badge, methodology popup, summary banner, and refresh button. All fields optional — omit for session artifacts, set for persistent dashboards.
+Drives the data-freshness badge, methodology popup, summary banner, refresh button, and share button. All fields optional — omit for session artifacts, set for persistent dashboards.
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `kerberos` / `dashboard_id` | str | Required for refresh button (`dashboard_id` defaults to `manifest.id`) |
+| `kerberos` / `dashboard_id` | str | Required for refresh + share buttons (`dashboard_id` defaults to `manifest.id`) |
 | `data_as_of` / `generated_at` | str (ISO) | Header badge `Data as of YYYY-MM-DD HH:MM:SS UTC`; compile-time fallback |
 | `sources` | list[str] | Source names (`["GS Market Data", "Haver"]`) |
 | `summary` | str \| `{title, body}` | Always-visible markdown banner above row 1 (today's read) |
@@ -189,6 +189,8 @@ Drives the data-freshness badge, methodology popup, summary banner, and refresh 
 | `refresh_frequency` / `refresh_enabled` | str / bool | `hourly` / `daily` / `weekly` / `manual`; `False` hides refresh button |
 | `tags` / `version` | list[str] / str | Echoed into the registry; manifest version string |
 | `api_url` / `status_url` | str | Refresh / status endpoint overrides |
+| `shared` / `shared_at` | bool / str | Compile-time snapshot of community-share state. `shared: True` means this dashboard is published to the `/dashboards/` Community section. `shared_at` is the ISO timestamp it was first shared. The runtime button reads live state from `window.PRISM_DASHBOARD_SHARED` if injected by the serving view; falls back to this snapshot otherwise. Defaults: `shared: False`, `shared_at: null`. |
+| `share_api_url` | str | Optional override of the share toggle endpoint (default `/api/dashboard/share/`). |
 
 `summary` and `methodology` accept the shared markdown grammar (§4.9). `summary` is always-visible above row 1 (today's read); `methodology` is click-to-open via the header button (how the data is constructed).
 
@@ -210,9 +212,18 @@ metadata = {
 | 1 | `Data as of <ts>` | `metadata.data_as_of` or `generated_at` set |
 | 2 | `Methodology` | `metadata.methodology` set |
 | 3 | `Refresh` | `metadata.kerberos` + `dashboard_id` set, `refresh_enabled != False` |
-| 4 | `Download Charts` | always (one PNG per `widget: chart`) |
-| 5 | `Download Panel` | always (full view as single PNG) |
-| 6 | `Download Excel` | dashboard has at least one `widget: table` |
+| 4 | `Share` / `Sharing` | `metadata.kerberos` + `dashboard_id` set, AND viewer matches author (`window.PRISM_VIEWER === metadata.kerberos`). Button label flips with state. Click on `Share` POSTs `{shared:true}`; click on `Sharing` opens a confirm modal then POSTs `{shared:false}`. |
+| 5 | `Download Charts` | always (one PNG per `widget: chart`) |
+| 6 | `Download Panel` | always (full view as single PNG) |
+| 7 | `Download Excel` | dashboard has at least one `widget: table` |
+
+The Share button is non-author-invisible by construction: the
+serving view injects `window.PRISM_VIEWER` (the viewer's kerberos)
+and the runtime hides the button unless `viewer === metadata.kerberos`.
+The server-side endpoint is also author-only -- the registry it
+mutates is always `users/{viewer}/dashboards/dashboards_registry.json`,
+so a non-author hand-crafting the API call cannot toggle someone
+else's share state. The visibility check is UX; auth is server-side.
 
 `header_actions[]` (§8) injects custom buttons in front of this bar.
 
@@ -259,7 +270,7 @@ Every `widget: chart` declares one of three variants. Use the lowest ceremony th
 | `scatter_studio` | none required; author-supplied whitelists drive runtime picker (§3.5) |
 | `area` | `x`, `y` (stacked area) |
 | `heatmap` | `x`, `y`, `value` |
-| `correlation_matrix` | `columns` (≥2 numeric), optional `transform`, `method`, `order_by` (§3.6) |
+| `correlation_matrix` | `columns` (≥2 numeric), optional `transform`, `method`, `order_by`, `window`, `window_options`, `transforms` (§3.6) |
 | `histogram` | `x`, optional `bins` (int or list of edges), `density` |
 | `bullet` | `y` (cat), `x` (cur), `x_low`, `x_high`, optional `color_by`, `label` |
 | `pie` | `category`, `value` |
@@ -365,7 +376,13 @@ The compiler truncates long category labels to `category_label_max_px`, sizes `n
 
 **Per-spec overrides.** `palette`, `theme`, `annotations` may live on `spec` to override manifest defaults. Required keys: `chart_type`, `dataset`, `mapping`. Titles / subtitles live at the widget level only — `spec.title` / `spec.subtitle` are rejected by the validator.
 
-**Global decimal cap.** Every numeric value rendered anywhere — value-axis tick labels, tooltips, KPI tiles, table cells, heatmap labels, correlation coefficients, regression statistics, "View raw data" modal — is hard-capped at 2 decimal places. Author-supplied precision options (`value_decimals`, `decimals`, `delta_decimals`, `tooltip.decimals`, table `"number:5"`) silently coerce down to the cap. Author-supplied raw JS function strings (`value_formatter`, `tooltip.formatter`, `axisLabel.formatter`) are NOT inspected. The cap is `config.MAX_DASHBOARD_DECIMALS`.
+**Global decimal cap.** Every numeric value rendered anywhere — value-axis tick labels, tooltips (axis-trigger crosshair tooltips, item tooltips), KPI tiles, table cells, heatmap labels, correlation coefficients, regression statistics, "View raw data" modal, dashboard detail-modal charts — is hard-capped at 2 decimal places. Three layers enforce this:
+
+1. **Author-supplied precision options.** `value_decimals`, `decimals`, `delta_decimals`, `tooltip.decimals`, table `"number:5"`, etc., are clamped through `clamp_decimals` to the cap before reaching any formatter.
+2. **Default tooltip / axis formatters.** Every chart automatically gets a default `axisLabel.formatter` on its value/log axes and a default `tooltip.valueFormatter`, both of which round through `toFixed(MAX_DASHBOARD_DECIMALS)` and strip trailing zeros (`4.5`, not `4.50`). Charts that ship a custom `tooltip.formatter` (full-HTML template) keep their custom formatter — the cap is enforced inside those via `__capDec` on every `toFixed()` literal.
+3. **Runtime guard.** The dashboard JS calls `__ensureTooltipDecimalCap(opt)` inside `materializeOption()` on every render so a chart that somehow reached the runtime without a tooltip `valueFormatter` (hand-edited spec, legacy snapshot) still cannot leak raw 12-digit floats. Same guard runs in the editor and in detail-modal renders.
+
+Author-supplied raw JS function strings (`value_formatter`, `tooltip.formatter`, `axisLabel.formatter`) are NOT inspected — the assumption is that an author writing raw JS knows what they're doing — but Python-side `toFixed(...)` literals authored anywhere in the payload all use `0`, `1`, or `2` explicitly, so the cap holds. The cap value is `config.MAX_DASHBOARD_DECIMALS`; raise it in one place and both Python (compile-time) and JS (runtime) regenerate from it.
 
 ### 3.4 Annotations
 
@@ -414,18 +431,37 @@ Stats strip example: `n=247  r=0.68***  R²=0.46  beta=0.42 (SE 0.03)  alpha=1.1
 
 "How do these N series co-move?" Builder applies a per-column transform, computes the correlation matrix, emits a diverging heatmap pinned to `[-1, 1]`.
 
+The builder also embeds a runtime sidecar (raw per-column values + epoch-ms times) so the dashboard's three-dots drawer can re-correlate against any **transform**, **rolling window**, or **method** the viewer picks — no script reload, no PRISM round-trip. Mapping `transform` and `window` become the *initial* drawer state, not a pin.
+
 | Mapping key | Purpose |
 |-------------|---------|
 | `columns` (req) | Numeric column names, length ≥ 2 |
 | `method` | `'pearson'` (default) or `'spearman'` (rank correlation; robust to monotonic non-linearity) |
-| `transform` | Per-column transform before correlation (default `'raw'`; same names as scatter_studio) |
-| `order_by` | Required when `transform` is order-aware. Default: first datetime-like col |
+| `transform` | Initial per-column transform shown in the drawer (default `'raw'`; same names as scatter_studio) |
+| `order_by` | Required when `transform` is order-aware OR when `window != 'all'`. Default: first datetime-like col |
+| `window` | Initial rolling window shown in the drawer. One of `window_options` (default `'all'`) |
+| `window_options` | Drawer's window menu. Default `['all', '21d', '63d', '126d', '252d', '504d', '1260d']`. Each entry must be `'all'` or `'<int>d'` |
+| `transforms` | Curated list of transform names the drawer offers. Default: `['raw', 'log', 'change', 'pct_change', 'yoy_pct', 'zscore', 'rolling_zscore_252', 'rank_pct']`. `raw` is always prepended |
 | `min_periods` | Min overlapping non-null pairs to report (default 5); below threshold renders blank |
 | `show_values` / `value_decimals` | Print correlation in cell (default `True` / `2`; clamped to global cap) |
 | `value_label_color` | `"auto"` (B/W contrast), hex, or `False` |
 | `colors` / `color_palette` | Override palette (default `gs_diverging`) |
 
+**Runtime drawer (three-dots → controls).** Three live knobs, plus an action bar:
+
+| Knob | Effect |
+|------|--------|
+| Transform | Re-runs the per-column transform across the **full history** (so `rolling_zscore_252` keeps its full lookback) then re-correlates the visible window. Order-aware transforms (`change`, `pct_change`, `yoy_*`, `rolling_zscore_*`) auto-hide when the chart has no time axis |
+| Window | Slices the post-transform series to the last N days before correlating. Hidden when no time axis. The matrix's first paint already respects `mapping.window`, so authors who pin `window: '63d'` get the rolling matrix at compile-time and the viewer can flip to other lookbacks |
+| Method | `Pearson` or `Spearman`. Method swap is per-render — author's `mapping.method` is the default |
+
+Subtitle auto-stamps `Pearson · %Δ · 63-day rolling · as of 2026-04-22` and updates on every drawer change. When the author passes an explicit `subtitle` on the widget, the auto-stamp is suppressed.
+
+`View data` / `Copy CSV` / `Download CSV` / `Download XLSX` operate on the **runtime** matrix (post Transform + Window + Method), with column names as the row / column headers — what gets exported matches what's on screen.
+
 Cell tooltip prints `<row name> × <col name>: r=0.xx`. Diagonal is always `1.0`. Use `correlation_matrix` for wide-form time-series panels (author gives columns; builder does math + visualMap). Use `heatmap` for pre-computed bivariate cells (cross-asset returns by month, hit-rate by quintile).
+
+Implementation note: the runtime payload (`opt._corr_runtime`) carries ~8 bytes × `N_cols` × `N_obs` of float values plus an `N_obs` epoch-ms times array. For an 8-column 5y daily panel that's ~70 KB / chart. Cap dataset frequency or column count if a dashboard needs many corr matrices.
 
 ### 3.7 Computed columns (manifest-level expressions)
 
@@ -812,6 +848,14 @@ Every chart / table / KPI carries a controls drawer. `initial_state` seeds it so
               "series": {"us_10y": {"transform": "log", "visible": True}},
               "trendline": "linear", "color_scale": "diverging"}}
 
+"spec": {"chart_type": "correlation_matrix", "dataset": "rates",
+          "mapping": {"columns": ["us_2y", "us_5y", "us_10y", "us_30y"],
+                       "transform": "raw", "order_by": "date"},
+          "initial_state": {
+              "corr_transform": "pct_change",
+              "corr_window":    "63d",
+              "corr_method":    "pearson"}}
+
 {"widget": "table", "initial_state": {"search": "tech", "sort_by": "z", "sort_dir": "desc",
     "hidden_columns": ["legacy_col"], "density": "compact",
     "freeze_first_col": True, "decimals": 2}}
@@ -911,12 +955,31 @@ Supported `where` ops: `==`, `!=`, `>`, `>=`, `<`, `<=`. Dependent filter's exis
 
 ### 5.3 Per-chart zoom (in-chart `dataZoom`)
 
-Every chart with `time` x-axis ships with two `dataZoom` controls injected at compile time (independent of any `dateRange` filter): `type: "inside"` (mouse wheel / pinch zoom + click-and-drag pan) and `type: "slider"` (draggable slider beneath the grid). Full dataset embedded; slider clips visible window. `grid.bottom` auto-bumps. Opt-out for sparkline-style tiles via `chart_zoom: false` on `spec` (or `mapping`); builders that already declared their own `dataZoom` (e.g. candlestick) are left alone.
+Every chart with `time` x-axis ships with two `dataZoom` controls injected at compile time (independent of any `dateRange` filter): `type: "inside"` (mouse wheel / pinch zoom + click-and-drag pan) and `type: "slider"` (draggable slider beneath the grid). Full dataset embedded; slider clips visible window. `grid.bottom` auto-bumps. Builders that already declared their own `dataZoom` (e.g. candlestick) are left alone.
+
+The slider's `labelFormatter` is auto-selected from the actual data span — `"HH:MM"` for sub-day data, `"Mon dd HH:MM"` for multi-day-but-under-two-weeks, `"Mon dd"` for daily-within-a-year, `"Mon YYYY"` for multi-year. So a 12h intraday chart's slider labels read `"06:30"` / `"18:30"`, a 5y EOD chart's labels read `"Apr 2021"` / `"Apr 2026"`, and so on.
+
+`chart_zoom` value:
+
+| Form                                | Result                                                       |
+|-------------------------------------|--------------------------------------------------------------|
+| `true` / unset                      | Both inside + slider injected (default)                      |
+| `false`                             | Nothing injected -- sparkline mode                           |
+| `{"slider": true, "inside": false}` | Slider only (chart inside-pan would steal page-scroll)       |
+| `{"slider": false, "inside": true}` | Inside only (cramped tile, slider clutters)                  |
+| `{"slider": false, "inside": false}`| Equivalent to `false`                                        |
+
+`spec.chart_zoom` and `mapping.chart_zoom` both work; `spec.chart_zoom` wins when both are set.
 
 ```json
 {"widget": "chart", "id": "tiny_sparkline", "w": 3,
   "spec": {"chart_type": "line", "dataset": "rates",
             "mapping": {"x": "date", "y": "us_2y"}, "chart_zoom": false}}
+
+{"widget": "chart", "id": "intraday_compact", "w": 4,
+  "spec": {"chart_type": "multi_line", "dataset": "rates_intraday",
+            "mapping": {"x": "timestamp", "y": ["us_2y", "us_10y"]},
+            "chart_zoom": {"slider": false}}}
 ```
 
 ### 5.4 `click_emit_filter`
@@ -1316,6 +1379,12 @@ current = (iday_df.ffill().iloc[-1] if iday_df is not None and len(iday_df) > 0
 ```
 
 Both `pull_market_data` calls share `name='rates'`, so the metadata sidecar (`rates_metadata.json`) is written / overwritten by whichever call wrote last — both calls describe the same coordinates, so a single sidecar is correct.
+
+**Sub-day timestamps are preserved end-to-end.** The dashboard compiler emits ISO-8601 with time component (and tz offset when present) for any column whose values aren't all calendar-day-aligned, so an intraday `timestamp` column with values like `2026-04-27 06:38:00-04:00` survives as 722 distinct x-values into ECharts. No special manifest configuration is needed — the same `multi_line` chart spec works for daily EOD data and for minute-bar intraday data. Daily / weekly / monthly columns continue to emit as bare `"%Y-%m-%d"` strings (byte-identical to the pre-sub-day-fix behaviour). The slider's `labelFormatter` auto-adapts to the data span (see §5.3): a 12h chart shows `"06:30"` / `"18:30"`, a 5y chart shows `"Apr 2021"` / `"Apr 2026"`. No author-side knob.
+
+If the intraday tab has a global `dateRange` filter targeting it (e.g. `targets: ["*"]` with `default: "1Y"`), the runtime dispatches `[now-365d, now]` into the chart's dataZoom but ECharts clamps the visible window to the actual data extent — the user sees the full intraday session, not a 1-year axis with a tick at the right edge. The previous footgun ("intraday charts collapse to a single tick on the day") is fixed at the serializer; no manifest workaround required.
+
+Compact / sparkline-shaped intraday tiles can drop the slider via `spec.chart_zoom = {"slider": false}` to reclaim the ~28px the slider claims at the bottom — see §5.3.
 
 ### 9.5 Refresh-runner namespace gap
 

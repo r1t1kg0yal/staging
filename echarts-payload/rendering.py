@@ -361,6 +361,41 @@ APP_JS = r"""
     return n;
   }
 
+  // Last-line-of-defence tooltip decimal cap (mirror of the dashboard
+  // runtime helper). Skipped when a custom ``formatter`` or
+  // ``valueFormatter`` is already set so author-supplied tooltip
+  // templates / runtime-installed formatters still win.
+  function __ensureTooltipDecimalCap(opt){
+    if (!opt || typeof opt !== 'object') return;
+    var tt = opt.tooltip;
+    if (!tt || typeof tt !== 'object') return;
+    if (tt.formatter) return;
+    if (tt.valueFormatter) return;
+    var cap = __MAX_DEC;
+    tt.valueFormatter = function(v){
+      if (v == null) return '';
+      if (typeof v === 'string') return v;
+      if (Array.isArray(v)) {
+        var out = [];
+        for (var i = 0; i < v.length; i++){
+          var x = v[i];
+          if (x == null) { out.push(''); continue; }
+          var nx = +x;
+          if (isNaN(nx)) { out.push(String(x)); continue; }
+          var sx = nx.toFixed(cap);
+          if (sx.indexOf('.') >= 0) sx = sx.replace(/0+$/, '').replace(/\.$/, '');
+          out.push(sx);
+        }
+        return out.join(', ');
+      }
+      var n = +v;
+      if (isNaN(n)) return String(v);
+      var s = n.toFixed(cap);
+      if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+      return s;
+    };
+  }
+
   // Revive string-encoded JS functions into real functions before any
   // setOption call. The editor uses this for every mutation + reset path.
   function _isFnStr(s) {
@@ -981,6 +1016,7 @@ APP_JS = r"""
       // become real functions. state.option is kept as-is so Raw/Code tab
       // still shows the serializable JSON.
       var live = reviveFns(JSON.parse(JSON.stringify(state.option)));
+      __ensureTooltipDecimalCap(live);
       state.chart.setOption(live, true);
       document.getElementById('chart-status').textContent = 'ok';
     } catch (e){
@@ -1703,6 +1739,19 @@ header.app-header {
 .header-actions .icon-btn.refresh-err-info:hover {
   background: var(--neg); color: #fff; border-color: var(--neg);
   filter: brightness(1.10);
+}
+/* Share button "currently sharing" state -- subtle accent so the
+   author can glance at the header and see that the dashboard is
+   public. The default Share button uses the standard icon-btn
+   chrome; the .shared modifier swaps to the GS sky-blue accent. */
+.header-actions .icon-btn.shared {
+  background: var(--gs-blue, #7399C6); color: #fff;
+  border-color: var(--gs-blue, #7399C6);
+}
+.header-actions .icon-btn.shared:hover {
+  background: var(--gs-blue, #7399C6); color: #fff;
+  border-color: var(--gs-blue, #7399C6);
+  filter: brightness(1.05);
 }
 /* Refresh-error modal -- surfaces full error context (status,
    classification, errors[], timestamps, pid, log path, dashboard
@@ -3144,6 +3193,10 @@ footer.app-footer .gs-mark .gs-wordmark { font-size: 12px; }
                 style="display:none">
           ! Error details
         </button>
+        <button class="icon-btn" id="share-btn"
+                title="Share this dashboard with the community" style="display:none">
+          <span id="share-btn-label">Share</span>
+        </button>
         <button class="icon-btn" id="export-all"
                 title="Download all charts as PNG (2x)">
           Download Charts
@@ -3226,6 +3279,45 @@ DASHBOARD_APP_JS = r"""
     if (n < 0) return 0;
     if (n > cap) return cap;
     return n;
+  }
+
+  // Last-line-of-defence tooltip decimal cap. Mirrors the compile-time
+  // pass in echart_studio._install_default_tooltip_decimal_cap so a
+  // chart that somehow reached the runtime without a tooltip
+  // ``valueFormatter`` (hand-edited spec, non-standard build path,
+  // legacy snapshot) still cannot leak raw 12-digit floats. Skipped
+  // when a custom ``formatter`` or ``valueFormatter`` is already
+  // present -- ECharts calls ``valueFormatter`` per-value only when
+  // no per-tooltip ``formatter`` overrides the whole template.
+  function __ensureTooltipDecimalCap(opt){
+    if (!opt || typeof opt !== 'object') return;
+    var tt = opt.tooltip;
+    if (!tt || typeof tt !== 'object') return;
+    if (tt.formatter) return;
+    if (tt.valueFormatter) return;
+    var cap = __MAX_DEC;
+    tt.valueFormatter = function(v){
+      if (v == null) return '';
+      if (typeof v === 'string') return v;
+      if (Array.isArray(v)) {
+        var out = [];
+        for (var i = 0; i < v.length; i++){
+          var x = v[i];
+          if (x == null) { out.push(''); continue; }
+          var nx = +x;
+          if (isNaN(nx)) { out.push(String(x)); continue; }
+          var sx = nx.toFixed(cap);
+          if (sx.indexOf('.') >= 0) sx = sx.replace(/0+$/, '').replace(/\.$/, '');
+          out.push(sx);
+        }
+        return out.join(', ');
+      }
+      var n = +v;
+      if (isNaN(n)) return String(v);
+      var s = n.toFixed(cap);
+      if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+      return s;
+    };
   }
 
   // Revive string-encoded JS functions (renderItem, formatter, filter)
@@ -3489,6 +3581,10 @@ DASHBOARD_APP_JS = r"""
         if (init.pie_sort != null)    st.pieSort = init.pie_sort;
         if (init.pie_other_threshold != null)
           st.pieOtherThreshold = init.pie_other_threshold;
+        // correlation_matrix runtime seeds
+        if (init.corr_transform != null) st.corrTransform = init.corr_transform;
+        if (init.corr_window != null)    st.corrWindow    = init.corr_window;
+        if (init.corr_method != null)    st.corrMethod    = init.corr_method;
     });
     // Walk widget meta for table / kpi initial_state
     Object.keys(WIDGET_META || {}).forEach(function(wid){
@@ -4785,9 +4881,14 @@ DASHBOARD_APP_JS = r"""
       state._lastStudioStats = statsBundle;
     }
 
-    // --- heatmap / correlation_matrix knobs ---
-    if (ct === 'heatmap' || ct === 'correlation_matrix'){
+    // --- heatmap knobs (categorical X/Y/value) ---
+    if (ct === 'heatmap'){
       _ccApplyHeatmap(opt, state);
+    }
+
+    // --- correlation_matrix knobs (Transform / Window / Method) ---
+    if (ct === 'correlation_matrix'){
+      _ccApplyCorrelationMatrix(cid, opt, state);
     }
 
     // --- pie knobs ---
@@ -5806,6 +5907,224 @@ DASHBOARD_APP_JS = r"""
     }
   }
 
+  // ---- helpers: correlation_matrix recompute (Transform / Window / Method) ----
+  //
+  // Mirrors echart_studio._corr_apply_window + _corr (Python) +
+  // _ccColumnTransform (JS, line/scatter shared). Reads the
+  // ``_corr_runtime`` sidecar embedded by build_correlation_matrix
+  // and produces a fresh ``[[xIdx, yIdx, r], ...]`` cell array on
+  // every drawer change.
+
+  function _ccCorrCfg(cid){
+    var base = SPECS[cid];
+    if (!base) return null;
+    return base._corr_runtime || null;
+  }
+
+  function _ccCorrWindowDays(window){
+    if (!window || window === 'all') return null;
+    if (/^\d+d$/.test(window)){
+      var n = parseInt(window.slice(0, -1), 10);
+      return isFinite(n) && n > 0 ? n : null;
+    }
+    return null;
+  }
+
+  function _ccCorrWindowLabel(window){
+    var n = _ccCorrWindowDays(window);
+    if (n == null) return 'Full sample';
+    return n + '-day rolling';
+  }
+
+  var _CC_MS_PER_DAY = 24 * 3600 * 1000;
+
+  function _ccCorrApplyWindow(transformed, times, window){
+    var n = _ccCorrWindowDays(window);
+    if (n == null || !times || !times.length) return transformed;
+    var lastT = null;
+    for (var i = times.length - 1; i >= 0; i--){
+      if (times[i] != null){ lastT = times[i]; break; }
+    }
+    if (lastT == null) return transformed;
+    var cutoff = lastT - n * _CC_MS_PER_DAY;
+    var out = {};
+    for (var col in transformed){
+      if (!Object.prototype.hasOwnProperty.call(transformed, col)) continue;
+      var arr = transformed[col] || [];
+      var mask = new Array(arr.length);
+      for (var k = 0; k < arr.length; k++){
+        var t = times[k];
+        if (t == null || t < cutoff){ mask[k] = null; }
+        else { mask[k] = arr[k]; }
+      }
+      out[col] = mask;
+    }
+    return out;
+  }
+
+  function _ccPearsonAligned(xs, ys){
+    var n = xs.length;
+    if (n < 2) return null;
+    var mx = 0, my = 0;
+    for (var i = 0; i < n; i++){ mx += xs[i]; my += ys[i]; }
+    mx /= n; my /= n;
+    var sxx = 0, syy = 0, sxy = 0;
+    for (var j = 0; j < n; j++){
+      var dx = xs[j] - mx, dy = ys[j] - my;
+      sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+    }
+    if (sxx <= 0 || syy <= 0) return null;
+    return sxy / Math.sqrt(sxx * syy);
+  }
+
+  function _ccCorrRanks(values){
+    // Average-rank ties (mirror scipy 'average' / pandas
+    // Series.rank(method='average')).
+    var pairs = [];
+    for (var i = 0; i < values.length; i++){
+      pairs.push({v: +values[i], i: i});
+    }
+    pairs.sort(function(a, b){ return a.v - b.v; });
+    var out = new Array(values.length);
+    var k = 0;
+    while (k < pairs.length){
+      var j = k;
+      while (j + 1 < pairs.length && pairs[j + 1].v === pairs[k].v) j++;
+      var avgRank = (k + j) / 2.0 + 1;
+      for (var m = k; m <= j; m++) out[pairs[m].i] = avgRank;
+      k = j + 1;
+    }
+    return out;
+  }
+
+  function _ccCorr(xs, ys, method, minPeriods){
+    if (!xs || !ys) return null;
+    var len = Math.min(xs.length, ys.length);
+    var ax = []; var ay = [];
+    for (var i = 0; i < len; i++){
+      var a = xs[i], b = ys[i];
+      if (a == null || b == null || isNaN(+a) || isNaN(+b)) continue;
+      ax.push(+a); ay.push(+b);
+    }
+    var mp = (minPeriods != null && minPeriods >= 1) ? minPeriods : 5;
+    if (ax.length < mp) return null;
+    if (method === 'spearman'){
+      return _ccPearsonAligned(_ccCorrRanks(ax), _ccCorrRanks(ay));
+    }
+    return _ccPearsonAligned(ax, ay);
+  }
+
+  function _ccCorrSubtitle(method, transform, window, asOf){
+    // "Pearson · %Δ · 63-day rolling · as of 2026-04-22"
+    // Drops the transform piece when raw, the window piece when 'all'
+    // and no time axis, and the as-of piece when no time axis.
+    var parts = [];
+    var m = (method || 'pearson').toLowerCase();
+    parts.push(m === 'spearman' ? 'Spearman' : 'Pearson');
+    var tLbl = _ccTransformLabelShort(transform || 'raw');
+    if (transform && transform !== 'raw' && tLbl) parts.push(tLbl);
+    if (asOf){
+      parts.push(_ccCorrWindowLabel(window).toLowerCase());
+      parts.push('as of ' + asOf);
+    } else if (window && window !== 'all'){
+      parts.push(_ccCorrWindowLabel(window).toLowerCase());
+    }
+    return parts.join(' \u00B7 ');
+  }
+
+  function _ccApplyCorrelationMatrix(cid, opt, state){
+    var cfg = _ccCorrCfg(cid);
+    if (!cfg || !opt || !opt.series || !opt.series[0]){
+      // Compile-time first-paint already in opt; nothing to do.
+      // No defensive fallback here -- a missing _corr_runtime is
+      // an engine bug, not a runtime case to guard against.
+      if (state && state.heatmapScale){
+        _ccApplyHeatmap(opt, state);
+      }
+      return;
+    }
+
+    var transform = state.corrTransform || cfg.transform_default || 'raw';
+    var window    = state.corrWindow    || cfg.window_default    || 'all';
+    var method    = state.corrMethod    || cfg.method            || 'pearson';
+
+    var cols   = cfg.columns || [];
+    var times  = cfg.times || null;
+    var values = cfg.values || {};
+    var minPeriods = +cfg.min_periods || 5;
+    var n      = cols.length;
+
+    // Per-column transform across the FULL history (so rolling z /
+    // YoY have their full lookback) then mask outside the window.
+    var transformed = {};
+    for (var i = 0; i < n; i++){
+      var col = cols[i];
+      transformed[col] = _ccColumnTransform(values[col] || [],
+                                              times || [], transform);
+    }
+    var sliced = _ccCorrApplyWindow(transformed, times, window);
+
+    // Recompute pairwise correlations.
+    var cells = new Array(n * n);
+    for (var ii = 0; ii < n; ii++){
+      for (var jj = 0; jj < n; jj++){
+        var r = _ccCorr(sliced[cols[ii]], sliced[cols[jj]],
+                          method, minPeriods);
+        var yIdx = (n - 1) - jj;
+        cells[ii * n + jj] = {value: [ii, yIdx, r]};
+      }
+    }
+    opt.series[0].data = cells;
+
+    // Visual-map color scale (existing diverging/sequential toggle).
+    if (state.heatmapScale){
+      var vm = opt.visualMap;
+      if (Array.isArray(vm)) vm = vm[0];
+      if (vm){
+        vm.inRange = vm.inRange || {};
+        if (state.heatmapScale === 'diverging'){
+          vm.inRange.color = ['#8C1D40', '#f5f5f5', '#1a365d'];
+        } else if (state.heatmapScale === 'sequential'){
+          vm.inRange.color = ['#f0f5fb', '#7399C6', '#002F6C'];
+        }
+      }
+    }
+
+    // Subtitle: pack method + transform + window + as_of into one
+    // line so the user always knows what they're looking at. Skip
+    // when the author pinned an explicit subtitle. We do NOT touch
+    // opt.title.text -- the dashboard pipeline blanks it when the
+    // widget tile owns the title, and re-stamping causes double
+    // headlines.
+    opt.title = opt.title || {};
+    if (!cfg.subtitle_author){
+      opt.title.subtext = _ccCorrSubtitle(method, transform, window,
+                                              cfg.as_of);
+    }
+
+    // Tooltip formatter: single source of truth for runtime. Shows
+    // the active transform's unit suffix when applicable (e.g. "%"
+    // for pct_change / yoy_pct).
+    var dec = (cfg.decimals != null && !isNaN(+cfg.decimals))
+      ? +cfg.decimals : 2;
+    var unitSuffix = _ccTransformSuffix(transform);
+    var xs = cols.slice(); var ys = cols.slice().reverse();
+    opt.tooltip = opt.tooltip || {};
+    opt.tooltip.show = true;
+    opt.tooltip.trigger = 'item';
+    opt.tooltip.formatter = function(p){
+      var v = (p.data && p.data.value) || p.data || [];
+      var xi = v[0], yi = v[1], rv = v[2];
+      var rn = ys[yi] || ''; var cn = xs[xi] || '';
+      if (rv == null || isNaN(+rv)){
+        return rn + ' x ' + cn + ': insufficient overlap';
+      }
+      var label = rn + ' x ' + cn + ': r=' + (+rv).toFixed(dec);
+      if (unitSuffix) label += ' (' + unitSuffix + ')';
+      return label;
+    };
+  }
+
   // ---- helpers: pie sort + other-bucket ----
 
   function _ccApplyPie(opt, state){
@@ -6311,7 +6630,7 @@ DASHBOARD_APP_JS = r"""
       }
     }
 
-    // --- Heatmap knobs ---
+    // --- Heatmap knobs (categorical X/Y/value) ---
     if (ct === 'heatmap'){
       html.push('<div class="cc-section">');
       html.push('<div class="cc-section-title">Heatmap</div>');
@@ -6321,6 +6640,78 @@ DASHBOARD_APP_JS = r"""
         'heatmap-scale', state.heatmapScale || 'sequential',
         [{value: 'sequential', label: 'Sequential'},
           {value: 'diverging',  label: 'Diverging (around 0)'}]));
+      html.push('</div></div>');
+      hasSection = true;
+    }
+
+    // --- Correlation matrix knobs (Transform / Window / Method) ---
+    if (ct === 'correlation_matrix'){
+      var corrCfg = _ccCorrCfg(cid) || {};
+      var transformsList = corrCfg.transforms || ['raw'];
+      var windowList     = corrCfg.window_options || ['all'];
+      var hasTimeAxis    = !!(corrCfg.times && corrCfg.times.length
+                              && corrCfg.as_of);
+
+      // Transform: filter the curated list to ones that don't need
+      // a time axis when we don't have one. Order-aware transforms
+      // (change / pct_change / yoy_* / rolling_zscore_*) drop out
+      // when ``times`` is null on the runtime sidecar.
+      var orderAware = function(t){
+        if (!t) return false;
+        if (t === 'change' || t === 'pct_change') return true;
+        if (t === 'yoy_change' || t === 'yoy_pct'
+              || t === 'yoy_log') return true;
+        if (t === 'ytd' || t === 'annualized_change') return true;
+        if (t.indexOf('rolling_zscore_') === 0) return true;
+        return false;
+      };
+      var transformOpts = transformsList
+        .filter(function(t){ return hasTimeAxis || !orderAware(t); })
+        .map(function(t){
+          return {value: t, label: _ccTransformLabelShort(t)};
+        });
+      var curTransform = state.corrTransform
+        || corrCfg.transform_default || 'raw';
+
+      var windowLabel = function(w){
+        if (w === 'all') return 'All';
+        var m = /^(\d+)d$/.exec(w);
+        if (!m) return w;
+        var n = +m[1];
+        var months = {21: '1m', 63: '3m', 126: '6m', 252: '1y',
+                       504: '2y', 1260: '5y'}[n];
+        return months ? (months + ' (' + n + 'd)') : (n + ' days');
+      };
+      var windowOpts = windowList.map(function(w){
+        return {value: w, label: windowLabel(w)};
+      });
+      var curWindow = state.corrWindow
+        || corrCfg.window_default || 'all';
+
+      var curMethod = state.corrMethod || corrCfg.method || 'pearson';
+
+      html.push('<div class="cc-section">');
+      html.push('<div class="cc-section-title">Correlation</div>');
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Transform</span>');
+      html.push(_ccBuildSelect('corr-transform', curTransform,
+                                  transformOpts));
+      if (hasTimeAxis){
+        html.push('<span class="cc-label">Window</span>');
+        html.push(_ccBuildSelect('corr-window', curWindow, windowOpts));
+      }
+      html.push('<span class="cc-label">Method</span>');
+      html.push(_ccBuildSelect('corr-method', curMethod, [
+        {value: 'pearson',  label: 'Pearson'},
+        {value: 'spearman', label: 'Spearman'}]));
+      html.push('</div>');
+
+      html.push('<div class="cc-row">');
+      html.push('<span class="cc-label">Color scale</span>');
+      html.push(_ccBuildSelect(
+        'heatmap-scale', state.heatmapScale || 'diverging',
+        [{value: 'diverging',  label: 'Diverging (around 0)'},
+          {value: 'sequential', label: 'Sequential'}]));
       html.push('</div></div>');
       hasSection = true;
     }
@@ -6400,6 +6791,9 @@ DASHBOARD_APP_JS = r"""
         else if (name === 'bar-stack')             state.barStack = el.value;
         else if (name === 'scatter-trendline')     state.scatterTrendline = el.value;
         else if (name === 'heatmap-scale')         state.heatmapScale = el.value;
+        else if (name === 'corr-transform')        state.corrTransform = el.value;
+        else if (name === 'corr-window')           state.corrWindow = el.value;
+        else if (name === 'corr-method')           state.corrMethod = el.value;
         else if (name === 'pie-sort')              state.pieSort = el.value;
         else if (name === 'pie-other')             state.pieOther = el.value;
         else if (name === 'studio-x')              { state.studio = state.studio || {}; state.studio.xCol = el.value; }
@@ -6941,10 +7335,67 @@ DASHBOARD_APP_JS = r"""
 
   function _ccChartFiltered(cid){
     var w = WIDGET_META[cid];
-    if (!w || !w.dataset_ref) return null;
+    if (!w) return null;
+    var spec = w.spec || {};
+    var ct   = String(spec.chart_type || '').toLowerCase();
+    if (ct === 'correlation_matrix'){
+      // correlation_matrix has no dataset_ref -- materialise the
+      // current NxN matrix straight from the live option so View
+      // Data / Copy CSV / Download CSV/XLSX reflect the runtime
+      // (post Transform/Window/Method) state.
+      return _ccCorrMatrixRows(cid);
+    }
+    if (!w.dataset_ref) return null;
     var ds = currentDatasets[w.dataset_ref];
     if (!ds || !ds.length) return null;
     return applyFilters(w.dataset_ref, ds, 'chart');
+  }
+
+  function _ccCorrMatrixRows(cid){
+    // Returns rows shaped as [[header...], [row...], ...]. The first
+    // column is the row label (a column name from cfg.columns); each
+    // subsequent column is the correlation coefficient against the
+    // matching column. Reads the live option (post-recompute) so the
+    // exported numbers exactly match what the cells display.
+    var rec = CHARTS[cid];
+    var opt = rec && rec.inst && rec.inst.getOption();
+    var cfg = _ccCorrCfg(cid);
+    if (!opt || !opt.series || !opt.series[0] || !cfg) return null;
+    var cols = (cfg.columns || []).slice();
+    var n = cols.length;
+    if (!n) return null;
+
+    var grid = [];
+    for (var i = 0; i < n; i++){
+      grid.push(new Array(n));
+      for (var j = 0; j < n; j++) grid[i][j] = null;
+    }
+    var data = opt.series[0].data || [];
+    data.forEach(function(d){
+      var v = (d && d.value) || d;
+      if (!Array.isArray(v) || v.length < 3) return;
+      var xi = v[0]; var yi = v[1]; var rv = v[2];
+      // _ccApplyCorrelationMatrix stores cells as
+      // [colIdx, (n-1)-rowIdx, r]. Invert yi to recover row index.
+      var ri = (n - 1) - yi;
+      if (ri < 0 || ri >= n || xi < 0 || xi >= n) return;
+      grid[ri][xi] = rv;
+    });
+
+    var header = [''].concat(cols);
+    var rows = [header];
+    var dec = (cfg.decimals != null && !isNaN(+cfg.decimals))
+      ? +cfg.decimals : 2;
+    for (var ri2 = 0; ri2 < n; ri2++){
+      var row = [cols[ri2]];
+      for (var ci = 0; ci < n; ci++){
+        var v = grid[ri2][ci];
+        row.push((v == null || isNaN(+v)) ? null
+                                              : +(+v).toFixed(dec));
+      }
+      rows.push(row);
+    }
+    return rows;
   }
 
   function _ccViewData(cid){
@@ -7222,6 +7673,11 @@ DASHBOARD_APP_JS = r"""
     // hasn't touched the drawer yet. Runs whether or not the chart
     // has a dataset_ref so transforms work on inline-data charts.
     applyChartControls(cid, opt);
+    // Last-line-of-defence: ensure the tooltip cannot render raw
+    // floats with > MAX_DASHBOARD_DECIMALS digits, regardless of
+    // whether the compile-time pass installed a valueFormatter or
+    // a runtime control already attached one.
+    __ensureTooltipDecimalCap(opt);
     return opt;
   }
 
@@ -9322,6 +9778,7 @@ DASHBOARD_APP_JS = r"""
     }
     var theme = MANIFEST.theme || 'gs_clean';
     var inst = echarts.init(el, theme in PAYLOAD.themes ? theme : null);
+    __ensureTooltipDecimalCap(opt);
     inst.setOption(opt, true);
     // Track so we can dispose on modal close (prevents leak over many
     // clicks).
@@ -10913,6 +11370,120 @@ DASHBOARD_APP_JS = r"""
       return r;
     };
   }
+
+  // ----- share button (community publish toggle) -----
+  //
+  // Lives in the standard top-right header row alongside Methodology /
+  // Refresh / Download. Visible only to the dashboard's author.
+  //
+  // The viewer's identity is injected into the served HTML by the
+  // PRISM Django dashboard-serving view as `window.PRISM_VIEWER`
+  // (string). The current registry-truth share state is optionally
+  // injected as `window.PRISM_DASHBOARD_SHARED` (bool); when absent
+  // the manifest's compile-time `metadata.shared` snapshot is used as
+  // the initial value (acceptable staleness -- one click corrects it).
+  //
+  // For local file:// preview neither global is set; the button stays
+  // hidden because viewer != author. This is the correct safe default.
+  //
+  // Click flips state. Going public is one click. Going private opens
+  // a confirm modal because the public URL stops resolving on
+  // un-share, and any link people have shared with each other breaks
+  // immediately. Re-share is always available (idempotent on the
+  // server).
+  //
+  // The share endpoint is author-only by construction on the server:
+  // the registry it touches is always the viewer's own
+  // (users/{viewer}/dashboards/...), so a non-author cannot toggle
+  // someone else's share state even if they craft the API call by
+  // hand. The button visibility check here is a UX gate; the auth
+  // gate is server-side.
+  (function(){
+    var btn   = document.getElementById('share-btn');
+    var label = document.getElementById('share-btn-label');
+    if (!btn || !label) return;
+
+    var author      = MD.kerberos;
+    var dashboardId = MD.dashboard_id || MANIFEST.id;
+    if (!author || !dashboardId) return;
+
+    var viewer = (typeof window !== 'undefined') ? window.PRISM_VIEWER : null;
+    if (!viewer || viewer !== author) return;
+
+    var shareApi = MD.share_api_url || '/api/dashboard/share/';
+
+    var state = (typeof window.PRISM_DASHBOARD_SHARED !== 'undefined')
+                  ? !!window.PRISM_DASHBOARD_SHARED
+                  : (MD.shared === true);
+
+    function paint(){
+      label.textContent = state ? 'Sharing' : 'Share';
+      btn.title = state
+        ? 'This dashboard is shared with the community. Click to make private.'
+        : 'Share this dashboard with the community.';
+      btn.classList.toggle('shared', state);
+    }
+
+    function postShareToggle(target){
+      btn.disabled = true;
+      var prev = label.textContent;
+      label.textContent = target ? 'Sharing...' : 'Unsharing...';
+      fetch(shareApi, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({dashboard_id: dashboardId, shared: !!target})
+      })
+        .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
+        .then(function(pair){
+          var code = pair[0], result = pair[1] || {};
+          if (code !== 200 || result.ok !== true){
+            alert('Share toggle failed: ' + (result.error || ('HTTP ' + code)));
+            label.textContent = prev;
+            return;
+          }
+          state = !!result.shared;
+          paint();
+        })
+        .catch(function(e){
+          alert('Share toggle network error: ' + e);
+          label.textContent = prev;
+        })
+        .then(function(){ btn.disabled = false; });
+    }
+
+    function onClick(){
+      if (state){
+        var body =
+          '<p>This dashboard is currently visible to every PRISM user in the ' +
+            '<strong>Community</strong> section.</p>' +
+          '<p>If you make it private, ' +
+            '<code>/community/dashboards/' + _he(author) + '/' + _he(dashboardId) + '/</code> ' +
+            'will return 404 and the tile will disappear from <code>/dashboards/</code>.</p>' +
+          '<p>You can re-share at any time.</p>' +
+          '<div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">' +
+            '<button id="share-cancel"  class="icon-btn">Cancel</button>' +
+            '<button id="share-confirm" class="icon-btn">Make private</button>' +
+          '</div>';
+        showModal('Make this dashboard private?', body);
+        var modal = document.getElementById('ed-modal-backdrop');
+        if (modal){
+          var c = modal.querySelector('#share-cancel');
+          var p = modal.querySelector('#share-confirm');
+          if (c) c.addEventListener('click', hideModal);
+          if (p) p.addEventListener('click', function(){
+            hideModal();
+            postShareToggle(false);
+          });
+        }
+      } else {
+        postShareToggle(true);
+      }
+    }
+
+    btn.style.display = 'inline-flex';
+    paint();
+    btn.addEventListener('click', onClick);
+  })();
 
   // ----- init -----
   window.addEventListener('load', function(){

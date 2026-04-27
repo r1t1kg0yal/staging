@@ -346,6 +346,86 @@ def _install_default_axis_decimal_cap(opt: Dict[str, Any]) -> None:
             label["formatter"] = _DEFAULT_VALUE_AXIS_FORMATTER_JS
 
 
+# JS body for the default tooltip ``valueFormatter``. Mirrors the value-
+# axis tick formatter above so a crosshair / axis-trigger tooltip cannot
+# render a number to more than ``MAX_DASHBOARD_DECIMALS`` digits. ECharts
+# calls ``valueFormatter`` per-value when no per-tooltip ``formatter`` is
+# set; if a chart type installs its own ``tooltip.formatter`` (custom HTML
+# template), ECharts ignores ``valueFormatter`` and the formatter's own
+# ``toFixed(...)`` literals (which are also bounded by the cap, see
+# ``rendering.py``'s ``__capDec``) take over.
+_DEFAULT_TOOLTIP_VALUE_FORMATTER_JS: str = (
+    "function(v){"
+    "  if (v == null) return '';"
+    "  if (typeof v === 'string') return v;"
+    "  if (Array.isArray(v)) {"
+    "    return v.map(function(x){"
+    "      if (x == null) return '';"
+    "      var nx = +x;"
+    "      if (isNaN(nx)) return String(x);"
+    "      var sx = nx.toFixed(" + str(MAX_DASHBOARD_DECIMALS) + ");"
+    "      if (sx.indexOf('.') >= 0) {"
+    "        sx = sx.replace(/0+$/, '').replace(/\\.$/, '');"
+    "      }"
+    "      return sx;"
+    "    }).join(', ');"
+    "  }"
+    "  var n = +v;"
+    "  if (isNaN(n)) return String(v);"
+    "  var s = n.toFixed(" + str(MAX_DASHBOARD_DECIMALS) + ");"
+    "  if (s.indexOf('.') >= 0) {"
+    "    s = s.replace(/0+$/, '').replace(/\\.$/, '');"
+    "  }"
+    "  return s;"
+    "}"
+)
+
+
+def _install_default_tooltip_decimal_cap(opt: Dict[str, Any]) -> None:
+    """Install a default tooltip ``valueFormatter`` capping rendered
+    numeric precision at ``MAX_DASHBOARD_DECIMALS``.
+
+    Idempotent and conservative:
+
+    * Skips if ``opt.tooltip`` is missing, falsy, or not a dict.
+    * Skips if a custom ``tooltip.formatter`` (string or function) is
+      already set -- those write the entire tooltip HTML themselves,
+      and any ``toFixed`` literals inside them are already bounded by
+      the cap (every ``toFixed`` literal authored on the Python side
+      uses 0/1/2 explicitly).
+    * Skips if a custom ``tooltip.valueFormatter`` is already set --
+      the caller chose its own per-value formatter (see e.g. the
+      ``tooltip.decimals`` sugar in ``echart_dashboard._lower_chart_widget``
+      and the runtime transform formatter in ``rendering.py``).
+
+    Otherwise installs the default formatter that:
+
+    * Returns strings unchanged (ECharts sometimes hands the formatter
+      a category name).
+    * Maps numeric arrays element-wise (scatter/heatmap raw values).
+    * Caps decimals at the global cap and strips trailing zeros so a
+      whole number renders as ``"4"`` not ``"4.00"``.
+
+    Called once per chart at the tail of ``make_echart`` (after annotations
+    + axis-cap pass), and once per chart-widget at the tail of
+    ``echart_dashboard._lower_chart_widget``, so dashboards inherit the
+    cap as well. The runtime mirror in ``rendering.py``'s
+    ``materializeOption`` re-applies the same guard at render time so a
+    spec hand-edited in the editor or coming through a non-standard path
+    still cannot leak raw 12-digit floats into the tooltip.
+    """
+    tt = opt.get("tooltip")
+    if not isinstance(tt, dict):
+        return
+    fmt = tt.get("formatter")
+    if fmt not in (None, "", False):
+        return
+    vfmt = tt.get("valueFormatter")
+    if vfmt not in (None, "", False):
+        return
+    tt["valueFormatter"] = _DEFAULT_TOOLTIP_VALUE_FORMATTER_JS
+
+
 # ---------------------------------------------------------------------------
 # Axis title / sort / dash helpers (used by multiple XY builders)
 # ---------------------------------------------------------------------------
@@ -3024,6 +3104,113 @@ def build_heatmap(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str,
     return opt
 
 
+def _corr_window_days(window: str) -> Optional[int]:
+    """Parse a window token like '63d' / 'all'. Returns the day count
+    or None when the token is 'all' / unparseable."""
+    if not isinstance(window, str) or window == "all":
+        return None
+    if window.endswith("d") and window[:-1].isdigit():
+        return int(window[:-1])
+    return None
+
+
+def _corr_window_label(window: str) -> str:
+    """Human-readable label for a window token. Mirrors the JS
+    counterpart so subtitle text matches before and after a runtime
+    Window change."""
+    n = _corr_window_days(window)
+    if n is None:
+        return "Full sample"
+    return f"{n}-day rolling"
+
+
+_TRANSFORM_SHORT_LABELS = {
+    "raw":                "Raw",
+    "log":                "log",
+    "change":             "\u0394",
+    "pct_change":         "%\u0394",
+    "log_change":         "log \u0394",
+    "yoy_change":         "YoY \u0394",
+    "yoy_pct":            "YoY %",
+    "yoy_log":            "YoY log \u0394",
+    "annualized_change":  "ann. \u0394",
+    "zscore":             "z-score",
+    "rank_pct":           "pct rank",
+    "ytd":                "YTD \u0394",
+    "index100":           "Index=100",
+}
+
+
+def _transform_short_label(name: str) -> str:
+    """Mirror of the JS ``_ccTransformLabelShort`` so compile-time
+    subtitles match runtime subtitles after a Transform change."""
+    if not name or name == "raw":
+        return "Raw"
+    if name.startswith("rolling_zscore_"):
+        try:
+            w = int(name.rsplit("_", 1)[-1])
+            return f"Rolling z ({w}d)"
+        except ValueError:
+            return name
+    return _TRANSFORM_SHORT_LABELS.get(name, name)
+
+
+def _corr_subtitle(method: str, transform: str, window: str,
+                    as_of: Optional[str]) -> str:
+    """Compose the auto-stamped subtitle line.
+
+    Format: ``Pearson \u00B7 %\u0394 \u00B7 63-day rolling \u00B7 as of 2026-04-22``.
+    Mirrors the JS-side ``_ccCorrSubtitle`` so compile-time and
+    runtime renders are byte-identical for the same state.
+    """
+    parts: List[str] = []
+    m = (method or "pearson").lower()
+    parts.append("Spearman" if m == "spearman" else "Pearson")
+    if transform and transform != "raw":
+        parts.append(_transform_short_label(transform))
+    if as_of:
+        parts.append(_corr_window_label(window).lower())
+        parts.append(f"as of {as_of}")
+    elif window and window != "all":
+        parts.append(_corr_window_label(window).lower())
+    return " \u00B7 ".join(parts)
+
+
+_MS_PER_DAY = 24 * 3600 * 1000
+
+
+def _corr_apply_window(
+    transformed: Dict[str, List[Optional[float]]],
+    times_ms: Optional[List[Optional[int]]],
+    window: str,
+) -> Dict[str, List[Optional[float]]]:
+    """Mask values outside the last-N-day window with None. Mirrors the
+    JS-side ``_ccCorrApplyWindow`` so compile-time and runtime
+    correlations agree byte-for-byte for the same (transform, window).
+    """
+    n_days = _corr_window_days(window)
+    if n_days is None or times_ms is None:
+        return transformed
+    last_t: Optional[int] = None
+    for t in reversed(times_ms):
+        if t is not None:
+            last_t = t
+            break
+    if last_t is None:
+        return transformed
+    cutoff = last_t - n_days * _MS_PER_DAY
+    out: Dict[str, List[Optional[float]]] = {}
+    for col, values in transformed.items():
+        masked: List[Optional[float]] = []
+        for v, t in zip(values, times_ms or []):
+            if t is None or t < cutoff:
+                masked.append(None)
+            else:
+                masked.append(v)
+        out[col] = masked
+    return out
+
+
 def build_correlation_matrix(df, mapping: Dict[str, Any],
                               ctx: BuilderContext) -> Dict[str, Any]:
     """N-by-N correlation heatmap from a column list.
@@ -3034,21 +3221,41 @@ def build_correlation_matrix(df, mapping: Dict[str, Any],
     ``mapping.show_values`` is true (default), with auto black/white
     contrast text against each cell's background color.
 
+    The builder also embeds an ``_corr_runtime`` sidecar block on the
+    option (raw per-column values + epoch-ms times) so the dashboard
+    runtime drawer can re-correlate any time window or pre-transform
+    on the client without round-tripping through PRISM. Mapping
+    ``transform`` becomes the *initial* drawer state, not a pin.
+
     Mapping keys:
         columns           list of numeric columns to correlate (required, >=2)
         method            'pearson' (default) | 'spearman'
-        transform         per-column pre-transform applied before correlation
-                          ('raw' | 'log' | 'pct_change' | 'yoy_pct' |
-                          'zscore' | 'rank_pct' | ...). Default 'raw'.
+        transform         initial per-column pre-transform shown in the
+                          drawer ('raw' | 'log' | 'pct_change' | 'yoy_pct'
+                          | 'zscore' | 'rank_pct' | ...). Default 'raw'.
                           Order-aware transforms use ``order_by`` (default
                           first datetime-like column in df, else row order).
         order_by          column name used as the sort key for order-aware
-                          transforms.  Required when transform is one of
-                          {pct_change, yoy_pct, change, rolling_zscore_*}.
+                          transforms and for runtime windowing. Optional;
+                          when omitted the builder picks the first
+                          datetime-like column. When neither path
+                          resolves a time column the runtime drawer
+                          hides the Window dropdown and order-aware
+                          transforms.
         min_periods       minimum overlapping non-null pairs required to
                           report a correlation; falls back to 5 when
                           omitted. Cells below the threshold render as
                           NaN (greyed in the heatmap).
+        window            initial rolling window shown in the drawer.
+                          One of ``window_options`` (default 'all').
+        window_options    list of window choices the drawer offers.
+                          Default
+                          ``['all', '21d', '63d', '126d', '252d',
+                          '504d', '1260d']``. Each entry is either
+                          ``'all'`` or ``'<int>d'``.
+        transforms        curated list of transform names the drawer
+                          offers. Default: the full studio transform
+                          set. ``raw`` is always prepended.
         show_values       bool, default True
         value_decimals    int, default 2
         value_label_color ``"auto"`` (default) for B/W contrast text,
@@ -3084,45 +3291,135 @@ def build_correlation_matrix(df, mapping: Dict[str, Any],
     decimals = clamp_decimals(mapping.get("value_decimals"), default=2)
     min_periods = int(mapping.get("min_periods", 5))
 
-    # Resolve the order column once: only used for order-aware transforms.
-    order_by = mapping.get("order_by")
-    if (transform in ("change", "pct_change", "yoy_change", "yoy_pct")
-            or transform.startswith("rolling_zscore_")):
-        if order_by and order_by in df.columns:
-            sorted_df = df.sort_values(order_by, kind="mergesort")
-            time_seq = _col_to_list(sorted_df, order_by)
-            data_df = sorted_df
-        else:
-            # Heuristic: pick the first datetime-like column.
-            import pandas as pd
-            time_col = None
-            for c in df.columns:
-                try:
-                    if pd.api.types.is_datetime64_any_dtype(df[c]):
-                        time_col = c
-                        break
-                except Exception:
-                    continue
-            if time_col is None:
+    # Runtime-drawer presets (Transform / Window / Method).
+    default_windows = ["all", "21d", "63d", "126d", "252d", "504d", "1260d"]
+    raw_windows = mapping.get("window_options")
+    if raw_windows is None:
+        window_options = list(default_windows)
+    elif isinstance(raw_windows, (list, tuple)):
+        window_options = []
+        for w in raw_windows:
+            if not isinstance(w, str):
                 raise ValueError(
-                    f"correlation_matrix: transform '{transform}' is "
-                    f"order-aware; provide mapping.order_by pointing to "
-                    f"a date/time column (available columns: "
-                    f"{list(df.columns)})."
+                    f"correlation_matrix: window_options entries must be "
+                    f"strings (got {type(w).__name__})"
                 )
-            sorted_df = df.sort_values(time_col, kind="mergesort")
-            time_seq = _col_to_list(sorted_df, time_col)
-            data_df = sorted_df
+            if w != "all" and not (w.endswith("d") and w[:-1].isdigit()):
+                raise ValueError(
+                    f"correlation_matrix: window_options entry '{w}' must "
+                    f"be 'all' or '<int>d' (e.g. '63d', '252d')"
+                )
+            window_options.append(w)
+        if not window_options:
+            window_options = list(default_windows)
+        if "all" not in window_options:
+            window_options = ["all"] + window_options
     else:
+        raise ValueError(
+            "correlation_matrix: window_options must be a list of strings"
+        )
+    window_default = (mapping.get("window") or "all").lower()
+    if window_default not in window_options:
+        raise ValueError(
+            f"correlation_matrix: window='{window_default}' must be one "
+            f"of window_options={window_options}"
+        )
+
+    raw_transforms = mapping.get("transforms")
+    if raw_transforms is None:
+        runtime_transforms = list(_DEFAULT_STUDIO_TRANSFORMS)
+    elif isinstance(raw_transforms, (list, tuple)):
+        runtime_transforms = [t for t in raw_transforms if isinstance(t, str)]
+        if not runtime_transforms:
+            runtime_transforms = list(_DEFAULT_STUDIO_TRANSFORMS)
+    else:
+        raise ValueError(
+            "correlation_matrix: transforms must be a list of strings"
+        )
+    if "raw" not in runtime_transforms:
+        runtime_transforms = ["raw"] + runtime_transforms
+    if transform not in runtime_transforms:
+        runtime_transforms.append(transform)
+
+    # Resolve the order column unconditionally so the runtime drawer
+    # can window any transform (not only order-aware ones). When the
+    # author hasn't pinned ``order_by`` we still try to auto-detect a
+    # datetime-like column; only an order-aware *initial* transform
+    # raises if nothing resolves -- everything else falls back to row
+    # order with the runtime Window dropdown hidden.
+    order_by = mapping.get("order_by")
+    import pandas as pd
+    time_col: Optional[str] = None
+    if order_by and order_by in df.columns:
+        time_col = order_by
+    elif order_by is None:
+        for c in df.columns:
+            try:
+                if pd.api.types.is_datetime64_any_dtype(df[c]):
+                    time_col = c
+                    break
+            except Exception:
+                continue
+    if time_col:
+        sorted_df = df.sort_values(time_col, kind="mergesort")
+        time_seq = _col_to_list(sorted_df, time_col)
+        data_df = sorted_df
+    else:
+        if (transform in ("change", "pct_change", "yoy_change", "yoy_pct")
+                or transform.startswith("rolling_zscore_")):
+            raise ValueError(
+                f"correlation_matrix: transform '{transform}' is "
+                f"order-aware; provide mapping.order_by pointing to "
+                f"a date/time column (available columns: "
+                f"{list(df.columns)})."
+            )
         time_seq = None
         data_df = df
 
-    # Apply per-column transform.
+    # Capture raw per-column values BEFORE transform so the runtime
+    # drawer can re-correlate against any transform / window the user
+    # picks. Stored as plain Python floats (None for NaN/missing) for
+    # JSON serialisation.
+    raw_values: Dict[str, List[Optional[float]]] = {}
+    for c in cols:
+        raw_values[str(c)] = _col_to_list(data_df, c)
+
+    # Convert sorted time column to epoch-ms (None for NaT) for the
+    # JS payload AND for compile-time windowing. Match _ccParseT on
+    # the JS side, which expects ms-since-epoch.
+    times_ms: Optional[List[Optional[int]]] = None
+    as_of_iso: Optional[str] = None
+    if time_seq is not None:
+        times_ms = []
+        last_valid: Optional[Any] = None
+        for t in time_seq:
+            if t is None:
+                times_ms.append(None)
+                continue
+            try:
+                ts = pd.Timestamp(t)
+            except (ValueError, TypeError):
+                times_ms.append(None)
+                continue
+            if pd.isna(ts):
+                times_ms.append(None)
+            else:
+                times_ms.append(int(ts.value // 1_000_000))
+                last_valid = ts
+        if last_valid is not None:
+            as_of_iso = last_valid.strftime("%Y-%m-%d")
+
+    # Apply per-column transform for the first-paint matrix.
     transformed: Dict[str, List[Optional[float]]] = {}
     for c in cols:
-        raw_vals = _col_to_list(data_df, c)
-        transformed[str(c)] = _compute_transform(raw_vals, time_seq,
-                                                    transform)
+        transformed[str(c)] = _compute_transform(raw_values[str(c)],
+                                                    time_seq, transform)
+
+    # Apply window slicing for the first-paint matrix. The transform
+    # ran on the full history (so rolling_zscore_252 and YoY have
+    # their full lookback) but the correlation only looks at the last
+    # N obs. JS mirrors this: transform then window then correlate.
+    sliced = _corr_apply_window(transformed, times_ms, window_default)
 
     # Compute correlation matrix.
     n_cols = len(cols)
@@ -3130,7 +3427,7 @@ def build_correlation_matrix(df, mapping: Dict[str, Any],
     cell_text: Dict[Tuple[int, int], Optional[float]] = {}
     for i, ci in enumerate(cols):
         for j, cj in enumerate(cols):
-            r = _corr(transformed[str(ci)], transformed[str(cj)],
+            r = _corr(sliced[str(ci)], sliced[str(cj)],
                        method=method, min_periods=min_periods)
             # ECharts heatmap cells: [xIndex, yIndex, value] where the
             # y axis is reversed so reading top-to-bottom matches the
@@ -3216,12 +3513,36 @@ def build_correlation_matrix(df, mapping: Dict[str, Any],
         f"return rn + ' x ' + cn + ': r=' + (+r).toFixed({decimals}); }}"
     )
 
-    suffix = _transform_axis_suffix(transform)
-    if suffix and ctx.title is None:
-        # When the author didn't set an explicit title, hint the
-        # transform in the chart title so a "raw" vs "%-change"
-        # correlation can't get accidentally confused.
-        opt["title"]["text"] = f"Correlation matrix{suffix}"
+    # Title: leave whatever ``_base_option(ctx)`` already set. The
+    # dashboard pipeline blanks it when the widget tile owns the
+    # title; rewriting it at runtime would cause double headlines.
+    # Standalone ``make_echart`` renders preserve ctx.title as-is.
+
+    # Subtitle: pack method + transform + window + as_of so the user
+    # always knows what they're looking at. Author-supplied subtitle
+    # (ctx.subtitle) wins. JS rewrites this on every drawer change.
+    if not ctx.subtitle:
+        opt["title"]["subtext"] = _corr_subtitle(
+            method, transform, window_default, as_of_iso
+        )
+
+    # Embed the runtime sidecar block so the dashboard drawer can
+    # re-correlate on Transform / Window / Method change. JS reads
+    # this off SPECS[cid]._corr_runtime.
+    opt["_corr_runtime"] = {
+        "columns":            [str(c) for c in cols],
+        "values":             {str(c): raw_values[str(c)] for c in cols},
+        "times":              times_ms,
+        "method":             method,
+        "min_periods":        int(min_periods),
+        "decimals":           int(decimals),
+        "transform_default":  transform,
+        "transforms":         list(runtime_transforms),
+        "window_default":     window_default,
+        "window_options":     list(window_options),
+        "as_of":              as_of_iso,
+        "subtitle_author":    ctx.subtitle or "",
+    }
 
     _layout_long_category_axis(opt, "yAxis")
     _autorotate_x_category_labels(opt, ctx)
@@ -5514,6 +5835,7 @@ def make_echart(
         _apply_annotations(opt, combined_annotations)
 
     _install_default_axis_decimal_cap(opt)
+    _install_default_tooltip_decimal_cap(opt)
 
     ok, warnings = validate_option(opt)
     chart_id = _compute_chart_id(opt)

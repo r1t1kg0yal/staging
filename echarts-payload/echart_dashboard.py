@@ -2778,6 +2778,7 @@ def _spec_to_option(
     from echart_studio import (
         _BUILDER_DISPATCH, _build_context, _apply_annotations,
         _install_default_axis_decimal_cap,
+        _install_default_tooltip_decimal_cap,
     )
 
     if chart_type not in _BUILDER_DISPATCH:
@@ -2836,6 +2837,10 @@ def _spec_to_option(
     # explicit formatter. Idempotent and tolerant of axes already
     # carrying a custom formatter.
     _install_default_axis_decimal_cap(opt)
+    # Cap tooltip-value precision at MAX_DASHBOARD_DECIMALS for any
+    # tooltip the builder + per-spec overrides left without a custom
+    # ``formatter`` or ``valueFormatter``. Idempotent.
+    _install_default_tooltip_decimal_cap(opt)
     return opt
 
 
@@ -3232,21 +3237,185 @@ def _apply_post_build_polish(opt: Dict[str, Any],
     _inject_default_chart_zoom(opt, chart_zoom_opt)
 
 
+def _resolve_chart_zoom_opt(opt: Any) -> tuple:
+    """Translate the author-facing ``chart_zoom`` value into
+    ``(want_inside, want_slider)``.
+
+    Accepts:
+      * ``None`` / ``True``               -> ``(True, True)``  -- default
+      * ``False``                         -> ``(False, False)`` -- full opt-out
+      * ``{"slider": bool, "inside": bool}`` -- granular; missing keys
+        default to True
+      * anything else                     -> treated as truthy
+    """
+    if opt is False:
+        return (False, False)
+    if isinstance(opt, dict):
+        return (bool(opt.get("inside", True)),
+                bool(opt.get("slider", True)))
+    return (True, True)
+
+
+def _data_span_seconds(opt: Dict[str, Any]):
+    """Best-effort estimate of the time-axis data span in seconds.
+
+    Probes ``opt.dataset[*].source`` first (col 0 = x), then falls back
+    to inline ``opt.series[*].data`` for charts without a dataset rewire
+    (sparkline / KPI tile shape). Parses ECharts' usual time-string
+    forms: ``"%Y-%m-%d"``, ``"%Y-%m-%d %H:%M:%S"``, ``"%Y-%m-%dT%H:%M:%S"``,
+    with optional tz offset. Returns ``None`` if the span can't be
+    determined (which the caller treats as "fall back to the default
+    ``"Mon YYYY"`` formatter")."""
+    import datetime as _dt
+
+    def _parse(v) -> "Optional[float]":
+        if isinstance(v, (int, float)):
+            return float(v) / 1000.0
+        if not isinstance(v, str) or not v:
+            return None
+        s = v.replace(" ", "T", 1)
+        try:
+            return _dt.datetime.fromisoformat(s).timestamp()
+        except (ValueError, TypeError):
+            return None
+
+    first_x = last_x = None
+
+    dataset = opt.get("dataset") or []
+    if isinstance(dataset, dict):
+        dataset = [dataset]
+    for ds in dataset:
+        if not isinstance(ds, dict):
+            continue
+        src = ds.get("source") or []
+        if not isinstance(src, list) or len(src) < 2:
+            continue
+        body = src[1:]
+        head = body[0]
+        tail = body[-1]
+        if isinstance(head, list) and head:
+            first_x = first_x if first_x is not None else _parse(head[0])
+        if isinstance(tail, list) and tail:
+            last_x = last_x if last_x is not None else _parse(tail[0])
+        if first_x is not None and last_x is not None:
+            break
+
+    if first_x is None or last_x is None:
+        for s in opt.get("series") or []:
+            if not isinstance(s, dict):
+                continue
+            data = s.get("data") or []
+            if not isinstance(data, list) or not data:
+                continue
+            head = data[0]
+            tail = data[-1]
+            if isinstance(head, list) and head:
+                first_x = first_x if first_x is not None else _parse(head[0])
+            if isinstance(tail, list) and tail:
+                last_x = last_x if last_x is not None else _parse(tail[0])
+            if first_x is not None and last_x is not None:
+                break
+
+    if first_x is None or last_x is None:
+        return None
+    return abs(last_x - first_x)
+
+
+def _slider_label_formatter_for_span(span_seconds) -> str:
+    """Pick a JS labelFormatter for the dataZoom slider based on the
+    data's actual time span.
+
+    Buckets (chosen to keep slider tick labels readable across the
+    full PRISM corpus -- 5y daily panels, 30y FRED series, 5d intraday
+    event windows, 12h same-day intraday tracks):
+
+      span <= 1 day        -> ``"HH:MM"``       (intraday)
+      span <= 14 days      -> ``"Mon dd HH:MM"`` (multi-day intraday)
+      span <= 1 year       -> ``"Mon dd"``      (daily within year)
+      span > 1 year (or unknown) -> ``"Mon YYYY"`` (multi-year, current default)
+
+    All formatters share the same NaN-guard prefix so the slider never
+    crashes on a stray timestamp it can't parse.
+    """
+    DAY = 86400.0
+    HH_MM = (
+        "function(v){"
+        " var d = new Date(v);"
+        " if (isNaN(d.getTime())) return v;"
+        " function p(n){return n<10?'0'+n:''+n;}"
+        " return p(d.getHours())+':'+p(d.getMinutes());"
+        "}"
+    )
+    DD_MMM_HH_MM = (
+        "function(v){"
+        " var d = new Date(v);"
+        " if (isNaN(d.getTime())) return v;"
+        " var m = ['Jan','Feb','Mar','Apr','May','Jun',"
+        " 'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];"
+        " function p(n){return n<10?'0'+n:''+n;}"
+        " return m+' '+d.getDate()+' '+p(d.getHours())+':'+p(d.getMinutes());"
+        "}"
+    )
+    DD_MMM = (
+        "function(v){"
+        " var d = new Date(v);"
+        " if (isNaN(d.getTime())) return v;"
+        " var m = ['Jan','Feb','Mar','Apr','May','Jun',"
+        " 'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];"
+        " return m+' '+d.getDate();"
+        "}"
+    )
+    MMM_YYYY = (
+        "function(v){"
+        " var d = new Date(v);"
+        " if (isNaN(d.getTime())) return v;"
+        " var m = ['Jan','Feb','Mar','Apr','May','Jun',"
+        " 'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];"
+        " return m + ' ' + d.getFullYear();"
+        "}"
+    )
+    if span_seconds is None:
+        return MMM_YYYY
+    if span_seconds <= DAY:
+        return HH_MM
+    if span_seconds <= 14 * DAY:
+        return DD_MMM_HH_MM
+    if span_seconds <= 365 * DAY:
+        return DD_MMM
+    return MMM_YYYY
+
+
 def _inject_default_chart_zoom(opt: Dict[str, Any],
                                   chart_zoom_opt: Any) -> None:
     """Inject inside + slider dataZoom for time-axis charts.
 
     Skip when:
-      * ``chart_zoom_opt`` is explicitly False
+      * ``chart_zoom_opt`` resolves to ``(False, False)`` -- full opt-out
       * ``opt`` already declares its own dataZoom (e.g. candlestick)
       * the chart has no time-typed xAxis (heatmaps, pies, polar shapes)
       * the chart uses a non-cartesian coordinate system (radar, polar)
+
+    Granular control via ``chart_zoom`` value:
+
+      * ``None`` / ``True``                 -- both inside + slider (default)
+      * ``False``                           -- nothing injected
+      * ``{"slider": bool, "inside": bool}`` -- pick exactly the components you want.
+        Useful for: ``{"slider": False}`` on dashboards where vertical
+        space is tight (slider claims ~28px), or ``{"inside": False}``
+        on small tiles where the inside-pan would steal page-scroll.
+
+    The slider's ``labelFormatter`` is auto-selected from the data span
+    via :func:`_slider_label_formatter_for_span` -- the previous
+    ``"Mon YYYY"`` default became useless when intraday data started
+    rendering correctly post-strftime-fix (a 12h chart with both ends
+    labelled "Apr 2026" tells the user nothing).
 
     The slider is sized to clear the grid bottom; we bump the grid's
     bottom padding when needed so the slider doesn't overlap the
     x-axis tick labels.
     """
-    if chart_zoom_opt is False:
+    want_inside, want_slider = _resolve_chart_zoom_opt(chart_zoom_opt)
+    if not want_inside and not want_slider:
         return
     if "dataZoom" in opt:
         return
@@ -3263,38 +3432,44 @@ def _inject_default_chart_zoom(opt: Dict[str, Any],
         return
 
     # Slider sits ~28px tall at bottom: 18px control + 10px breathing
-    # room. Push the grid up if its bottom padding would clash.
+    # room. Only bump grid padding when we're actually injecting it.
     slider_height = 18
     slider_bottom = 10
     slider_total = slider_height + slider_bottom + 14  # 14px clearance
 
-    grid = opt.get("grid")
-    if isinstance(grid, dict):
-        grids = [grid]
-    elif isinstance(grid, list):
-        grids = grid
-    else:
-        grids = []
-    for g in grids:
-        if not isinstance(g, dict):
-            continue
-        cur = g.get("bottom")
-        try:
-            cur_n = int(cur) if cur is not None else 0
-        except (TypeError, ValueError):
-            cur_n = 0
-        if cur_n < slider_total:
-            g["bottom"] = slider_total
+    if want_slider:
+        grid = opt.get("grid")
+        if isinstance(grid, dict):
+            grids = [grid]
+        elif isinstance(grid, list):
+            grids = grid
+        else:
+            grids = []
+        for g in grids:
+            if not isinstance(g, dict):
+                continue
+            cur = g.get("bottom")
+            try:
+                cur_n = int(cur) if cur is not None else 0
+            except (TypeError, ValueError):
+                cur_n = 0
+            if cur_n < slider_total:
+                g["bottom"] = slider_total
 
-    opt["dataZoom"] = [
-        {
+    span_s = _data_span_seconds(opt)
+    label_formatter = _slider_label_formatter_for_span(span_s)
+
+    dataZoom: List[Dict[str, Any]] = []
+    if want_inside:
+        dataZoom.append({
             "type": "inside",
             "xAxisIndex": time_axis_indices,
             "zoomLock": False,
             "moveOnMouseMove": True,
             "preventDefaultMouseMove": False,
-        },
-        {
+        })
+    if want_slider:
+        dataZoom.append({
             "type": "slider",
             "xAxisIndex": time_axis_indices,
             "height": slider_height,
@@ -3311,17 +3486,9 @@ def _inject_default_chart_zoom(opt: Dict[str, Any],
                 "lineStyle": {"color": "#94a3b8", "opacity": 0.45},
                 "areaStyle": {"color": "#94a3b8", "opacity": 0.10},
             },
-            "labelFormatter": (
-                "function(v){"
-                " var d = new Date(v);"
-                " if (isNaN(d.getTime())) return v;"
-                " var m = ['Jan','Feb','Mar','Apr','May','Jun',"
-                " 'Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];"
-                " return m + ' ' + d.getFullYear();"
-                "}"
-            ),
-        },
-    ]
+            "labelFormatter": label_formatter,
+        })
+    opt["dataZoom"] = dataZoom
 
 
 def _format_placeholder_subtext(triage: Dict[str, Any],
