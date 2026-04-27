@@ -103,13 +103,69 @@ def _df_or_none(df):
     return None
 
 
+def _format_datetime_series(ser):
+    """Convert a datetime64 Series to ISO-8601 strings, preserving sub-day
+    component when present.
+
+    Output formats (matched to what live PRISM emits and what ECharts
+    parses on the JS side via ``Date.parse``):
+
+      * date-only (every value is calendar-day-aligned)  -> ``"%Y-%m-%d"``
+      * sub-day, tz-naive                                -> ``"%Y-%m-%d %H:%M:%S"``
+      * sub-day, tz-aware                                -> ``isoformat(sep=' ')``
+                                                            e.g. ``"2026-04-27 06:38:00-04:00"``
+
+    NaT values are emitted as ``None`` (so JSON serialization keeps
+    them out of the data; the chart code's existing
+    ``isNaN(d.getTime())`` checks handle them).
+
+    The asymmetry vs ``%z`` (no colon) is deliberate -- PRISM live
+    manifests use the colon form, and matching it keeps staging /
+    PRISM byte-identical on this surface."""
+    import pandas as pd
+    if not pd.api.types.is_datetime64_any_dtype(ser):
+        return ser
+    valid = ser.dropna()
+    if len(valid) == 0:
+        return ser.dt.strftime("%Y-%m-%d")
+    has_sub_day = bool(((valid.dt.hour != 0)
+                          | (valid.dt.minute != 0)
+                          | (valid.dt.second != 0)
+                          | (valid.dt.microsecond != 0)
+                          | (valid.dt.nanosecond != 0)).any())
+    if not has_sub_day:
+        return ser.dt.strftime("%Y-%m-%d")
+    if ser.dt.tz is not None:
+        return ser.apply(
+            lambda x: None if pd.isna(x) else x.isoformat(sep=' '))
+    return ser.dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_datetime_value(v):
+    """Per-value version of ``_format_datetime_series``. Returns the
+    input unchanged when it isn't a ``pd.Timestamp``; returns ``None``
+    on NaT."""
+    import pandas as pd
+    if not isinstance(v, pd.Timestamp):
+        return v
+    if pd.isna(v):
+        return None
+    has_sub_day = bool(v.hour or v.minute or v.second
+                          or v.microsecond or v.nanosecond)
+    if not has_sub_day:
+        return v.strftime("%Y-%m-%d")
+    if v.tz is not None:
+        return v.isoformat(sep=' ')
+    return v.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _rows(df, cols: Sequence[str]) -> List[List[Any]]:
     """Return df[cols].values as a list of plain Python rows."""
     import pandas as pd
     sub = df[list(cols)].copy()
     for c in cols:
         if pd.api.types.is_datetime64_any_dtype(sub[c]):
-            sub[c] = sub[c].dt.strftime("%Y-%m-%d")
+            sub[c] = _format_datetime_series(sub[c])
     rows = []
     for _, r in sub.iterrows():
         row = []
@@ -146,7 +202,7 @@ def _col_to_list(df, col: str) -> List[Any]:
     import pandas as pd
     ser = df[col]
     if pd.api.types.is_datetime64_any_dtype(ser):
-        ser = ser.dt.strftime("%Y-%m-%d")
+        ser = _format_datetime_series(ser)
     out = []
     for v in ser:
         if v is None or (isinstance(v, float) and v != v):

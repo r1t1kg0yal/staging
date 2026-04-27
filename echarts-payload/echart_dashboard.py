@@ -1497,7 +1497,9 @@ def df_to_source(df_or_source: Any) -> List[List[Any]]:
 
     Accepts:
         * pandas DataFrame  -- converted; datetime columns emit as ISO-8601
-          strings; NaN becomes None.
+          strings (date-only when the column is calendar-day-aligned,
+          ``"%Y-%m-%d %H:%M:%S"`` / ``isoformat(sep=' ')`` when any
+          sub-day component is present); NaN / NaT becomes None.
         * list              -- returned as-is (assumed already in source shape).
 
     Raises TypeError on anything else. This is the canonical bridge between
@@ -1507,11 +1509,12 @@ def df_to_source(df_or_source: Any) -> List[List[Any]]:
     """
     try:
         import pandas as pd
+        from echart_studio import _format_datetime_series
         if isinstance(df_or_source, pd.DataFrame):
             df = df_or_source.copy()
             for c in df.columns:
                 if pd.api.types.is_datetime64_any_dtype(df[c]):
-                    df[c] = df[c].dt.strftime("%Y-%m-%d")
+                    df[c] = _format_datetime_series(df[c])
             source: List[List[Any]] = [list(df.columns)]
             for _, row in df.iterrows():
                 source.append([_scalarize(v) for v in row])
@@ -1957,6 +1960,7 @@ def _columns_to_source(columns: Dict[str, "pd.Series"],
                           column_order: List[str]) -> List[List[Any]]:
     """Convert a {col: Series} dict back to list-of-lists source shape."""
     import pandas as pd
+    from echart_studio import _format_datetime_value
     if not column_order:
         return [[]]
     n = max(len(columns[c]) for c in column_order)
@@ -1983,7 +1987,7 @@ def _columns_to_source(columns: Dict[str, "pd.Series"],
                 except Exception:
                     pass
             if isinstance(v, pd.Timestamp):
-                row.append(v.strftime("%Y-%m-%d"))
+                row.append(_format_datetime_value(v))
                 continue
             row.append(v)
         rows.append(row)
