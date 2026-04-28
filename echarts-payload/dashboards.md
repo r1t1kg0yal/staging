@@ -101,7 +101,7 @@ save_manifest           # manifest -> JSON file
 df_to_source            # DataFrame -> canonical row-of-lists source form
 ```
 
-`compile_dashboard()` raises by default (`strict=True`) on any error-severity diagnostic; `strict=False` keeps going so PRISM gets a single round-trip list of fixes. One theme (`gs_clean`); three palettes (`gs_primary`, `gs_blues`, `gs_diverging`).
+`compile_dashboard()` raises by default (`strict=True`) on any error-severity diagnostic. `strict=False` is an inner-loop discovery mode — it keeps going so PRISM can see every cosmetic / advisory issue in one round-trip. **`strict=False` is for in-session iteration only; the persisted `scripts/build.py` MUST use `strict=True`.** A short list of load-bearing error codes (`chart_mapping_column_missing`, `chart_dataset_empty`, `kpi_source_*`, `table_column_field_missing`, `filter_field_missing_in_target`, `chart_build_failed`, …) raise regardless of `strict` — these are the errors that would otherwise ship a chart with `(no data)`, a KPI tile with `--`, an empty table cell, or a filter that silently filters nothing. The full list lives in `echart_dashboard.ALWAYS_BLOCKING_ERROR_CODES`. One theme (`gs_clean`); three palettes (`gs_primary`, `gs_blues`, `gs_diverging`).
 
 ---
 
@@ -202,7 +202,6 @@ The remaining fields are optional but every persistent dashboard should at least
 | `sources` | list[str] | Source names (`["GS Market Data", "Haver"]`) |
 | `summary` | str \| `{title, body}` | Always-visible markdown banner above row 1 (today's read) |
 | `refresh_frequency` | str | `hourly` / `daily` / `weekly` / `manual`; controls the hourly runner — manual means `Refresh` is button-driven only |
-| `refresh_enabled` | bool | Default `True`. Setting `False` hides the always-on `Refresh` button (escape hatch for one-shot dashboards whose data source cannot be re-pulled) |
 | `tags` / `version` | list[str] / str | Echoed into the registry; manifest version string |
 | `api_url` / `status_url` | str | Refresh / status endpoint overrides |
 | `shared` / `shared_at` | bool / str | Compile-time snapshot of community-share state. `shared: True` means this dashboard is published to the `/dashboards/` Community section. `shared_at` is the ISO timestamp it was first shared. The runtime button reads live state from `window.PRISM_DASHBOARD_SHARED` if injected by the serving view; falls back to this snapshot otherwise. Defaults: `shared: False`, `shared_at: null` |
@@ -233,7 +232,7 @@ Left-to-right, the four buttons every persistent dashboard renders:
 | # | Button | Behaviour | Gating |
 |---|--------|-----------|--------|
 | 1 | `Methodology` | Click → markdown popup with `metadata.methodology` rendered | Always present; `metadata.methodology` is required so the button always opens to real content |
-| 2 | `Refresh` | Click → POST to `api_url` (default `/api/dashboard/refresh/`) and poll `status_url` until completion. Failures pop the structured error modal with a "Copy markdown for PRISM" button | Requires `metadata.kerberos` + `metadata.dashboard_id`. Hidden when `refresh_enabled: False` (rare escape hatch). Hidden on community / observatory views (`PRISM_VIEWER !== metadata.kerberos`) |
+| 2 | `Refresh` | Click → POST to `api_url` (default `/api/dashboard/refresh/`) and poll `status_url` until completion. Failures pop the structured error modal with a "Copy markdown for PRISM" button | Requires `metadata.kerberos` + `metadata.dashboard_id`. Non-suppressible from the manifest -- there is no opt-out flag. Every persistent dashboard renders this button; if a server-side refresh is genuinely impossible (registry disabled, runner namespace gap), the click surfaces the failure in the structured error modal |
 | 3 | `Share` / `Sharing` | Click on `Share` → POST `{shared: true}` to the share-toggle endpoint, label flips to `Sharing`. Click on `Sharing` → confirm modal, POST `{shared: false}` | Requires `metadata.kerberos` + `metadata.dashboard_id`. Hidden unless `window.PRISM_VIEWER === metadata.kerberos` (server-side gate is enforced separately by the registry-path construction in §6.8 of `prism/dashboards-portal.md`). Hidden entirely on Observatory dashboards (`PRISM_IS_OBSERVATORY = true`) |
 | 4 | `Download ▾` | Click opens a dropdown with three menu items: `Panel` (full view as a single PNG via html2canvas), `Charts` (one PNG per `widget: chart`), `Excel` (one workbook with one sheet per `widget: table`). The `Excel` item is hidden when no table widgets exist. Click outside / Esc closes the menu | Always present |
 
@@ -241,11 +240,11 @@ The chrome also carries the `theme-toggle` (always on) and the `Data as of <ts>`
 
 #### 2.3.2 "Why is my Refresh button missing?"
 
-The runtime emits `console.warn('[prism] Refresh button hidden: ...')` naming the missing field(s) whenever the JS gate fires. Three causes:
+The runtime emits `console.warn('[prism] Refresh button hidden: ...')` naming the missing field(s) whenever the JS gate fires. Single cause:
 
-1. **Missing metadata.** `compile_dashboard` rejects this at validate time, but legacy `dashboard.html` files from before that guard can still be on S3. Recompile via Tool 2.
-2. **`metadata.refresh_enabled: False`.** Rare escape hatch; drop the field or set `True` and recompile.
-3. **Cross-user / Observatory view.** Only the author refreshes. Visit your own `/profile/dashboards/<id>/`.
+- **Missing `metadata.kerberos` or `metadata.dashboard_id`.** `compile_dashboard` rejects this at validate time, but legacy `dashboard.html` files from before that guard can still be on S3. Recompile via Tool 2.
+
+There is no manifest-side opt-out: the `metadata.refresh_enabled` field has been retired. Old manifests that still set it validate fine (the field is silently ignored). The button always renders for any persistent dashboard with `kerberos` + `dashboard_id`. If a refresh genuinely cannot run (server-side registry disabled, runner namespace gap), the click surfaces the failure in the error modal; the button does not vanish.
 
 ### 2.4 `compile_dashboard` parameters
 
@@ -258,7 +257,7 @@ The runtime emits `console.warn('[prism] Refresh button hidden: ...')` naming th
 | `write_html` / `write_json` | Default `True`. `False` in sandbox so PRISM writes via `s3_manager.put()` |
 | `save_pngs=True` | Render each chart widget to PNG (titles/subtitles baked in) |
 | `png_dir` / `png_scale=2` | PNG output dir / device-pixel multiplier (1=baseline, 2=retina, 4=print) |
-| `strict=True` (default) | Hard-fail on any error-severity diagnostic. `strict=False` keeps going so PRISM can fix all in one round-trip |
+| `strict=True` (default) | Hard-fail on any error-severity diagnostic. `strict=False` keeps going for cosmetic / advisory diagnostics so PRISM can fix all in one round-trip — **in-session iteration only**; the persisted `scripts/build.py` MUST use `strict=True`. A load-bearing allow-list (`ALWAYS_BLOCKING_ERROR_CODES`) raises regardless of this flag |
 | `user_id` | Stamped into editor HTML / spec sheet localStorage scoping |
 
 Returns `DashboardResult(success, html_path, manifest_path, html, warnings, diagnostics, error_message)`. `result.html` is the raw HTML string (handy when `write_html=False`).
@@ -977,6 +976,8 @@ Supported `where` ops: `==`, `!=`, `>`, `>=`, `<`, `<=`. Dependent filter's exis
 
 Every chart with `time` x-axis ships with two `dataZoom` controls injected at compile time (independent of any `dateRange` filter): `type: "inside"` (mouse wheel / pinch zoom + click-and-drag pan) and `type: "slider"` (draggable slider beneath the grid). Full dataset embedded; slider clips visible window. `grid.bottom` auto-bumps. Builders that already declared their own `dataZoom` (e.g. candlestick) are left alone.
 
+The injected zoom is **per-chart and local by default** -- dragging the slider on one chart does not move the slider on a sibling chart in the same panel, even when both target the same dataset. The window also survives unrelated filter changes: a select / radio / numberRange filter rerendering the chart will re-apply its compile-time spec but preserve the current in-chart zoom window. Three explicit paths can move the window across charts: (a) a `dateRange` global filter dropdown change (§5.1) translates into a `dispatchAction({type:'dataZoom'})` on every targeted chart, (b) an authored `Link` with `sync: ["dataZoom"]` (§6) wires the affected charts into an `echarts.connect()` group so drags propagate live, and (c) the filter-reset button intentionally snaps every chart back to its default window. Everything else stays local.
+
 The slider's `labelFormatter` is auto-selected from the actual data span — `"HH:MM"` for sub-day data, `"Mon dd HH:MM"` for multi-day-but-under-two-weeks, `"Mon dd"` for daily-within-a-year, `"Mon YYYY"` for multi-year. So a 12h intraday chart's slider labels read `"06:30"` / `"18:30"`, a 5y EOD chart's labels read `"Apr 2021"` / `"Apr 2026"`, and so on.
 
 `chart_zoom` value:
@@ -1032,6 +1033,8 @@ Turn a data-point click on one chart into a filter change driving downstream wid
 ```
 
 `sync` values: `axis`, `tooltip`, `legend`, `dataZoom`. At load, runtime sets `chart.group = group` and calls `echarts.connect(group)`.
+
+`sync: ["dataZoom"]` is the **only** mechanism that mirrors a slider drag live across charts -- without an explicit Link the in-chart zoom is always local (§5.3). Use it sparingly: it's the right call when a panel is comparing the same window across several series (curve / spread / vol on aligned dates) and the wrong call when each chart is independently navigable.
 
 `brush.type`: `rect`, `polygon`, `lineX`, `lineY`. When user brushes on any member chart, runtime extracts `coordRange`, filters linked charts' datasets to brushed range on x axis, re-renders all linked charts. Clearing brush resets dataset.
 
@@ -1162,6 +1165,14 @@ print(f'[verify] rates_eod: shape={df.shape}'); print(df.head()); print(df.dtype
 
 #### Tool 2 — author + persist + exec `build.py` FROM S3
 
+**Five non-negotiables for the persisted `build.py`** — every one of these has been observed as a real PRISM-authored bug that shipped a known-broken dashboard:
+
+1. `compile_dashboard(..., strict=True)` — explicit, no `strict=False`. `strict=False` is a discovery-mode tool for in-session iteration; the refresh runner re-execs `build.py` every day and `strict=False` ships broken artifacts with `(no data)` placeholder cards. The compiler additionally hard-fails a load-bearing allow-list of error codes (missing column, empty dataset, KPI source unresolvable, table column missing, filter field missing, builder exception) regardless of `strict`, so a `strict=False` build script will still raise on the failure modes that matter — but the SSOT is `strict=True`.
+2. **No `try/except` around `compile_dashboard()`.** A swallowed `ValueError` silently re-uploads stale HTML or, worse, no HTML at all while the refresh runner records `status="success"`. Let exceptions propagate.
+3. `if not r.success: raise ValueError(...)` — never `print()` and continue, never write `r.html` past the failure check.
+4. **Every CSV gets renamed to plain English (Rule 1) BEFORE handing it to `populate_template`.** Loading `next_meeting_probs.csv` whose columns are Haver codes (`PFNP@DAILY`, ...) and feeding it straight into a manifest whose chart spec maps `mapping.x="outcome"` is the canonical failure mode. The rename step is non-optional even when there are 5+ datasets in the dashboard.
+5. **Use `compile_dashboard()` directly (the dict-based API), NOT `Dashboard(...)` + `.build()`.** The OOP class-builder bypasses `chart_data_diagnostics` entirely; column-mapping mistakes silently fall through to `(no data)` placeholders.
+
 ```python
 import io
 df = pd.read_csv(io.BytesIO(s3_manager.get(f'{DASHBOARD_PATH}/data/rates_eod.csv')),
@@ -1184,7 +1195,6 @@ initial_manifest = {
         "generated_at":      datetime.now(timezone.utc).isoformat(),
         "sources":           ["GS Market Data"],
         "refresh_frequency": "daily",
-        "refresh_enabled":   True,
         "tags":              ["rates"],
     },
     "datasets": {"rates_eod": df.reset_index()},
@@ -1422,10 +1432,10 @@ The refresh runner's `_build_exec_namespace` injects `pd`, `np`, `io`, `json`, `
 
 Consequence: a `pull_data.py` using any of those builds cleanly during the in-session Tool 1 exec (the build-time exec runs in the sandbox, where they ARE injected) but the daily refresh raises `NameError`.
 
-Workarounds while the gap closes:
+Behaviour when the gap fires:
 
 - **Single-source dashboards using only the four pull primitives** refresh cleanly with no caveat.
-- **Multi-source dashboards needing alt-data** are buildable today but should set `metadata.refresh_enabled = False` until the runner namespace expands. Surface this trade-off explicitly.
+- **Multi-source dashboards needing alt-data** are still buildable; the always-on `Refresh` button still renders (there is no manifest opt-out), and the daily/hourly runner attempt produces a `runner_error` with the offending name. The user clicks `Refresh`, the structured error modal pops with the full `NameError`, and the "Copy markdown for PRISM" button hands the failure back for triage. Until the runner namespace expands, set `refresh_frequency: "manual"` on the registry entry to suppress the cron attempt; keep the manifest as-is so the manual refresh remains one click away.
 
 Structural fix is PRISM-side: extend `_build_exec_namespace` to mirror the `execute_analysis_script` sandbox's data-retrieval bundle. Tracked in `prism/_changelog.md`.
 
@@ -1551,6 +1561,10 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 
 | Anti-pattern | Do instead |
 |--------------|-----------|
+| Persisting `scripts/build.py` with `compile_dashboard(..., strict=False)` | `strict=True` is the SSOT for the persisted build script. `strict=False` is for in-session iteration only and has been observed shipping `(no data)` placeholder cards as `last_refresh_status="success"`. The compiler also hard-fails a load-bearing allow-list (`ALWAYS_BLOCKING_ERROR_CODES`) regardless of `strict`, so even the deviant case raises on the failures that matter — but the SSOT is `strict=True` |
+| Wrapping `compile_dashboard()` in `try/except` so the build "succeeds" past validation failures | Let the `ValueError` propagate. The refresh runner catches it, records `last_refresh_status="error"`, and the structured error modal surfaces the diagnostic to the user |
+| Loading CSV files into `populate_template` without renaming columns to plain English (Rule 1) | Every `pd.read_csv(...)` is followed by a `df.columns = [...]` rename. Vendor-native column names (Haver codes like `PFNP@DAILY`, market-data coordinate names like `IR_USD_FOMCJump_30Apr2026_Rate`) into a manifest with chart specs that map `mapping.x="outcome"` / `mapping.x="meeting"` is the canonical failure mode |
+| Building a dashboard via `Dashboard(...)` constructor + `.build()` (the OOP class-builder API) | Use the dict-based `compile_dashboard()` flow. `Dashboard.build()` skips `chart_data_diagnostics` entirely; column-mapping mistakes silently fall through to placeholder cards |
 | Saving a user dashboard only to `SESSION_PATH`; skipping the refresh button by editing HTML | Persist to `users/{kerberos}/dashboards/...`; set `metadata.kerberos` + `dashboard_id` |
 | Pulling data and/or compiling in-session, *then* writing scripts to S3 as an afterthought — two divergent code paths | Write the script to S3 first, `s3_manager.get` it back, `exec` it |
 | Inlining data pull + manifest build into one tool call so neither `pull_data.py` nor `build.py` exist as standalone files | Use the three-tool model: Tool 1 persists+execs `pull_data.py`; Tool 2 persists+execs `build.py`; Tool 3 registers |
@@ -1569,7 +1583,8 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 | Passing `name='rates_eod'` to `pull_market_data` (function appends another `_eod` → `data/rates_eod_eod.csv`) | Pass `name='rates'`. Sidecar uses the bare name (`data/rates_metadata.json`) |
 | Hand-rolling `s3_manager.put(df.to_csv().encode(), ...)` for FDIC / SEC EDGAR / BIS / Treasury / NY Fed / scraper output | Use `save_artifact(data, name='...', output_path=f'{SESSION_PATH}/data')`. Polymorphic, idempotent |
 | `manifest.datasets` keys NOT matching on-disk CSV stems (key `'rates'` while CSV is `data/rates_eod.csv`) | Make the dataset key the CSV stem byte-for-byte: `'rates_eod'`, `'rates_intraday'`, `'cpi'` |
-| `pull_data.py` uses names the runner doesn't inject (`save_artifact`, alt-data clients) AND ships with `refresh_enabled: True` | Restrict to the four pull primitives, OR set `metadata.refresh_enabled = False` until the runner namespace expands (§9.5) |
+| `pull_data.py` uses names the runner doesn't inject (`save_artifact`, alt-data clients) AND the registry entry is left at the default `refresh_frequency` | Restrict to the four pull primitives, OR set the registry entry's `refresh_frequency: "manual"` so the cron skips it until the runner namespace expands (§9.5). The browser's `Refresh` button stays available either way; failed clicks surface in the structured error modal |
+| Setting `metadata.refresh_enabled = False` to hide the browser `Refresh` button | The field is retired -- the button is non-suppressible from the manifest. Drop the field; rely on the structured error modal to surface failures |
 
 ---
 
@@ -1589,7 +1604,7 @@ Run `s3_manager.list()` on `{DASHBOARD_PATH}` and verify each path:
 **Configuration:**
 
 - `metadata.kerberos`, `metadata.dashboard_id`, and `metadata.methodology` all set (validator hard-rejects the build without them — they gate the always-on Methodology / Refresh / Share chrome buttons)
-- `metadata.data_as_of` set; `refresh_frequency` set; `refresh_enabled` defaults to `True`
+- `metadata.data_as_of` set; `refresh_frequency` set. The browser `Refresh` button is non-suppressible from the manifest; do NOT add `metadata.refresh_enabled` (retired field, silently ignored)
 - Registry entry **appended into `registry['dashboards']`** (not written as a top-level key); verify by re-loading and asserting `DASHBOARD_NAME in [d['id'] for d in registry['dashboards']]`
 - `update_user_manifest(kerberos, artifact_type='dashboard')` called AFTER the registry write succeeds (the wrapper updates the user manifest pointer block, it does not write the registry itself)
 
@@ -1600,7 +1615,7 @@ Run `s3_manager.list()` on `{DASHBOARD_PATH}` and verify each path:
 - Every `pull_market_data` `name=` is the bare base (no `_eod` / `_intraday`)
 - Every `manifest.datasets` key matches the on-disk CSV stem byte-for-byte
 - `pull_data.py` printed real shapes / heads / dtypes before `build.py` was authored; intraday handled defensively
-- If `pull_data.py` uses `save_artifact` or any alt-data client, `metadata.refresh_enabled = False` (§9.5)
+- If `pull_data.py` uses `save_artifact` or any alt-data client, set the registry entry's `refresh_frequency: "manual"` until the runner namespace expands (§9.5). The browser `Refresh` button stays on regardless
 - Datasets cleaned: `df.reset_index()` for DTI-keyed frames, plain English columns, no MultiIndex
 - Every dataset backing a chart / table carries `field_provenance` (per-column `system` + `symbol`)
 - Time-series pulls preserve full back-history (§16); never clip to the visible window

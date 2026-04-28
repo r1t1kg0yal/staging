@@ -4321,7 +4321,9 @@ DASHBOARD_APP_JS = r"""
         _dispatchChartDateZoom(cid);
       });
     } else {
-      (listeners[filterId] || []).forEach(rerenderChart);
+      (listeners[filterId] || []).forEach(function(cid){
+        rerenderChart(cid);
+      });
     }
     renderKpis();
     renderTables();
@@ -7998,11 +8000,66 @@ DASHBOARD_APP_JS = r"""
     if (params.dataIndex == null) return null;
     return rows[params.dataIndex] || null;
   }
-  function rerenderChart(cid){
+  // rerenderChart(cid, opts?)
+  //
+  // Re-materializes a chart's option from its compile-time SPEC and
+  // pushes it through setOption. Called by every non-dateRange filter
+  // change, brush cross-filter, chart-control drawer change, and the
+  // filter-reset button. By default we preserve the chart's current
+  // in-chart dataZoom window across the rerender so the user's local
+  // slider drag survives unrelated filter changes -- e.g. dragging
+  // the slider on a rates chart and then flipping a region select
+  // shouldn't snap the slider back to the dateRange filter's anchor.
+  //
+  // The dateRange dropdown path is already handled separately via
+  // _dispatchChartDateZoom (see broadcast()), so the capture/restore
+  // here doesn't fight that flow -- changing the dateRange dropdown
+  // legitimately moves every targeted chart.
+  //
+  // Callers that DO want a clean reset (the global / per-tab filter
+  // reset button) pass {preserveZoom: false}.
+  function rerenderChart(cid, opts){
     var rec = CHARTS[cid]; if (!rec) return;
+    var preserveZoom = !(opts && opts.preserveZoom === false);
+    var savedZoom = null;
+    if (preserveZoom){
+      try {
+        var prevOpt = rec.inst.getOption();
+        var prevDz = prevOpt && prevOpt.dataZoom;
+        if (prevDz && prevDz.length){
+          savedZoom = prevDz.map(function(z){
+            if (!z || typeof z !== 'object') return null;
+            var win = {};
+            if (z.startValue != null) win.startValue = z.startValue;
+            if (z.endValue   != null) win.endValue   = z.endValue;
+            if (win.startValue == null && z.start != null) win.start = z.start;
+            if (win.endValue   == null && z.end   != null) win.end   = z.end;
+            return win;
+          });
+        }
+      } catch (e) { savedZoom = null; }
+    }
     rec.inst.setOption(reviveFns(materializeOption(cid)), true);
-    // Studio charts ship a stats strip below the canvas; populate it
-    // from the bundle stashed by _ccApplyStudio during materialize.
+    if (savedZoom){
+      try {
+        for (var i = 0; i < savedZoom.length; i++){
+          var win = savedZoom[i];
+          if (!win) continue;
+          var hasAbs = ('startValue' in win) || ('endValue' in win);
+          var hasPct = ('start' in win)      || ('end' in win);
+          if (!hasAbs && !hasPct) continue;
+          var act = {type: 'dataZoom', dataZoomIndex: i};
+          if (hasAbs){
+            if ('startValue' in win) act.startValue = win.startValue;
+            if ('endValue'   in win) act.endValue   = win.endValue;
+          } else {
+            if ('start' in win) act.start = win.start;
+            if ('end'   in win) act.end   = win.end;
+          }
+          rec.inst.dispatchAction(act);
+        }
+      } catch (e) {}
+    }
     var st = chartControlState[cid];
     var w = WIDGET_META[cid] || {};
     var ct = String(((w && w.spec) || {}).chart_type || '').toLowerCase();
@@ -8194,7 +8251,13 @@ DASHBOARD_APP_JS = r"""
         else el.value = filterState[f.id] == null ? '' : filterState[f.id];
       });
       Object.keys(currentDatasets).forEach(resetDataset);
-      Object.keys(CHARTS).forEach(rerenderChart);
+      // Filter reset is one of the few legitimate paths where in-chart
+      // dataZoom windows should snap back to the dateRange anchor --
+      // the user is explicitly returning the dashboard to its default
+      // state, so the slider should reset along with everything else.
+      Object.keys(CHARTS).forEach(function(cid){
+        rerenderChart(cid, {preserveZoom: false});
+      });
       renderKpis(); renderTables();
     }
 
@@ -10665,10 +10728,16 @@ DASHBOARD_APP_JS = r"""
 
   // ----- refresh button + error surfacing -----
   //
-  // Shown when metadata.kerberos + metadata.dashboard_id are set AND
-  // metadata.refresh_enabled !== false. POSTs to metadata.api_url
-  // (default /api/dashboard/refresh/) and polls metadata.status_url
-  // for completion.
+  // Shown when metadata.kerberos + metadata.dashboard_id are set.
+  // POSTs to metadata.api_url (default /api/dashboard/refresh/) and
+  // polls metadata.status_url for completion.
+  //
+  // The refresh button is non-suppressible from the manifest side --
+  // there is no opt-out flag. Every persistent dashboard renders it.
+  // If a server-side refresh is genuinely impossible (registry
+  // disabled, runner namespace gap, etc.) the click surfaces the
+  // failure in the structured error modal below; that's the right UX,
+  // not a missing button.
   //
   // Refresh failures must be RECOVERABLE FROM THE BROWSER. A console
   // warning is not enough; the user typically does not have a
@@ -10707,8 +10776,7 @@ DASHBOARD_APP_JS = r"""
     if (!btn || !label) return;
     var kerberos = MD.kerberos;
     var dashboardId = MD.dashboard_id || MANIFEST.id;
-    var enabled = MD.refresh_enabled !== false;
-    if (!kerberos || !dashboardId || !enabled){
+    if (!kerberos || !dashboardId){
       // Dev-visible breadcrumb. The validator on the Python side
       // (compile_dashboard with require_persistence_metadata=True)
       // already rejects manifests missing kerberos / dashboard_id, but
@@ -10719,7 +10787,6 @@ DASHBOARD_APP_JS = r"""
       var miss = [];
       if (!kerberos)    miss.push('metadata.kerberos');
       if (!dashboardId) miss.push('metadata.dashboard_id (or manifest.id)');
-      if (!enabled)     miss.push('metadata.refresh_enabled (set to false)');
       console.warn(
         '[prism] Refresh button hidden: ' + miss.join(', ') + '. ' +
         'Persistent dashboards must set metadata.kerberos and ' +

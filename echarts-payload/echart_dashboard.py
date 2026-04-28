@@ -294,9 +294,15 @@ def validate_manifest(
             v = metadata.get(k)
             if v is not None and not isinstance(v, list):
                 errs.append(_err(f"metadata.{k}", "must be a list of strings"))
-        re = metadata.get("refresh_enabled")
-        if re is not None and not isinstance(re, bool):
-            errs.append(_err("metadata.refresh_enabled", "must be a bool"))
+        # ``metadata.refresh_enabled`` was an escape hatch that hid the
+        # browser Refresh button when set to ``False``; the field is
+        # deprecated. The button is non-suppressible from the manifest
+        # side now -- every persistent dashboard renders it. Old
+        # manifests on S3 that still carry the field (with any value)
+        # validate fine; the field is silently ignored at compile and
+        # render time. The server-side ``refresh_enabled`` flag on the
+        # ``dashboards_registry.json`` per-dashboard entry is a
+        # separate field and continues to gate the hourly runner.
         rf = metadata.get("refresh_frequency")
         if rf is not None and rf not in VALID_REFRESH_FREQUENCIES:
             errs.append(_err("metadata.refresh_frequency",
@@ -3892,6 +3898,47 @@ MANIFEST_BYTES_ERROR = 5_242_880     # 5 MB
 TABLE_ROWS_WARN = 1_000
 TABLE_ROWS_ERROR = 5_000
 
+# -----------------------------------------------------------------------------
+# Always-blocking error codes.
+#
+# These diagnostic codes flag load-bearing data-shape mistakes where the
+# rendered chart / KPI / table / filter is GUARANTEED to be broken
+# (placeholder card, '--' tile, empty cell, no-op filter). compile_dashboard
+# fails on any of these regardless of the ``strict`` flag because persisting
+# such an artifact ships a known-broken dashboard.
+#
+# The opt-in ``strict=False`` iteration mode still applies to cosmetic /
+# advisory diagnostics and to error codes outside this set, so the
+# inner-loop "fix everything in one round-trip" model is preserved for
+# diagnostics where a placeholder is acceptable feedback. Authors who
+# discover a NEW always-blocking case (a code where ``strict=False`` would
+# silently ship broken output) should add the code here, not gate it
+# behind ``strict``.
+# -----------------------------------------------------------------------------
+ALWAYS_BLOCKING_ERROR_CODES: frozenset = frozenset({
+    # Chart spec data-binding failures: chart renders the
+    # ``(no data)`` placeholder card.
+    "chart_mapping_column_missing",
+    "chart_mapping_required_missing",
+    "chart_mapping_column_all_nan",
+    "chart_dataset_empty",
+    "chart_build_failed",
+    # KPI source failures: tile renders ``--``.
+    "kpi_no_value_no_source",
+    "kpi_value_is_placeholder",
+    "kpi_source_malformed",
+    "kpi_source_dataset_unknown",
+    "kpi_source_aggregator_unknown",
+    "kpi_source_column_missing",
+    "kpi_source_no_numeric_values",
+    # stat_grid source failures: cell renders ``--``.
+    "stat_grid_source_unresolvable",
+    # Table column failures: column header renders but cells are empty.
+    "table_column_field_missing",
+    # Filter failures: filter is a no-op (silently filters nothing).
+    "filter_field_missing_in_target",
+})
+
 # Mapping keys whose values are dataset column references (string or
 # list of strings). Anything not in this set is treated as a config
 # flag (e.g. legend_position, x_log, humanize) and not column-checked.
@@ -6410,6 +6457,16 @@ def compile_dashboard(
     rendering ``--`` because the diagnostic layer was either silent
     or non-blocking. The new default is "fail loud, fix it"; PRISM's
     iteration runner explicitly opts into the resilient mode.
+
+    Note: a small allow-list of load-bearing error codes
+    (:data:`ALWAYS_BLOCKING_ERROR_CODES`) ALWAYS fail compile,
+    regardless of ``strict``. These are codes where the rendered
+    artifact is guaranteed broken (chart placeholder, KPI ``--``,
+    empty table cell, no-op filter); persisting such an artifact
+    ships a known-broken dashboard. ``strict=False`` cannot suppress
+    them. Authors can still iterate freely on cosmetic / advisory
+    diagnostics in non-strict mode -- only the load-bearing set is
+    elevated.
     """
     if isinstance(manifest, (str, Path)):
         base_dir: Optional[Path] = None
@@ -6510,6 +6567,28 @@ def compile_dashboard(
 
     diags: List[Diagnostic] = (list(shape_diags)
                                   + list(chart_data_diagnostics(manifest_dict)))
+
+    # Always-blocking error codes fire regardless of the ``strict`` flag --
+    # see ALWAYS_BLOCKING_ERROR_CODES near the data-budget constants for
+    # the rationale. ``strict=False`` iteration mode is preserved for
+    # error codes outside this set; codes inside it would silently ship
+    # a broken dashboard and so always raise.
+    always_blocking = [
+        d for d in diags
+        if d.severity == "error"
+        and d.code in ALWAYS_BLOCKING_ERROR_CODES
+    ]
+    if always_blocking:
+        preview = "\n".join(f"  - {e}" for e in always_blocking[:10])
+        extra = (f"\n  ... and {len(always_blocking) - 10} more"
+                 if len(always_blocking) > 10 else "")
+        raise ValueError(
+            f"compile_dashboard: {len(always_blocking)} always-blocking "
+            f"error-severity diagnostic(s) (these fail regardless of the "
+            f"`strict` flag because the rendered artifact would be "
+            f"broken):\n{preview}{extra}"
+        )
+
     if strict:
         errors = [d for d in diags if d.severity == "error"]
         if errors:
@@ -6524,6 +6603,30 @@ def compile_dashboard(
     chart_specs = _resolve_chart_specs(
         manifest_dict, base_dir, diags=diags,
     )
+
+    # Post-build re-check: ``_resolve_chart_specs`` adds ``chart_build_failed``
+    # diagnostics when a builder raises (typically because a validation gap
+    # in chart_data_diagnostics let a bad spec through to the builder).
+    # ``chart_build_failed`` is always-blocking because the chart card
+    # renders as the ``(no data)`` placeholder -- a broken artifact, just
+    # discovered later in the pipeline.
+    pre_block_ids = {id(d) for d in always_blocking}
+    new_blocking = [
+        d for d in diags
+        if d.severity == "error"
+        and d.code in ALWAYS_BLOCKING_ERROR_CODES
+        and id(d) not in pre_block_ids
+    ]
+    if new_blocking:
+        preview = "\n".join(f"  - {e}" for e in new_blocking[:10])
+        extra = (f"\n  ... and {len(new_blocking) - 10} more"
+                 if len(new_blocking) > 10 else "")
+        raise ValueError(
+            f"compile_dashboard: {len(new_blocking)} always-blocking "
+            f"error-severity diagnostic(s) emerged during spec resolution "
+            f"(builder exception(s); the rendered chart card would show "
+            f"the `(no data)` placeholder):\n{preview}{extra}"
+        )
 
     html = render_dashboard_html(
         manifest_dict, chart_specs,
@@ -6585,4 +6688,5 @@ __all__ = [
     "DATASET_BYTES_WARN", "DATASET_BYTES_ERROR",
     "MANIFEST_BYTES_WARN", "MANIFEST_BYTES_ERROR",
     "TABLE_ROWS_WARN", "TABLE_ROWS_ERROR",
+    "ALWAYS_BLOCKING_ERROR_CODES",
 ]
