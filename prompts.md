@@ -1,89 +1,105 @@
-# Context-extraction: dashboard validation bypass investigation
-I'm hitting `(no data)` placeholder cards on dashboards I built recently with these
-exact subtexts (rendered inside the chart card on `dashboard.html`):
-  1. `(no data) bar: mapping.x='outcome' is not a column in dataset 'next_meeting_probs'`
-  2. `(no data) bar: mapping.x='meeeting' is not a column in dataset 'fomc_jumps_eod'`
-  3. `(no data) bullet: mapping.x_low='low_1y' is not a column in dataset 'rv_screen'`
-That subtext is the diagnostic message from `chart_data_diagnostics`. It means the
-chart spec references a column that does not exist in the dataset. With
-`compile_dashboard(strict=True)` (the default per `dashboards.md`) this should
-hard-fail at compile time, not render a placeholder. The fact that I am SEEING the
-placeholder card means the build path is bypassing the strict gate.
-Investigate which of my dashboards are affected and tell me, verbatim, what the
-build flow actually does.
-This is a context-extraction prompt. Do not run pulls. Do not call
-`compile_dashboard`. Do not modify anything. Read-only S3 inspection only via
-`execute_analysis_script` + `s3_manager.get`. Reply with verbatim file contents
-and exact S3 paths.
-KERBEROS = `goyalri`        (replace if different)
-## Phase A: enumerate all dashboards
-Read `users/{KERBEROS}/dashboards/dashboards_registry.json`. For each entry in
-`registry["dashboards"]`, print one row:
-| id | last_refreshed | last_refresh_status | refresh_enabled | refresh_frequency |
+## Context extraction: valuation-vs-earnings-revisions widget
 
-Plus call out any dashboard whose `id` matches or seems to host one of the three
-dataset names above (`next_meeting_probs`, `fomc_jumps_eod`, `rv_screen`).
-## Phase B: locate the implicated dashboards
-For each dashboard in the registry, fetch:
-  - `users/{KERBEROS}/dashboards/{id}/manifest.json`
-Walk `manifest.datasets` keys and `manifest.layout` (or `manifest.layout.tabs[].rows`)
-chart `spec.dataset` references. Identify every dashboard whose manifest
-references ANY of: `next_meeting_probs`, `fomc_jumps_eod`, `rv_screen`.
-For each implicated dashboard, for the matching widget, print:
-dashboard_id = ... widget id = ... widget chart_type = ... spec.dataset = ... spec.mapping = {... verbatim from manifest ...}
+I have a dashboard called something like "tech and semis earnings monitor"
+(I am `goyalri`). It contains a widget titled approximately
+**"VALUATION VS. EARNINGS REVISIONS"** -- three groups in the legend:
+Software, Semiconductors, MegaCap Tech. Almost certainly chart_type
+`scatter_multi` (x = valuation, y = earnings revisions, color = sub-industry).
 
-## Phase C: dump scripts/build.py verbatim for each implicated dashboard
-For each implicated dashboard, fetch:
-  - `users/{KERBEROS}/dashboards/{id}/scripts/build.py`
-  - `users/{KERBEROS}/dashboards/{id}/scripts/pull_data.py`
-Print the full contents of each, verbatim, in a fenced code block. Do not
-paraphrase. Do not redact.
-After printing each `build.py`, answer these four yes/no/quote questions:
-  1. Does it call `compile_dashboard(...)` ? Quote the exact call line(s).
-  2. Is `strict=` passed explicitly in that call ? If yes, quote the value.
-     If no, note that the default (`True`) applies.
-  3. Is the `compile_dashboard(...)` call wrapped in a `try` / `except` block ?
-     Quote it if so.
-  4. Does it use `Dashboard(...)` constructor + `.build()` instead of the
-     dict-based `compile_dashboard()` flow ? Quote it if so.
-  5. Does it check `r.success` (or equivalent) before writing
-     `dashboard.html` / `manifest.json` to S3 ? Quote it.
-## Phase D: column-vs-mapping reality check
-For each implicated dashboard, list the files under
-`users/{KERBEROS}/dashboards/{id}/data/` (use `s3_manager.list_objects` or the
-equivalent). For each CSV file present, read it back and print:
-file = data/.csv shape = (rows, cols) columns = [...] dtypes = {...}
+Symptom: the chart's plot area renders as a single solid gold/khaki
+rectangle. No visible axes, no visible points, no visible trendlines.
+Either the axes are blown out so all points collapse into one pixel,
+or one marker is being rendered the size of the whole plot, or a
+visualMap / markArea is painting the grid. We need to figure out which.
 
-Then for every chart `spec` in the manifest whose `spec.dataset` matches one of
-those CSV stems, list:
-mapping_key → mapping_value (column name) → IN dataset? (yes / NO)
+Do the following introspection. Use `list_ai_repo` and
+`execute_analysis_script` as needed. Reply with the requested artefacts
+verbatim, no paraphrasing.
 
-so we can see exactly which `mapping.x` / `mapping.y` / `mapping.x_low` /
-`mapping.color` etc. references are pointing at columns that don't exist in
-the on-disk data.
-## Phase E: refresh_status.json snapshot
-For each implicated dashboard, fetch:
-  - `users/{KERBEROS}/dashboards/{id}/refresh_status.json`
-Print verbatim. We're looking for `status`, `errors[]`, `auto_healed`,
-`completed_at`.
-## Phase F: summary
-Single table with one row per implicated dashboard:
-| id | strict_mode | wraps_compile_in_try | uses_Dashboard_class | checks_r.success | last_refresh_status | broken_charts |
+### 1. Locate the dashboard
 
-Where `broken_charts` is the list of widget ids whose `mapping` references a
-column that's not in the on-disk CSV (from Phase D).
-Do not propose fixes. Do not edit anything. Just report.
-ASCII summary of what this gathers and why it's enough to lock down the cause:
+1. List `users/goyalri/dashboards/dashboards_registry.json`. From the
+   `dashboards[]` list, return the entry whose `name` / `id` matches
+   "tech" + "semis" + "earnings". Return that entry verbatim
+   (the full dict).
+2. Confirm the dashboard's S3 folder. Print every file under
+   `users/goyalri/dashboards/<id>/` and `users/goyalri/dashboards/<id>/scripts/`
+   and `users/goyalri/dashboards/<id>/data/` (path + size).
 
-                EVIDENCE             →    DECISIVE FOR
-                ────────                  ─────────────
-  Phase A (registry)               →   which dashboards exist + last status
-  Phase B (manifest)               →   which dashboards host the failing specs
-  Phase C (build.py verbatim)      →   strict=False vs try/except vs Dashboard()
-                                       ── this single phase tells us which of the
-                                       three deviations is happening
-  Phase D (CSV columns)            →   confirms typo vs schema-drift root cause
-                                       (e.g. column was renamed; manifest stale)
-  Phase E (refresh_status.json)    →   confirms whether last refresh "succeeded"
-                                       even though charts are broken
-  Phase F (summary)                →   one-table verdict per dashboard
+### 2. Manifest spec for the widget
+
+3. Read `users/goyalri/dashboards/<id>/manifest_template.json`. Find the
+   widget whose `spec.title` matches "VALUATION VS. EARNINGS REVISIONS"
+   (case-insensitive, allow for trailing periods). Return that single
+   widget block verbatim -- the full `spec` dict, including
+   `chart_type`, `dataset` (and any inline `dataset_ref`), `mapping`,
+   `palette`, and any `options` / `chart_zoom` / `axes` keys.
+4. Read `users/goyalri/dashboards/<id>/manifest.json` (the compiled,
+   data-embedded artefact). Return the same widget's compiled block
+   verbatim. We want to compare template vs compiled side by side.
+
+### 3. Compiled ECharts option for the widget
+
+5. From the compiled `manifest.json`, extract the ECharts `option` dict
+   for that single chart and return it verbatim. Specifically include
+   these subtrees in full:
+   - `xAxis` (full dict, including `min`, `max`, `scale`, `nice`, `type`)
+   - `yAxis` (same)
+   - `series` (every series object: `type`, `name`, `symbol`, `symbolSize`,
+     `itemStyle`, `data` length, plus the FIRST 10 and LAST 10 entries
+     of `series[*].data` so we can see the actual numeric tuples)
+   - `visualMap` (if present, the full block)
+   - `dataZoom` (full list)
+   - any `markArea` / `markPoint` / `markLine` blocks anywhere in series
+6. For each `series` block, also return:
+   - `len(series.data)`
+   - `min(x)`, `max(x)`, `min(y)`, `max(y)` across `series.data`
+     (treat `series.data` as `[[x, y, ...], ...]`)
+   - count of any `null` / `None` / `NaN` / `Infinity` values that
+     appear in any tuple position
+
+### 4. Underlying dataset
+
+7. The widget's `spec.dataset` references `manifest.datasets.<name>`.
+   Locate that dataset in `manifest.json` (`datasets.<name>.rows` /
+   `.columns`) and also locate the matching CSV under
+   `users/goyalri/dashboards/<id>/data/`. For BOTH copies, return:
+   - column list with dtypes
+   - row count
+   - `df.describe()` on every numeric column
+   - count of NaN / Inf per column
+   - the FIRST 5 and LAST 5 rows verbatim
+   - the row(s) corresponding to `min(x)`, `max(x)`, `min(y)`, `max(y)`
+     of whichever columns the widget's `mapping.x` and `mapping.y` point at
+8. Print the values of `mapping.x`, `mapping.y`, `mapping.color`, and
+   (if present) `mapping.size` and `mapping.trendlines` from the
+   widget's spec.
+
+### 5. Build script
+
+9. Read `users/goyalri/dashboards/<id>/scripts/build.py`. Return the
+   full block of code that constructs THIS widget's spec (the dict
+   passed into the manifest under that title). Do not return the whole
+   file -- just the relevant assignment / function for the
+   valuation-vs-earnings widget.
+10. Read `users/goyalri/dashboards/<id>/scripts/pull_data.py`. Return
+    the section that produces the dataframe feeding the widget --
+    specifically, the column-construction / formula for the valuation
+    metric on `mapping.x` and the earnings-revisions metric on
+    `mapping.y`. Quote the relevant lines verbatim.
+
+### 6. Refresh state
+
+11. Return the contents of
+    `users/goyalri/dashboards/<id>/refresh_status.json` verbatim.
+
+### Output format
+
+Reply with one section per numbered item above. Use fenced code blocks
+for every JSON/dict/dataframe payload. Do not summarise; we want raw
+material.
+
+If part of this prompt cannot be answered (file missing, widget title
+doesn't match anything, dataset name not found), add a brief
+`## Could not resolve` section at the end listing what you tried and
+what blocked it.

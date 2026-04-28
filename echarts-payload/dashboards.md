@@ -43,12 +43,11 @@ All six absolute. A dashboard violating any of them is broken even if `dashboard
 - Write the manifest against verified shapes, not imagined columns.
 - Inheriting a non-compliant dashboard (bypasses `compile_dashboard()`, hand-writes HTML/CSS/JS, types numbers into `datasets[*].source`, skips persistence) → bringing it back to spec takes priority over whatever surface change was originally asked for. Surface the trade transparently.
 
-### Rule 4 — canonical layout, scripts on disk
+### Rule 4 — canonical layout, exclusive whitelist
 
-- Every persistent user dashboard lands at `users/{kerberos}/dashboards/{name}/` with the full artefact set in §2.2.
-- Required: `dashboard.html`, `manifest.json`, `manifest_template.json`, `scripts/pull_data.py`, `scripts/build.py`, raw CSVs in `data/`.
-- The two `.py` files under `scripts/` are exactly what the refresh runner re-executes on schedule.
-- Missing scripts → the [Refresh] button fails immediately with `FileNotFoundError`.
+- The dashboard folder at `users/{kerberos}/dashboards/{name}/` follows an **exclusive** layout: the artefact set in §2.2 is both the floor (every `[REQUIRED · 1]` row must exist) AND the ceiling (no other paths permitted). Cardinality is exact: one `pull_data.py`, one `build.py`, one `manifest.json`, one `manifest_template.json`, one `dashboard.html`. No second copies, no `_v2` / `_old` / `_backup` siblings, no timestamped scripts, no per-source data subfolders, no scratch `.md` / `.json` siblings.
+- The two `.py` files under `scripts/` are exactly what the refresh runner re-executes on schedule. Missing scripts → the [Refresh] button fails immediately with `FileNotFoundError`. Stale duplicates next to them → the runner picks up whichever bytes the lexicographic scan lands on, silently.
+- §2.5 codifies the audit (`_audit_dashboard_layout`) PRISM runs at Tool 2's verify step and again whenever it inherits an existing dashboard folder. Audit failures block registration; rogue files are quarantined to `archive/<UTC>/`, never silently deleted.
 
 ### Rule 5 — every CSV at `{DASHBOARD_PATH}/data/<dataset>.csv`
 
@@ -145,42 +144,48 @@ For **conversational (session-only)** dashboards:
 {SESSION_PATH}/dashboards/{id}.html     compiled dashboard
 ```
 
-For **persistent user dashboards** (Rule 4) — every artefact tagged `[REQUIRED]` must be present on S3 by the end of the build:
+For **persistent user dashboards** (Rule 4) — the layout below is **exclusive**. Every `[REQUIRED · 1]` path must exist exactly once; nothing else is permitted at any depth except the explicitly-allowed `data/` / `history/` / `archive/` prefixes. The audit in §2.5 enforces this both ways (presence and exclusivity).
 
 ```
 users/{kerberos}/dashboards/{dashboard_name}/
-  manifest_template.json    [REQUIRED] LLM-editable spec, NO data
-  manifest.json             [REQUIRED] template + fresh data, embedded
-  dashboard.html            [REQUIRED] compile_dashboard output
-  refresh_status.json       runtime state (status, errors[], pid, auto_healed)
-  thumbnail.png             optional
-  scripts/                  [REQUIRED]
-    pull_data.py            [REQUIRED] data acquisition (~50-150 lines)
-    build.py                [REQUIRED] ~12 lines: load + populate + compile
-  data/                     [REQUIRED] populated by pull_data.py via output_path=f'{SESSION_PATH}/data'
-    rates_eod.csv           one CSV per dataset; stem matches manifest key
+  manifest_template.json    [REQUIRED · 1] LLM-editable spec, NO data
+  manifest.json             [REQUIRED · 1] template + fresh data, embedded
+  dashboard.html            [REQUIRED · 1] compile_dashboard output
+  refresh_status.json       [optional · ≤1] runner-owned runtime state (never author-written)
+  thumbnail.png             [optional · ≤1] author-owned preview image
+  scripts/                  [REQUIRED · exactly these two files, no others]
+    pull_data.py            [REQUIRED · 1] data acquisition (~50-150 lines)
+    build.py                [REQUIRED · 1] ~12 lines: load + populate + compile
+  data/                     [REQUIRED · CSVs/JSONs whose stems match manifest.datasets keys]
+    rates_eod.csv           one CSV per dataset; stem matches manifest key byte-for-byte
     rates_intraday.csv      pull_market_data appends _eod / _intraday
     rates_metadata.json     pull_market_data sidecar uses the bare name
     cpi.csv                 pull_haver_data: no suffix
     cpi_metadata.json
     swap_curve.csv          pull_plottool_data: no suffix
     fdic_gs_bank.csv        save_artifact: no suffix
-  history/                  optional snapshots when keep_history=true
+  history/                  [optional] snapshots when keep_history=true; runner-managed
+  archive/<UTC>/            [optional] §2.5 quarantine for non-canonical files; ignored by runner + audit
 ```
 
-**Why every required artefact has to be there.** The refresh runner has no PRISM state and no conversation memory — it re-executes the persisted scripts on a schedule. Missing `scripts/*.py` → runner has nothing to call. Missing `manifest_template.json` → `build.py` can't load the template. Missing `data/*.csv` → `build.py` can't read what `pull_data.py` was supposed to write.
+**Why exclusivity matters.** The refresh runner has no PRISM state and no conversation memory — it re-executes the persisted scripts on a schedule. Missing `scripts/*.py` → runner has nothing to call. Missing `manifest_template.json` → `build.py` can't load the template. Missing `data/*.csv` → `build.py` can't read what `pull_data.py` was supposed to write. **Extra files are equally load-bearing**: a `scripts/build_v2.py` next to `scripts/build.py`, a `manifest_old.json` next to `manifest.json`, or a `data/haver/cpi.csv` next to `data/cpi.csv` all create ambiguity that the runner resolves silently — usually wrong.
 
-**Forbidden:**
+**Forbidden (audited at §2.5):**
 
-- HTML / CSS / JS in any `.py` file (`rendering.py` owns it)
-- `scripts/build_dashboard.py` (renamed to `build.py`)
-- Per-source folders (`haver/`, `market_data/` — everything goes to `data/`)
-- Timestamped scripts (`20260424_*.py`)
-- Session-only artifacts at dashboard scope (`*_results.md`, `*_artifacts.json`)
-- Multiple data JSONs (only `manifest.json`)
-- Inline `<script>const DATA = {}` in HTML
-- Legacy helpers (`sanitize_html_booleans()`)
-- A "persistent" dashboard whose `scripts/` folder is empty
+| Class | Examples | Why |
+|-------|----------|-----|
+| Cardinality violations | `scripts/build_v2.py`, `manifest_old.json`, `pull_data.bak`, `dashboard.prev.html` | Two candidates for "the" file; the runner picks one without telling you which |
+| Timestamped historicals at top level | `20260424_pull_data.py`, `manifest.20260424.json` | Use `archive/<UTC>/` (§2.5) — never sit alongside live artefacts |
+| Per-source data subfolders | `data/haver/`, `data/market_data/`, `data/plottool_data/` | Everything goes flat into `data/` (Rule 5) |
+| Self-suffix CSVs | `data/rates_eod_eod.csv` | The `pull_market_data` `name=` footgun (§9.2 rule 1); rename to bare `name='rates'` |
+| Manifest-orphan CSVs | `data/old_dataset.csv` (no matching `manifest.datasets["old_dataset"]`) | Refresh path is "scripts write CSV → build reads CSV by manifest key"; orphan CSVs never get read and shouldn't sit there |
+| Scratch siblings | `*_results.md`, `*_artifacts.json`, `notes.txt`, `README.md` | Session-scope artefacts belong under `{SESSION_PATH}/`, not at dashboard scope |
+| HTML / CSS / JS in any `.py` file | inlining markup into `pull_data.py` or `build.py` | `rendering.py` owns all markup |
+| Multiple data JSONs at top | `data.json`, `metrics.json` next to `manifest.json` | Only `manifest.json` is canonical; embed everything else inside it |
+| Inline `<script>const DATA = {}` in HTML | hand-edited `dashboard.html` | Let `compile_dashboard` emit; never post-edit |
+| Legacy helpers | `sanitize_html_booleans()` references | Removed; any caller is a stale code path |
+| Empty `scripts/` on a persistent dashboard | `scripts/` directory with no `.py` files | The "persistent" promise is "refresh runner re-execs these"; nothing to re-exec → not persistent |
+| Renamed canonical files | `scripts/build_dashboard.py`, `scripts/refresh.py`, `scripts/main.py` | Names are load-bearing — the runner reads `scripts/pull_data.py` and `scripts/build.py` exactly |
 
 ### 2.3 Metadata block
 
@@ -261,6 +266,109 @@ There is no manifest-side opt-out: the `metadata.refresh_enabled` field has been
 | `user_id` | Stamped into editor HTML / spec sheet localStorage scoping |
 
 Returns `DashboardResult(success, html_path, manifest_path, html, warnings, diagnostics, error_message)`. `result.html` is the raw HTML string (handy when `write_html=False`).
+
+### 2.5 Folder sanctity audit
+
+The §2.2 folder layout is **exclusive**, not just inclusive — listing what must be there AND what must not. PRISM enforces it via `_audit_dashboard_layout({DASHBOARD_PATH}, manifest)` at two moments. The audit is ~25 lines that PRISM authors inline; no helper is injected into the sandbox.
+
+| Trigger | When PRISM runs the audit | What blocks if it fails |
+|---------|--------------------------|-------------------------|
+| **Tool 2 verify** | Immediately after `exec(build.py)` writes its artefacts; before Tool 3 runs | Registration. A registered dashboard with rogue files in its folder is a refresh-runner footgun (the runner could pick up `scripts/build_v2.py` next time the canonical script is briefly re-uploaded) |
+| **Inheritance** | Whenever PRISM picks up an existing dashboard folder for any change (manifest tweak, surface refactor, even a typo fix) | The surface change. Bringing the folder back to spec takes priority over whatever was originally asked for; surface the trade transparently to the user before proceeding |
+
+#### 2.5.1 The audit function
+
+```python
+def _audit_dashboard_layout(dashboard_path, manifest, keep_history=False):
+    """Layout sanctity check. Raises on any whitelist violation.
+
+    Allowed paths under {dashboard_path}/:
+      manifest.json, manifest_template.json, dashboard.html      [required, exactly 1 each]
+      scripts/pull_data.py, scripts/build.py                     [required, exactly 1 each]
+      refresh_status.json, thumbnail.png                         [optional, runner / author owned]
+      data/<key>.csv | data/<key>.json   for key in manifest.datasets
+      data/<bare>_metadata.json          (bare = key sans _eod / _intraday suffix)
+      history/...                                                [if keep_history=True]
+      archive/...                                                [quarantined ex-rogues]
+    Anything else raises.
+    """
+    pfx = dashboard_path.rstrip('/') + '/'
+    rel = sorted({k[len(pfx):] for k in s3_manager.list(pfx) if k.startswith(pfx)})
+
+    REQUIRED = {'manifest.json', 'manifest_template.json', 'dashboard.html',
+                'scripts/pull_data.py', 'scripts/build.py'}
+    OPTIONAL = {'refresh_status.json', 'thumbnail.png'}
+
+    ds_keys = list(manifest.get('datasets', {}).keys())
+    bare    = [k.removesuffix('_eod').removesuffix('_intraday') for k in ds_keys]
+    allowed_data = (
+        {f'data/{k}.csv'  for k in ds_keys} |
+        {f'data/{k}.json' for k in ds_keys} |
+        {f'data/{k}_metadata.json' for k in ds_keys} |
+        {f'data/{b}_metadata.json' for b in bare})
+
+    seen, rogue = set(), []
+    for r in rel:
+        if r in REQUIRED:                              seen.add(r); continue
+        if r in OPTIONAL:                              continue
+        if r in allowed_data:                          continue
+        if keep_history and r.startswith('history/'):  continue
+        if r.startswith('archive/'):                   continue
+        rogue.append(r)
+
+    if missing := REQUIRED - seen:
+        raise FileNotFoundError(f'[layout] missing required: {sorted(missing)}')
+    if rogue:
+        ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+        moves = '\n    '.join(
+            f"s3_manager.move('{pfx}{r}', '{pfx}archive/{ts}/{r}')" for r in rogue)
+        raise RuntimeError(
+            f'[layout] rogue paths violate exclusive whitelist: {rogue}\n'
+            f'  cleanup (move-to-archive; never silent delete):\n    {moves}')
+    return sorted(seen), sorted(allowed_data), rel
+
+# Tool 2 verify call:
+m = json.loads(s3_manager.get(f'{DASHBOARD_PATH}/manifest.json').decode('utf-8'))
+_audit_dashboard_layout(DASHBOARD_PATH, m)
+```
+
+#### 2.5.2 Quarantine, never delete
+
+The audit prints a `s3_manager.move()` recipe rather than running `s3_manager.delete()` itself. Three reasons:
+
+1. **Rogue files sometimes turn out to be the real artefact mis-named.** A `manifest_v2.json` next to `manifest.json` could be the live one and the canonical one is stale. Auto-deleting either is irreversible.
+2. **The audit is a verification step, not a write step.** Mixing verification with destructive S3 ops is a class of bug — verification must be safely re-runnable. Quarantine writes are explicit and authored by PRISM in a follow-up step.
+3. **`archive/<UTC>/` is the only top-level prefix the audit ignores by design.** Quarantined files don't re-trip the audit on the next run, and the refresh runner already ignores `archive/` (it reads only the canonical paths). Once a quarter, sweep `archive/` by hand if storage hygiene matters.
+
+The cleanup pattern when the audit raises:
+
+```python
+# 1. Run the audit. It raises with a list of rogue paths and a move() recipe in the message.
+try:
+    _audit_dashboard_layout(DASHBOARD_PATH, m)
+except RuntimeError as e:
+    print(e)  # surface to the user; confirm before mass-moving
+
+# 2. Author the moves explicitly. Never run delete().
+ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+for rogue in ['scripts/build_v2.py', 'manifest_old.json', 'data/haver/cpi.csv']:
+    s3_manager.move(f'{DASHBOARD_PATH}/{rogue}',
+                     f'{DASHBOARD_PATH}/archive/{ts}/{rogue}')
+
+# 3. Re-run audit; should now pass.
+_audit_dashboard_layout(DASHBOARD_PATH, m)
+```
+
+#### 2.5.3 Inheritance: audit BEFORE you change anything
+
+When PRISM picks up an existing dashboard for any reason, the first action is the audit — not the requested surface change. Two scenarios:
+
+| Scenario | What happens |
+|----------|--------------|
+| Audit passes | Proceed with the requested change. At end of session, re-run audit before Tool 3. |
+| Audit raises | Surface to the user: "I inherited `{dashboard_id}` and the folder has rogue files violating the §2.5 whitelist. Cleaning these up takes priority over the surface change you asked for. Proposed quarantine moves: ... . Confirm to proceed." After cleanup, audit must pass before any code in `pull_data.py` / `build.py` is rewritten — otherwise the surface change ships ON TOP OF a non-compliant folder, which is the exact failure mode this rule prevents. |
+
+Inherited dashboards from before this rule existed (pre-2026-04-28 builds) commonly fail the audit on first inspection. That's expected; the cleanup-first protocol exists for exactly these cases.
 
 ---
 
@@ -1242,11 +1350,10 @@ ns = {
 }
 exec(compile(src, f'{DASHBOARD_PATH}/scripts/build.py', 'exec'), ns)
 
-# Confirm every required artefact landed (Rule 4)
-for sub in ['scripts/pull_data.py', 'scripts/build.py',
-            'manifest_template.json', 'manifest.json', 'dashboard.html']:
-    if not s3_manager.exists(f'{DASHBOARD_PATH}/{sub}'):
-        raise FileNotFoundError(f'[Tool 2] missing on S3: {sub}')
+# Folder sanctity audit (§2.5): raises on missing required OR rogue paths.
+# Author _audit_dashboard_layout() inline as shown in §2.5.1.
+m = json.loads(s3_manager.get(f'{DASHBOARD_PATH}/manifest.json').decode('utf-8'))
+_audit_dashboard_layout(DASHBOARD_PATH, m)
 print('[Tool 2] complete; ready for Tool 3 (register)')
 ```
 
@@ -1586,20 +1693,41 @@ Brand hex anchors for `series_colors`: GS Navy `#002F6C`, GS Sky `#7399C6`, GS G
 | `pull_data.py` uses names the runner doesn't inject (`save_artifact`, alt-data clients) AND the registry entry is left at the default `refresh_frequency` | Restrict to the four pull primitives, OR set the registry entry's `refresh_frequency: "manual"` so the cron skips it until the runner namespace expands (§9.5). The browser's `Refresh` button stays available either way; failed clicks surface in the structured error modal |
 | Setting `metadata.refresh_enabled = False` to hide the browser `Refresh` button | The field is retired -- the button is non-suppressible from the manifest. Drop the field; rely on the structured error modal to surface failures |
 
+**Folder sanctity (Rule 4 + §2.5):**
+
+| Anti-pattern | Do instead |
+|--------------|-----------|
+| Leaving `scripts/build_v2.py` / `scripts/pull_data.bak` next to the canonical files "for reference" | Either it's the canonical file or it doesn't belong. Move references to `archive/<UTC>/` (§2.5.2). The runner cannot tell which of two `.py` files in `scripts/` is "real" |
+| Renaming the canonical scripts to anything else (`scripts/main.py`, `scripts/refresh.py`, `scripts/build_dashboard.py`) | The runner reads `scripts/pull_data.py` and `scripts/build.py` exactly. No flexibility. Audit raises FileNotFoundError on the canonical name |
+| Multiple manifest copies (`manifest.json` + `manifest_old.json` / `manifest_v2.json` / `manifest.20260424.json`) | Exactly one `manifest.json`. Quarantine the others to `archive/<UTC>/` |
+| Per-source data subfolders (`data/haver/cpi.csv`, `data/market_data/rates_eod.csv`) | Flat `data/cpi.csv`, `data/rates_eod.csv`. Driven by `output_path=f'{SESSION_PATH}/data'` on every pull (Rule 5). Audit flags any `data/<subdir>/` |
+| Self-suffix CSVs from the `pull_market_data` `name=` footgun (`data/rates_eod_eod.csv`) | Pass `name='rates'` (bare); the function appends `_eod`. The audit flags `rates_eod_eod` because no `manifest.datasets["rates_eod_eod"]` key exists to allow it |
+| Manifest-orphan CSVs in `data/` (`data/old_dataset.csv` with no `manifest.datasets["old_dataset"]`) | Either register the key in `manifest.datasets` or quarantine the CSV. The audit's allowed-data set is derived from the manifest, so orphan CSVs raise |
+| Scratch siblings at dashboard scope (`dashboard_results.md`, `_artifacts.json`, `notes.txt`, `README.md`) | Session-scope artefacts belong under `{SESSION_PATH}/`, not `{DASHBOARD_PATH}/`. The audit flags any non-canonical top-level path |
+| Auto-deleting rogue files when the audit raises (`s3_manager.delete()` in a loop) | `s3_manager.move(...)` to `archive/<UTC>/` instead. Rogue files sometimes turn out to be the real artefact mis-named; archive is recoverable, delete is not (§2.5.2) |
+| Inheriting an existing non-compliant dashboard and proceeding directly with the surface change the user asked for | Audit first. If it raises, surface to the user: "Folder violates §2.5 whitelist; cleanup-first protocol takes priority over the requested change." Cleanup, re-audit, then proceed (§2.5.3) |
+| Suppressing the audit (commenting it out, wrapping in `try/except: pass`) because "the dashboard renders fine" | The audit catches refresh-time footguns that don't surface at build time. The compiler validates the manifest; the audit validates the **folder around** the manifest. Both are load-bearing |
+
 ---
 
 ## 14. Pre-flight checklist
 
-Run `s3_manager.list()` on `{DASHBOARD_PATH}` and verify each path:
+**Folder layout (Rule 4 + §2.5).** Run the sanctity audit; it raises on any whitelist violation (missing required OR rogue paths):
 
-- `dashboard.html` — compiled HTML
-- `manifest.json` — compiled manifest with embedded data
-- `manifest_template.json` — structural template, no data
-- `scripts/pull_data.py` — verbatim Tool 1 script
-- `scripts/build.py` — verbatim Tool 2 script (~12 lines)
-- `data/<dataset>.csv` — one CSV per dataset, flat folder. Stem matches `manifest.datasets` key. `pull_market_data` auto-appends `_eod` / `_intraday`
+```python
+m = json.loads(s3_manager.get(f'{DASHBOARD_PATH}/manifest.json').decode('utf-8'))
+_audit_dashboard_layout(DASHBOARD_PATH, m)   # §2.5.1
+```
 
-`refresh_status.json` is NOT a build-time artefact — the refresh runner writes it on first refresh attempt.
+The audit covers everything the old hand-rolled `s3_manager.list()` loop did, plus exclusivity. Specifically it verifies:
+
+- `dashboard.html` / `manifest.json` / `manifest_template.json` exist exactly once
+- `scripts/pull_data.py` and `scripts/build.py` exist exactly once and are the only `.py` files under `scripts/`
+- `data/<key>.csv` (or `.json`) exists for every `manifest.datasets` key, byte-for-byte; `pull_market_data` auto-appends `_eod` / `_intraday`
+- `data/<bare>_metadata.json` sidecars allowed (where `bare` strips `_eod` / `_intraday`)
+- No rogue paths anywhere — no `_v2`, no `_old`, no per-source `data/<source>/` subfolders, no scratch `.md` / `.json` siblings, no manifest-orphan CSVs
+
+`refresh_status.json` is NOT a build-time artefact — the refresh runner writes it on first refresh attempt. The audit allows it as optional; do not pre-create it.
 
 **Configuration:**
 
