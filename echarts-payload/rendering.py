@@ -1880,6 +1880,42 @@ header.app-header {
 }
 .header-actions { display: flex; gap: 6px; align-items: center;
                     flex-wrap: wrap; justify-content: flex-end; }
+
+/* Download dropdown. Single icon-btn that opens a click-anchored
+   popover listing Panel / Charts / Excel. Replaces the three
+   stand-alone Download* buttons that used to live in the chrome.
+   Click-to-open + click-outside / Esc-to-close (no hover dropdown);
+   accessibility-friendly because every menu item is a real <button>. */
+.download-dd { position: relative; display: inline-flex; }
+.download-dd .download-caret { font-size: 10px; line-height: 1;
+                                  margin-left: 2px; opacity: 0.7; }
+.download-dd[data-open="true"] #download-btn { background: var(--bg-soft, #f4f6fa); }
+.download-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 20;
+  min-width: 140px; padding: 4px; margin: 0;
+  list-style: none;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+}
+.download-menu[hidden] { display: none; }
+.download-menu li { padding: 0; margin: 0; }
+.download-menu-item {
+  display: block; width: 100%;
+  padding: 7px 10px; border: 0; background: transparent;
+  color: var(--text); font-size: 12px;
+  font-family: var(--gs-font-sans); font-weight: 500;
+  text-align: left; cursor: pointer; border-radius: 3px;
+}
+.download-menu-item:hover { background: var(--bg-soft, #f0f3f8); }
+:root[data-theme="dark"] .download-menu {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+}
+:root[data-theme="dark"] .download-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
 .icon-btn {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-sm); padding: 6px 12px;
@@ -2739,7 +2775,7 @@ main.app-main { padding: 20px 28px 40px 28px; flex: 1 1 auto; }
    without stomping the per-cell conditional colors. Note: the
    `--pos-soft` / `--neg-soft` variables are deliberately used
    directly here -- avoiding `color-mix(in srgb, ..., transparent)`
-   so html2canvas (used by the "Download Panel" button) can
+   so html2canvas (used by the Download dropdown's "Panel" item) can
    parse this rule. The visual difference is imperceptible because
    both vars are already very low-alpha rgba. */
 .data-table tr.row-hl-pos td   { background: var(--pos-soft); }
@@ -3197,19 +3233,39 @@ footer.app-footer .gs-mark .gs-wordmark { font-size: 12px; }
                 title="Share this dashboard with the community" style="display:none">
           <span id="share-btn-label">Share</span>
         </button>
-        <button class="icon-btn" id="export-all"
-                title="Download all charts as PNG (2x)">
-          Download Charts
-        </button>
-        <button class="icon-btn" id="export-dashboard"
-                title="Download the entire panel as one PNG (full page).">
-          Download Panel
-        </button>
-        <button class="icon-btn" id="export-excel"
-                title="Download all tables as one Excel workbook"
-                style="display:none">
-          Download Excel
-        </button>
+        <div class="download-dd" id="download-dd">
+          <button class="icon-btn" id="download-btn"
+                  type="button"
+                  title="Download dashboard contents"
+                  aria-haspopup="menu" aria-expanded="false">
+            <span id="download-btn-label">Download</span>
+            <span class="download-caret" aria-hidden="true">&#x25BE;</span>
+          </button>
+          <ul class="download-menu" id="download-menu" role="menu"
+              aria-label="Download options" hidden>
+            <li role="none">
+              <button type="button" role="menuitem"
+                      class="download-menu-item" id="export-dashboard"
+                      title="Download the entire panel as one PNG (full page).">
+                Panel
+              </button>
+            </li>
+            <li role="none">
+              <button type="button" role="menuitem"
+                      class="download-menu-item" id="export-all"
+                      title="Download all charts as individual PNGs (2x).">
+                Charts
+              </button>
+            </li>
+            <li role="none" id="download-menu-excel-li" hidden>
+              <button type="button" role="menuitem"
+                      class="download-menu-item" id="export-excel"
+                      title="Download all tables as one Excel workbook.">
+                Excel
+              </button>
+            </li>
+          </ul>
+        </div>
         <button class="icon-btn theme-toggle" id="theme-toggle"
                 type="button"
                 title="Toggle light / dark mode"
@@ -10506,9 +10562,59 @@ DASHBOARD_APP_JS = r"""
     var hasTable = Object.keys(WIDGET_META).some(function(k){
       return WIDGET_META[k].widget === 'table';
     });
-    if (!hasTable) return;
-    btn.style.display = 'inline-flex';
     btn.addEventListener('click', downloadAllTablesXlsx);
+    // The Excel menu item lives inside the Download dropdown -- show
+    // it only when the dashboard contains at least one table widget.
+    if (hasTable){
+      var li = document.getElementById('download-menu-excel-li');
+      if (li) li.hidden = false;
+    }
+  })();
+
+  // ----- Download dropdown (Panel / Charts / Excel) -----
+  //
+  // Single dropdown anchored to the [Download] button in the chrome.
+  // Click the button to toggle; click outside or press Esc to close.
+  // Each menu item delegates to the existing handler that the
+  // standalone export buttons used to wire (panel: html2canvas;
+  // charts: per-chart PNG; excel: SheetJS workbook). The Excel item
+  // is shown/hidden by the block above based on whether the
+  // dashboard contains any widget:table.
+  (function(){
+    var dd  = document.getElementById('download-dd');
+    var btn = document.getElementById('download-btn');
+    var menu = document.getElementById('download-menu');
+    if (!dd || !btn || !menu) return;
+    function open(){
+      menu.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      dd.setAttribute('data-open', 'true');
+    }
+    function close(){
+      menu.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      dd.removeAttribute('data-open');
+    }
+    function toggle(){
+      if (menu.hidden) open(); else close();
+    }
+    btn.addEventListener('click', function(e){
+      e.stopPropagation(); toggle();
+    });
+    document.addEventListener('click', function(e){
+      if (menu.hidden) return;
+      if (!dd.contains(e.target)) close();
+    });
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape' && !menu.hidden) close();
+    });
+    // Each menu item closes the menu after firing its action. The
+    // action itself is wired by the existing export-* listeners, so
+    // we do not call them here -- we just close.
+    Array.prototype.forEach.call(
+      menu.querySelectorAll('.download-menu-item'),
+      function(item){ item.addEventListener('click', close); }
+    );
   })();
 
   // ----- header_actions: custom buttons/links in the header -----
@@ -10602,7 +10708,24 @@ DASHBOARD_APP_JS = r"""
     var kerberos = MD.kerberos;
     var dashboardId = MD.dashboard_id || MANIFEST.id;
     var enabled = MD.refresh_enabled !== false;
-    if (!kerberos || !dashboardId || !enabled) return;
+    if (!kerberos || !dashboardId || !enabled){
+      // Dev-visible breadcrumb. The validator on the Python side
+      // (compile_dashboard with require_persistence_metadata=True)
+      // already rejects manifests missing kerberos / dashboard_id, but
+      // legacy dashboards built before that guard landed can still
+      // render without these fields. Surface the silent-hide path so
+      // we can diagnose "where did my Refresh button go?" without
+      // needing to re-read the JS.
+      var miss = [];
+      if (!kerberos)    miss.push('metadata.kerberos');
+      if (!dashboardId) miss.push('metadata.dashboard_id (or manifest.id)');
+      if (!enabled)     miss.push('metadata.refresh_enabled (set to false)');
+      console.warn(
+        '[prism] Refresh button hidden: ' + miss.join(', ') + '. ' +
+        'Persistent dashboards must set metadata.kerberos and ' +
+        'metadata.dashboard_id; rebuild via compile_dashboard().');
+      return;
+    }
     var apiUrl = MD.api_url || '/api/dashboard/refresh/';
     var statusUrl = MD.status_url || '/api/dashboard/refresh/status/';
     btn.style.display = 'inline-flex';
@@ -11775,7 +11898,7 @@ def _chart_toolbar_buttons(w: Dict[str, Any]) -> str:
 
     Setting ``spec.chart_controls = False`` (or the same on the widget)
     suppresses the controls drawer toggle. Bulk PNG export is handled
-    by the dashboard-level "Download Charts" header button.
+    by the dashboard-level Download dropdown's "Charts" item.
     """
     extra: List[str] = []
     for btn in w.get("action_buttons") or []:
@@ -11851,8 +11974,8 @@ def _chart_toolbar_buttons(w: Dict[str, Any]) -> str:
     )
     # Toolbar order: custom action_buttons, stats popup button,
     # then the controls drawer toggle (rightmost). The dashboard-level
-    # "Download Charts" button in the header covers PNG export for the
-    # whole dashboard; per-tile PNG download was redundant and removed.
+    # Download dropdown's "Charts" item covers PNG export for the whole
+    # dashboard; per-tile PNG download was redundant and removed.
     return (
         "<div class=\"tile-actions\">"
         + "".join(extra)

@@ -15,9 +15,9 @@ For refresh-pipeline operations / failure modal / runner internals see `prism/da
 
 ---
 
-## 0. Contract: five rules
+## 0. Contract: six rules
 
-All five absolute. A dashboard violating any of them is broken even if `dashboard.html` renders.
+All six absolute. A dashboard violating any of them is broken even if `dashboard.html` renders.
 
 ### Rule 1 — real data only
 
@@ -57,6 +57,13 @@ All five absolute. A dashboard violating any of them is broken even if `dashboar
 - Without `output_path`, CSVs land in per-source subfolders (`market_data/`, `haver/`, `plottool_data/`) — `build.py` does not look there → refresh fails.
 - `pull_market_data` ALWAYS appends `_eod` / `_intraday` to the filename. Pass `name='rates'` → `data/rates_eod.csv`. Use `'rates_eod'` as the manifest dataset key. Pass `name='rates_eod'` → broken `data/rates_eod_eod.csv`.
 - The dataset key in `manifest.datasets` matches the on-disk CSV stem byte-for-byte. §9.2 has the per-source pattern.
+
+### Rule 6 — hand off the portal URL, never the HTML file
+
+- The deliverable PRISM surfaces is the **portal URL** (`http://reports.prism-ai.url.gs.com:8501/profile/dashboards/{dashboard_id}/`). Lead with it on the first line of the build success message.
+- The S3 path of `dashboard.html` is internal plumbing. Surface it ONLY if the user explicitly asks ("give me the raw HTML", "where on S3 does this land"). Even then, surface the portal URL alongside.
+- The portal URL is load-bearing because the serving Django view injects the `window.PRISM_VIEWER` / `PRISM_DASHBOARD_AUTHOR` / `PRISM_DASHBOARD_SHARED` JS globals before `</head>` (§2.3.1). Those globals drive the always-on chrome — Refresh / Share visibility, owner vs viewer state, observatory suppression. Opening the bare `dashboard.html` directly from S3 (or downloading it) skips that injection and the chrome silently degrades.
+- The portal URL is also the only path that picks up the hourly refresh runner's updates, the structured failure modal, the share-toggle endpoint, and the per-user community visibility. The bare HTML is a one-shot snapshot.
 
 ### The build flow IS the refresh path
 
@@ -177,55 +184,68 @@ users/{kerberos}/dashboards/{dashboard_name}/
 
 ### 2.3 Metadata block
 
-Drives the data-freshness badge, methodology popup, summary banner, refresh button, and share button. All fields optional — omit for session artifacts, set for persistent dashboards.
+Drives the data-freshness badge, methodology popup, summary banner, refresh button, and share button.
 
-| Field | Type | Purpose |
-|-------|------|---------|
-| `kerberos` / `dashboard_id` | str | Required for refresh + share buttons (`dashboard_id` defaults to `manifest.id`) |
+Three fields are **required** for every dashboard `compile_dashboard` produces — they gate the always-on header chrome (§2.3.1) and the validator rejects manifests missing them:
+
+| Required field | Type | Purpose |
+|----------------|------|---------|
+| `kerberos` | str | Owner kerberos. Gates the `Refresh` and `Share` buttons; bound to the S3 path the refresh runner writes |
+| `dashboard_id` | str | Stable id under `users/{kerberos}/dashboards/`. Typically equals `manifest.id` — set both to the same value |
+| `methodology` | str \| `{title, body}` | Markdown describing how the data is constructed. Drives the always-on `Methodology` popup. Must be non-empty |
+
+The remaining fields are optional but every persistent dashboard should at least carry `data_as_of` / `generated_at` (data-freshness badge) and `sources`:
+
+| Optional field | Type | Purpose |
+|----------------|------|---------|
 | `data_as_of` / `generated_at` | str (ISO) | Header badge `Data as of YYYY-MM-DD HH:MM:SS UTC`; compile-time fallback |
 | `sources` | list[str] | Source names (`["GS Market Data", "Haver"]`) |
 | `summary` | str \| `{title, body}` | Always-visible markdown banner above row 1 (today's read) |
-| `methodology` | str \| `{title, body}` | Click-to-open markdown popup (header button) |
-| `refresh_frequency` / `refresh_enabled` | str / bool | `hourly` / `daily` / `weekly` / `manual`; `False` hides refresh button |
+| `refresh_frequency` | str | `hourly` / `daily` / `weekly` / `manual`; controls the hourly runner — manual means `Refresh` is button-driven only |
+| `refresh_enabled` | bool | Default `True`. Setting `False` hides the always-on `Refresh` button (escape hatch for one-shot dashboards whose data source cannot be re-pulled) |
 | `tags` / `version` | list[str] / str | Echoed into the registry; manifest version string |
 | `api_url` / `status_url` | str | Refresh / status endpoint overrides |
-| `shared` / `shared_at` | bool / str | Compile-time snapshot of community-share state. `shared: True` means this dashboard is published to the `/dashboards/` Community section. `shared_at` is the ISO timestamp it was first shared. The runtime button reads live state from `window.PRISM_DASHBOARD_SHARED` if injected by the serving view; falls back to this snapshot otherwise. Defaults: `shared: False`, `shared_at: null`. |
-| `share_api_url` | str | Optional override of the share toggle endpoint (default `/api/dashboard/share/`). |
+| `shared` / `shared_at` | bool / str | Compile-time snapshot of community-share state. `shared: True` means this dashboard is published to the `/dashboards/` Community section. `shared_at` is the ISO timestamp it was first shared. The runtime button reads live state from `window.PRISM_DASHBOARD_SHARED` if injected by the serving view; falls back to this snapshot otherwise. Defaults: `shared: False`, `shared_at: null` |
+| `share_api_url` | str | Optional override of the share toggle endpoint (default `/api/dashboard/share/`) |
 
-`summary` and `methodology` accept the shared markdown grammar (§4.9). `summary` is always-visible above row 1 (today's read); `methodology` is click-to-open via the header button (how the data is constructed).
+`summary` and `methodology` accept the shared markdown grammar (§4.9). `summary` is always-visible above row 1 (today's read); `methodology` is click-to-open via the always-on header button (how the data is constructed).
 
 ```python
 metadata = {
+    "kerberos":     "goyalri",
+    "dashboard_id": "rates_monitor",
+    "methodology":  "## Sources\n* US Treasury OTR yields (FRED H.15)\n## Construction\n"
+                     "* 2s10s, 5s30s = simple cash differences in bp",
     "data_as_of": "2026-04-24T15:00:00Z",
-    "methodology": "## Sources\n* US Treasury OTR yields (FRED H.15)\n## Construction\n"
-                    "* 2s10s, 5s30s = simple cash differences in bp",
-    "summary": {"title": "Today's read",
-                 "body": "Front-end has richened ~6bp on a softer print. Curve "
-                          "**bull-steepened**, 2s10s out of inversion."},
+    "sources":    ["GS Market Data"],
+    "summary":    {"title": "Today's read",
+                    "body": "Front-end has richened ~6bp on a softer print. Curve "
+                             "**bull-steepened**, 2s10s out of inversion."},
 }
 ```
 
-**Standard top-right protocol** (left-to-right, each auto-shows when its enabling config is present):
+#### 2.3.1 Always-on header chrome
 
-| # | Element | Visible when |
-|---|---------|--------------|
-| 1 | `Data as of <ts>` | `metadata.data_as_of` or `generated_at` set |
-| 2 | `Methodology` | `metadata.methodology` set |
-| 3 | `Refresh` | `metadata.kerberos` + `dashboard_id` set, `refresh_enabled != False` |
-| 4 | `Share` / `Sharing` | `metadata.kerberos` + `dashboard_id` set, AND viewer matches author (`window.PRISM_VIEWER === metadata.kerberos`). Button label flips with state. Click on `Share` POSTs `{shared:true}`; click on `Sharing` opens a confirm modal then POSTs `{shared:false}`. |
-| 5 | `Download Charts` | always (one PNG per `widget: chart`) |
-| 6 | `Download Panel` | always (full view as single PNG) |
-| 7 | `Download Excel` | dashboard has at least one `widget: table` |
+The header's right edge is **shell-injected, not manifest-authored**. PRISM never lists these buttons in JSON; the rendering shell hardcodes them and the validator enforces the metadata that makes them functional. There is no way to suppress the chrome via the manifest.
 
-The Share button is non-author-invisible by construction: the
-serving view injects `window.PRISM_VIEWER` (the viewer's kerberos)
-and the runtime hides the button unless `viewer === metadata.kerberos`.
-The server-side endpoint is also author-only -- the registry it
-mutates is always `users/{viewer}/dashboards/dashboards_registry.json`,
-so a non-author hand-crafting the API call cannot toggle someone
-else's share state. The visibility check is UX; auth is server-side.
+Left-to-right, the four buttons every persistent dashboard renders:
 
-`header_actions[]` (§8) injects custom buttons in front of this bar.
+| # | Button | Behaviour | Gating |
+|---|--------|-----------|--------|
+| 1 | `Methodology` | Click → markdown popup with `metadata.methodology` rendered | Always present; `metadata.methodology` is required so the button always opens to real content |
+| 2 | `Refresh` | Click → POST to `api_url` (default `/api/dashboard/refresh/`) and poll `status_url` until completion. Failures pop the structured error modal with a "Copy markdown for PRISM" button | Requires `metadata.kerberos` + `metadata.dashboard_id`. Hidden when `refresh_enabled: False` (rare escape hatch). Hidden on community / observatory views (`PRISM_VIEWER !== metadata.kerberos`) |
+| 3 | `Share` / `Sharing` | Click on `Share` → POST `{shared: true}` to the share-toggle endpoint, label flips to `Sharing`. Click on `Sharing` → confirm modal, POST `{shared: false}` | Requires `metadata.kerberos` + `metadata.dashboard_id`. Hidden unless `window.PRISM_VIEWER === metadata.kerberos` (server-side gate is enforced separately by the registry-path construction in §6.8 of `prism/dashboards-portal.md`). Hidden entirely on Observatory dashboards (`PRISM_IS_OBSERVATORY = true`) |
+| 4 | `Download ▾` | Click opens a dropdown with three menu items: `Panel` (full view as a single PNG via html2canvas), `Charts` (one PNG per `widget: chart`), `Excel` (one workbook with one sheet per `widget: table`). The `Excel` item is hidden when no table widgets exist. Click outside / Esc closes the menu | Always present |
+
+The chrome also carries the `theme-toggle` (always on) and the `Data as of <ts>` pill (visible when `metadata.data_as_of` or `generated_at` is set). Share-button auth is server-side too — the share-toggle endpoint always writes `users/{caller}/dashboards/dashboards_registry.json`, so a non-author cannot toggle someone else's state regardless of UI. `header_actions[]` (§8) injects custom buttons to the **left** of this chrome bar; the validator rejects any custom `id` that would collide with a reserved chrome id (full list in §8).
+
+#### 2.3.2 "Why is my Refresh button missing?"
+
+The runtime emits `console.warn('[prism] Refresh button hidden: ...')` naming the missing field(s) whenever the JS gate fires. Three causes:
+
+1. **Missing metadata.** `compile_dashboard` rejects this at validate time, but legacy `dashboard.html` files from before that guard can still be on S3. Recompile via Tool 2.
+2. **`metadata.refresh_enabled: False`.** Rare escape hatch; drop the field or set `True` and recompile.
+3. **Cross-user / Observatory view.** Only the author refreshes. Visit your own `/profile/dashboards/<id>/`.
 
 ### 2.4 `compile_dashboard` parameters
 
@@ -1048,7 +1068,7 @@ Tabs lazily initialise charts on first activation; last-active tab persisted in 
 
 ## 8. Header actions
 
-Optional `manifest.header_actions[]` appends custom buttons / links to the header (left of the standard top-right protocol). Use for dashboard-specific escape hatches.
+Optional `manifest.header_actions[]` appends custom buttons / links to the header (left of the always-on chrome — Methodology / Refresh / Share / Download — described in §2.3.1). Use for dashboard-specific escape hatches.
 
 | Key | Purpose |
 |-----|---------|
@@ -1056,7 +1076,7 @@ Optional `manifest.header_actions[]` appends custom buttons / links to the heade
 | `href` | If set, renders `<a>` (opens in new tab by default) |
 | `onclick` | Name of a global JS function. One of `href` / `onclick` is required |
 | `target` | `"_self"` to open inline (defaults to `_blank`) |
-| `id` | Optional DOM id |
+| `id` | Optional DOM id. Cannot collide with a reserved chrome id (`refresh-btn`, `share-btn`, `download-btn`, `download-menu`, `methodology-btn`, `theme-toggle`, `export-all`, `export-dashboard`, `export-excel`, `data-as-of`, `data-as-of-val`, `header-actions`). The validator rejects collisions because a custom action with one of these ids would silently shadow the live chrome at runtime |
 | `primary` | `True` → GS Navy primary button styling |
 | `icon` | Optional leading glyph |
 | `title` | Hover tooltip |
@@ -1152,11 +1172,21 @@ df.columns = ['us_2y', 'us_10y']      # plain English (Rule 1)
 # Dataset key 'rates_eod' matches the on-disk CSV stem (Rule 5).
 initial_manifest = {
     "schema_version": 1, "id": DASHBOARD_NAME, "title": "Rates Monitor",
-    "metadata": {"kerberos": KERBEROS, "dashboard_id": DASHBOARD_NAME,
-                  "data_as_of": str(df.index.max().date()),
-                  "generated_at": datetime.now(timezone.utc).isoformat(),
-                  "sources": ["GS Market Data"], "refresh_frequency": "daily",
-                  "refresh_enabled": True, "tags": ["rates"]},
+    "metadata": {
+        "kerberos":     KERBEROS,
+        "dashboard_id": DASHBOARD_NAME,
+        "methodology": (
+            "## Sources\n* GS Market Data: 2Y + 10Y USD swap rates (EOD)\n"
+            "## Construction\n* Daily close pulled via pull_market_data; "
+            "no transforms before charting"
+        ),
+        "data_as_of":        str(df.index.max().date()),
+        "generated_at":      datetime.now(timezone.utc).isoformat(),
+        "sources":           ["GS Market Data"],
+        "refresh_frequency": "daily",
+        "refresh_enabled":   True,
+        "tags":              ["rates"],
+    },
     "datasets": {"rates_eod": df.reset_index()},
     "layout": {"rows": [[{"widget": "chart", "id": "curve", "w": 12, "title": "UST Curve",
         "spec": {"chart_type": "multi_line", "dataset": "rates_eod",
@@ -1558,7 +1588,8 @@ Run `s3_manager.list()` on `{DASHBOARD_PATH}` and verify each path:
 
 **Configuration:**
 
-- `metadata.kerberos` + `dashboard_id` + `data_as_of` set; `refresh_frequency` set; `refresh_enabled` defaults to `True`
+- `metadata.kerberos`, `metadata.dashboard_id`, and `metadata.methodology` all set (validator hard-rejects the build without them — they gate the always-on Methodology / Refresh / Share chrome buttons)
+- `metadata.data_as_of` set; `refresh_frequency` set; `refresh_enabled` defaults to `True`
 - Registry entry **appended into `registry['dashboards']`** (not written as a top-level key); verify by re-loading and asserting `DASHBOARD_NAME in [d['id'] for d in registry['dashboards']]`
 - `update_user_manifest(kerberos, artifact_type='dashboard')` called AFTER the registry write succeeds (the wrapper updates the user manifest pointer block, it does not write the registry itself)
 
@@ -1580,7 +1611,7 @@ Run `s3_manager.list()` on `{DASHBOARD_PATH}` and verify each path:
 - Tool 2 same pattern; `build.py` is thin (~12 lines)
 - Both ran cleanly to completion — the build IS the refresh smoke test
 
-**Hand-off:** portal URL printed only after Tool 3 succeeds.
+**Hand-off (Rule 6):** the success message leads with the portal URL (`/profile/dashboards/{id}/`); the `dashboard.html` S3 path is mentioned only if the user explicitly asks for it.
 
 ---
 

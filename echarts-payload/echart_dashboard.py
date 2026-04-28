@@ -158,7 +158,35 @@ def _err(path: str, msg: str) -> str:
     return f"{path}: {msg}"
 
 
-def validate_manifest(manifest: Dict[str, Any]) -> Tuple[bool, List[str]]:
+# DOM ids reserved by the rendering shell for the always-on header chrome
+# (Methodology / Refresh / Share / Download dropdown / theme toggle / data-as-of
+# pill / refresh-error pill). A manifest's ``header_actions[].id`` cannot
+# collide with any of these -- the chrome is non-suppressible and an authored
+# button with one of these ids would silently shadow the live chrome at runtime.
+RESERVED_HEADER_ACTION_IDS = frozenset({
+    "methodology-btn",
+    "refresh-btn",
+    "refresh-btn-label",
+    "refresh-err-btn",
+    "share-btn",
+    "share-btn-label",
+    "download-btn",
+    "download-btn-label",
+    "download-menu",
+    "export-all",
+    "export-dashboard",
+    "export-excel",
+    "theme-toggle",
+    "data-as-of",
+    "data-as-of-val",
+    "header-actions",
+})
+
+
+def validate_manifest(
+    manifest: Dict[str, Any],
+    require_persistence_metadata: bool = False,
+) -> Tuple[bool, List[str]]:
     """Validate a manifest dict. Return (ok, error_list).
 
     Datasets are normalized on a shallow copy so that DataFrames passed
@@ -175,6 +203,18 @@ def validate_manifest(manifest: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
     Missing required fields produce one error each; the validator
     does not short-circuit on first error.
+
+    ``require_persistence_metadata`` (default ``False``) elevates the
+    chrome-required metadata fields from optional to mandatory. When
+    ``True``, the manifest MUST set ``metadata.kerberos``,
+    ``metadata.dashboard_id``, and ``metadata.methodology`` -- the three
+    fields that gate the always-on header chrome (Refresh, Share, and
+    Methodology buttons respectively). ``compile_dashboard`` and
+    ``Dashboard.build`` pass ``True`` by default; a missing field there
+    means the resulting dashboard would silently render without those
+    buttons, which is exactly the bug class this guard exists to
+    prevent. Lower-level entry points (``render_dashboard``, direct
+    ``validate_manifest`` calls in tests) keep the lenient default.
     """
     errs: List[str] = []
     if not isinstance(manifest, dict):
@@ -224,54 +264,101 @@ def validate_manifest(manifest: Dict[str, Any]) -> Tuple[bool, List[str]]:
                               f"unknown palette '{palette}'; "
                               f"valid: {sorted(PALETTES.keys())}"))
 
-    # metadata block (optional; all fields optional)
+    # metadata block. Type-checks always run; presence-checks for the
+    # three chrome-gating fields (kerberos / dashboard_id / methodology)
+    # are conditional on ``require_persistence_metadata`` -- on for the
+    # main user-facing entry points (compile_dashboard, Dashboard.build),
+    # off for lower-level / test contexts.
     metadata = manifest.get("metadata")
-    if metadata is not None:
-        if not isinstance(metadata, dict):
-            errs.append(_err("metadata", "must be a dict"))
-        else:
-            for k in ("kerberos", "dashboard_id", "data_as_of",
-                       "generated_at", "version", "api_url", "status_url"):
-                v = metadata.get(k)
-                if v is not None and not isinstance(v, str):
-                    errs.append(_err(f"metadata.{k}",
-                                       f"must be a string, got {type(v).__name__}"))
-            for k in ("sources", "tags"):
-                v = metadata.get(k)
-                if v is not None and not isinstance(v, list):
-                    errs.append(_err(f"metadata.{k}", "must be a list of strings"))
-            re = metadata.get("refresh_enabled")
-            if re is not None and not isinstance(re, bool):
-                errs.append(_err("metadata.refresh_enabled", "must be a bool"))
-            rf = metadata.get("refresh_frequency")
-            if rf is not None and rf not in VALID_REFRESH_FREQUENCIES:
-                errs.append(_err("metadata.refresh_frequency",
-                                   f"'{rf}' not in "
-                                   f"{sorted(VALID_REFRESH_FREQUENCIES)}"))
-            # methodology: markdown string OR {title?, body} dict.
-            # Drives the header "Methodology" popup button.
-            meth = metadata.get("methodology")
-            if meth is not None:
-                if isinstance(meth, str):
-                    pass
-                elif isinstance(meth, dict):
-                    for k in ("title", "body", "text"):
-                        v = meth.get(k)
-                        if v is not None and not isinstance(v, str):
-                            errs.append(_err(
-                                f"metadata.methodology.{k}",
-                                f"must be a string, got {type(v).__name__}"))
-                    if not (meth.get("body") or meth.get("text")):
-                        errs.append(_err(
-                            "metadata.methodology",
-                            "dict form requires a 'body' (or 'text') key"))
-                else:
+    if metadata is not None and not isinstance(metadata, dict):
+        errs.append(_err("metadata", "must be a dict"))
+        metadata = None
+    if metadata is None and require_persistence_metadata:
+        # Empty / missing metadata block on the main entry path is the
+        # bug-class this guard exists to catch. Surface a single
+        # actionable error pointing at all three required fields.
+        errs.append(_err(
+            "metadata",
+            "required block missing. Persistent dashboards must set "
+            "metadata.kerberos, metadata.dashboard_id, and "
+            "metadata.methodology -- these gate the always-on Refresh, "
+            "Share, and Methodology buttons in the header chrome."))
+    if isinstance(metadata, dict):
+        for k in ("kerberos", "dashboard_id", "data_as_of",
+                   "generated_at", "version", "api_url", "status_url"):
+            v = metadata.get(k)
+            if v is not None and not isinstance(v, str):
+                errs.append(_err(f"metadata.{k}",
+                                   f"must be a string, got {type(v).__name__}"))
+        for k in ("sources", "tags"):
+            v = metadata.get(k)
+            if v is not None and not isinstance(v, list):
+                errs.append(_err(f"metadata.{k}", "must be a list of strings"))
+        re = metadata.get("refresh_enabled")
+        if re is not None and not isinstance(re, bool):
+            errs.append(_err("metadata.refresh_enabled", "must be a bool"))
+        rf = metadata.get("refresh_frequency")
+        if rf is not None and rf not in VALID_REFRESH_FREQUENCIES:
+            errs.append(_err("metadata.refresh_frequency",
+                               f"'{rf}' not in "
+                               f"{sorted(VALID_REFRESH_FREQUENCIES)}"))
+        # methodology: markdown string OR {title?, body} dict.
+        # Drives the header "Methodology" popup button.
+        meth = metadata.get("methodology")
+        if meth is not None:
+            if isinstance(meth, str):
+                if require_persistence_metadata and not meth.strip():
                     errs.append(_err(
                         "metadata.methodology",
-                        "must be a markdown string or "
-                        "{title?, body} dict"))
+                        "required for persistent dashboards; got empty string"))
+            elif isinstance(meth, dict):
+                for k in ("title", "body", "text"):
+                    v = meth.get(k)
+                    if v is not None and not isinstance(v, str):
+                        errs.append(_err(
+                            f"metadata.methodology.{k}",
+                            f"must be a string, got {type(v).__name__}"))
+                if not (meth.get("body") or meth.get("text")):
+                    errs.append(_err(
+                        "metadata.methodology",
+                        "dict form requires a 'body' (or 'text') key"))
+            else:
+                errs.append(_err(
+                    "metadata.methodology",
+                    "must be a markdown string or "
+                    "{title?, body} dict"))
 
-    # header_actions: optional custom buttons/links in the header
+        # Required-presence checks for the three chrome gates.
+        if require_persistence_metadata:
+            for k, hint in (
+                ("kerberos",
+                 "owner kerberos; gates the Refresh + Share buttons"),
+                ("dashboard_id",
+                 "stable id under users/{kerberos}/dashboards/; gates "
+                 "the Refresh button and the share-toggle endpoint"),
+                ("methodology",
+                 "markdown describing how the data is constructed; "
+                 "drives the Methodology popup. Use a plain string or "
+                 "{title, body} dict"),
+            ):
+                v = metadata.get(k)
+                missing = (
+                    v is None
+                    or (isinstance(v, str) and not v.strip())
+                    or (isinstance(v, dict) and not (
+                        v.get("body") or v.get("text")))
+                )
+                if missing:
+                    errs.append(_err(
+                        f"metadata.{k}",
+                        f"required for persistent dashboards -- {hint}"))
+
+    # header_actions: optional custom buttons/links in the header.
+    # Custom buttons are inserted to the LEFT of the always-on chrome
+    # (Methodology / Refresh / Share / Download / theme toggle). The
+    # chrome's DOM ids are reserved -- a custom action that re-uses one
+    # would silently shadow the live chrome at runtime, which has bitten
+    # us before.
     header_actions = manifest.get("header_actions")
     if header_actions is not None:
         if not isinstance(header_actions, list):
@@ -284,6 +371,16 @@ def validate_manifest(manifest: Dict[str, Any]) -> Tuple[bool, List[str]]:
                     continue
                 if not a.get("label"):
                     errs.append(_err(f"{base}.label", "required"))
+                aid = a.get("id")
+                if aid is not None and aid in RESERVED_HEADER_ACTION_IDS:
+                    errs.append(_err(
+                        f"{base}.id",
+                        f"'{aid}' collides with a reserved chrome id "
+                        f"({sorted(RESERVED_HEADER_ACTION_IDS)}). "
+                        "Pick a different id; the chrome buttons "
+                        "(Methodology / Refresh / Share / Download / "
+                        "theme toggle) cannot be replaced via "
+                        "header_actions."))
                 if not (a.get("href") or a.get("onclick")):
                     errs.append(_err(
                         base,
@@ -1434,9 +1531,12 @@ class Dashboard:
 
     def build(self, session_path: Optional[Union[str, Path]] = None,
               output_path: Optional[Union[str, Path]] = None,
-              write_html: bool = True, write_json: bool = True) -> DashboardResult:
+              write_html: bool = True, write_json: bool = True,
+              require_persistence_metadata: bool = True) -> DashboardResult:
         manifest = self.to_manifest()
-        ok, errs = validate_manifest(manifest)
+        ok, errs = validate_manifest(
+            manifest,
+            require_persistence_metadata=require_persistence_metadata)
         if not ok:
             return DashboardResult(
                 manifest=manifest, manifest_path=None,
@@ -6273,6 +6373,7 @@ def compile_dashboard(
     png_dir: Optional[Union[str, Path]] = None,
     png_scale: int = 2,
     strict: bool = True,
+    require_persistence_metadata: bool = True,
 ) -> DashboardResult:
     """JSON-first entry point. Compile a manifest to a dashboard.
 
@@ -6352,7 +6453,17 @@ def compile_dashboard(
     _apply_show_when_compile(manifest_dict)
     _augment_manifest(manifest_dict)
 
-    ok, errs = validate_manifest(manifest_dict)
+    # compile_dashboard is the user-facing build path; the four
+    # always-on chrome buttons (Methodology / Refresh / Share /
+    # Download dropdown) must all be functional, which means the
+    # gating metadata fields must all be present. validate_manifest
+    # rejects manifests that would silently render with chrome buttons
+    # missing. ``require_persistence_metadata`` defaults to True for
+    # this reason; tests / dev fixtures that exercise the renderer with
+    # bare-minimum manifests can opt out via the kwarg.
+    ok, errs = validate_manifest(
+        manifest_dict,
+        require_persistence_metadata=require_persistence_metadata)
     if not ok or compute_errors:
         return DashboardResult(
             manifest=manifest_dict, manifest_path=None,
