@@ -3476,6 +3476,11 @@ class AxisConfig:
     # Shape: ``{"interval": "month", "step": 6}``.
     tick_step: Optional[Dict[str, Any]] = None
     format: Optional[str] = None
+    # Vega expression for per-tick label formatting. When set, takes
+    # precedence over ``format`` and lets us produce conditional
+    # labels (e.g. show date at midnight ticks, time-of-day at other
+    # ticks on a multi-day intraday axis). See ``determine_date_format``.
+    label_expr: Optional[str] = None
     title: Optional[str] = None
     grid: bool = True
     domain_min: Optional[float] = None
@@ -3495,11 +3500,16 @@ class DateFormatConfig:
     span when we asked for 4.
     """
 
-    format: str
+    format: Optional[str]
     tick_count: Optional[int]
     label_angle: Optional[int]
     description: str
     tick_step: Optional[Dict[str, Any]] = None
+    # Optional Vega expression for conditional per-tick formatting
+    # (e.g. multi-day intraday axes that show date at midnight and
+    # time elsewhere). When present, the renderer uses this instead
+    # of ``format``.
+    label_expr: Optional[str] = None
 
 
 # Static date-format presets keyed by intent. ``determine_date_format`` may
@@ -3507,11 +3517,15 @@ class DateFormatConfig:
 # dynamically computed ``label_angle``. ``label_angle=None`` means "let
 # ``calculate_optimal_label_angle`` decide".
 #
-# House style: every label that contains a month uses the abbreviated
-# 3-letter month (``%b`` -> "Jan", "Apr", etc.) and a 2-digit year
-# (``%y`` -> "25"). The canonical "month + year" form is ``%b-%y``
-# ("Apr-25"). Never use full month names (``%B``) and never display a
-# year on its own without a month.
+# House style:
+#   - Sub-annual ticks (every 1, 3, or 6 months): use ``%b-%y``
+#     ("Apr-25") so the month is informative.
+#   - Annual or longer ticks (every 12+ months): every tick lands on
+#     January and the "Jan-" prefix is pure noise, so we drop down to
+#     bare ``%Y`` ("2024"). Charts with multi-decade history are far
+#     more readable this way.
+# Always abbreviate months (``%b`` -> "Jan"), never full month names
+# (``%B``), and always 2-digit year (``%y``) when paired with a month.
 DATE_FORMAT_PRESETS: Dict[str, DateFormatConfig] = {
     "quarterly": DateFormatConfig(
         format="%b-%y",
@@ -3706,7 +3720,11 @@ def determine_date_format(
 
     The function dispatches in three layers:
       1. **Intraday** (span < ~5 days with sub-daily granularity):
-         minute / hour formats with a tight tick budget.
+         24-hour ``%H:%M`` time labels with explicit minute / hour /
+         day tick steps. Date prefix (``%b %d``) is added whenever the
+         data crosses midnight so adjacent ``00:00`` ticks remain
+         unambiguous; full-day strides drop the time component
+         entirely.
       2. **Short calendar spans** (≤ 5 days, daily granularity):
          force ``tick_count`` to match the number of calendar days so
          Vega-Lite doesn't place sub-daily ticks that produce duplicate
@@ -3716,7 +3734,7 @@ def determine_date_format(
          month-day, day-month) and let
          ``calculate_optimal_label_angle`` decide the rotation.
 
-    All non-intraday ``tick_count`` values are clamped by
+    All ``tick_count`` / ``tick_step`` values are clamped by
     ``_max_ticks_for_width`` so the result honours the available canvas.
     """
     if len(date_series) == 0:
@@ -3729,50 +3747,165 @@ def determine_date_format(
     span_hours = span_delta.total_seconds() / 3600
 
     # ---- INTRADAY DETECTION (must come FIRST) -----------------------------
-    if span_days <= 5:
-        unique_dates = date_series.dt.date.nunique()
-        points_per_day = len(date_series) / max(unique_dates, 1)
-        is_intraday = points_per_day > 10
+    # Detect intraday data by inter-sample cadence rather than a fixed
+    # "points per day" threshold: any series whose median sample-to-
+    # sample gap is sub-daily counts as intraday, which catches both
+    # high-frequency (1-min ticks) and sparse (5 hourly readings) cases.
+    if span_hours <= 5 * 24 and len(date_series) >= 2:
+        date_diffs = date_series.sort_values().diff().dropna()
+        if len(date_diffs) > 0:
+            median_diff_seconds = float(date_diffs.dt.total_seconds().median())
+        else:
+            median_diff_seconds = float("inf")
+        is_intraday = median_diff_seconds < 20 * 3600
 
         if is_intraday:
-            if span_hours <= 1:
-                return DateFormatConfig(
-                    format="%I:%M%p", tick_count=6, label_angle=0,
-                    description="Intraday < 1 hour",
+            unique_dates = date_series.dt.date.nunique()
+            crosses_midnight = unique_dates > 1
+
+            # Initial stride targeting ~5-7 ticks across a clean
+            # boundary. Always picks a "nice" interval so adjacent
+            # ticks land on uniform stride (10s/30s, 1/5/10/15/30 min,
+            # 1/2/3/6/12 h, 1 day) rather than whatever Vega-Lite
+            # would auto-snap to from a soft tick_count hint.
+            #
+            # ``stride_seconds`` is the canonical stride. For spans
+            # >= 5 min we work in minute-aligned strides (most common
+            # case); for shorter spans we drop to second-aligned.
+            span_seconds = span_delta.total_seconds()
+            if span_seconds <= 60:
+                stride_seconds = 10
+            elif span_seconds <= 300:
+                stride_seconds = 30
+            elif span_hours <= 0.5:
+                stride_seconds = 5 * 60
+            elif span_hours <= 1:
+                stride_seconds = 10 * 60
+            elif span_hours <= 2:
+                stride_seconds = 15 * 60
+            elif span_hours <= 3:
+                stride_seconds = 30 * 60
+            elif span_hours <= 7:
+                stride_seconds = 60 * 60
+            elif span_hours <= 14:
+                stride_seconds = 120 * 60
+            elif span_hours <= 24:
+                stride_seconds = 180 * 60
+            elif span_hours <= 48:
+                stride_seconds = 360 * 60
+            elif span_hours <= 72:
+                stride_seconds = 720 * 60
+            else:
+                stride_seconds = 1440 * 60
+
+            # Conditional Vega expression for multi-day intraday axes.
+            # A naive ``"%b %d %H:%M"`` format on every tick produces
+            # ugly long labels ("Apr 28 12:00") that have to be
+            # rotated -45 to fit. Instead, render the date *only* at
+            # midnight ticks and the time-of-day at other ticks. This
+            # keeps every label short (max 6 chars), horizontal, and
+            # conveys the day boundary visually:
+            #
+            #     12:00   Apr 29   12:00   Apr 30
+            #
+            # The first day's date isn't shown unless a tick happens
+            # to land on its midnight; the chart title / subtitle
+            # carries that anchor.
+            INTRADAY_DATETIME_LABEL_EXPR = (
+                "hours(datum.value) === 0 && minutes(datum.value) === 0 "
+                "&& seconds(datum.value) === 0 "
+                "? timeFormat(datum.value, '%b %d') "
+                ": timeFormat(datum.value, '%H:%M')"
+            )
+
+            def _intraday_format_and_sample(
+                stride_s: int,
+            ) -> Tuple[Optional[str], Optional[str], str]:
+                """Pick format / labelExpr + width-sample for a stride.
+
+                Returns ``(format, label_expr, sample_label)``. Exactly
+                one of ``format`` or ``label_expr`` is non-None.
+
+                  - Day-aligned stride (>= 86400 s): date-only ``%b %d``.
+                    Every tick lands at midnight so time is redundant.
+                  - Sub-minute stride (< 60 s): ``%H:%M:%S``.
+                  - Cross-midnight or span > 24h: conditional labelExpr
+                    (date at midnight, time elsewhere). Sample is the
+                    longest expected label, ``"Apr 28"``.
+                  - Single-day intraday: ``%H:%M``.
+                """
+                if stride_s >= 86400:
+                    return ("%b %d", None, "Apr 28")
+                if stride_s < 60:
+                    return ("%H:%M:%S", None, "09:30:00")
+                if crosses_midnight or span_hours > 24:
+                    return (None, INTRADAY_DATETIME_LABEL_EXPR, "Apr 28")
+                return ("%H:%M", None, "09:30")
+
+            fmt, label_expr, sample = _intraday_format_and_sample(
+                stride_seconds,
+            )
+
+            # Width-aware fitting. The labelExpr design keeps every
+            # label short (max 6 chars), so the strategy is: bump
+            # stride until labels fit horizontally. Only rotate as a
+            # last resort if even the coarsest stride still doesn't
+            # fit (extremely narrow composite panels).
+            nice_strides_s = [
+                10, 30,                                     # seconds
+                60, 5 * 60, 10 * 60, 15 * 60, 30 * 60,      # minutes
+                60 * 60, 2 * 60 * 60, 3 * 60 * 60,          # hours
+                6 * 60 * 60, 12 * 60 * 60,
+                86400, 2 * 86400,                           # days
+            ]
+            n_ticks = max(int(span_seconds / stride_seconds) + 1, 2)
+            max_horiz = _max_ticks_for_width(chart_width, sample, 0)
+            while (
+                n_ticks > max_horiz
+                and stride_seconds < nice_strides_s[-1]
+            ):
+                next_stride = next(
+                    (s for s in nice_strides_s if s > stride_seconds),
+                    nice_strides_s[-1],
                 )
-            if span_hours <= 2:
-                return DateFormatConfig(
-                    format="%I:%M%p", tick_count=8, label_angle=0,
-                    description="Intraday 1-2 hours",
+                stride_seconds = next_stride
+                fmt, label_expr, sample = _intraday_format_and_sample(
+                    stride_seconds,
                 )
-            if span_hours <= 3:
-                return DateFormatConfig(
-                    format="%I:%M%p", tick_count=6, label_angle=0,
-                    description="Intraday 2-3 hours",
-                )
-            if span_hours <= 12:
-                return DateFormatConfig(
-                    format="%I%p", tick_count=8, label_angle=0,
-                    description="Intraday single day",
-                )
-            if span_days <= 1:
-                return DateFormatConfig(
-                    format="%I%p", tick_count=8, label_angle=0,
-                    description="Intraday ~1 day",
-                )
-            if span_days <= 2:
-                return DateFormatConfig(
-                    format="%m/%d %I%p", tick_count=10, label_angle=30,
-                    description="Intraday 1-2 days",
-                )
-            if span_days <= 3:
-                return DateFormatConfig(
-                    format="%m/%d %I%p", tick_count=12, label_angle=45,
-                    description="Intraday 2-3 days",
-                )
+                n_ticks = max(int(span_seconds / stride_seconds) + 1, 2)
+                max_horiz = _max_ticks_for_width(chart_width, sample, 0)
+
+            if n_ticks <= max_horiz:
+                angle = 0
+            else:
+                max_diag = _max_ticks_for_width(chart_width, sample, -45)
+                angle = -45 if n_ticks <= max_diag else -90
+
+            if stride_seconds < 60:
+                tick_step = {"interval": "seconds", "step": stride_seconds}
+                stride_label = f"{stride_seconds}s"
+            elif stride_seconds < 3600:
+                tick_step = {
+                    "interval": "minutes", "step": stride_seconds // 60,
+                }
+                stride_label = f"{stride_seconds // 60}min"
+            elif stride_seconds < 86400:
+                tick_step = {
+                    "interval": "hours", "step": stride_seconds // 3600,
+                }
+                stride_label = f"{stride_seconds // 3600}h"
+            else:
+                tick_step = {
+                    "interval": "day", "step": stride_seconds // 86400,
+                }
+                stride_label = f"{stride_seconds // 86400}d"
             return DateFormatConfig(
-                format="%m/%d %I%p", tick_count=10, label_angle=45,
-                description="Intraday 3-5 days",
+                format=fmt,
+                tick_count=None,
+                label_angle=angle,
+                description=f"Intraday ticks (every {stride_label})",
+                tick_step=tick_step,
+                label_expr=label_expr,
             )
 
     # ---- BUG-1 FIX: short daily spans (<= 5 days) -------------------------
@@ -3794,40 +3927,50 @@ def determine_date_format(
     span_years = span_days / 365.25
     span_months = span_days / 30.44
 
-    # ---- > 10 years: always year-only --------------------------------------
-    # House style still applies: even on multi-year axes, show a month
-    # so the label reads as "Jan-25" rather than a bare "2025". This
-    # avoids Vega-Lite's hierarchical-default fallback to "August /
-    # December / 2026".
+    # ---- > 10 years: year-only --------------------------------------------
+    # On multi-decade axes the tick stride is annual or longer, so every
+    # tick lands on January and the "Jan-" prefix carries zero
+    # information. Drop the month and use bare 4-digit year ("1994",
+    # "2024"). An explicit year ``tick_step`` keeps Vega-Lite from
+    # placing ticks at fractional-year boundaries that wouldn't render
+    # to a clean year label.
+    #
+    # Stride targets ~5-7 visible ticks across common span buckets:
+    #   10-15y -> every 2 years
+    #   15-50y -> every 5 years
+    #   >50y   -> every 10 years
+    # If the chosen stride produces too many labels for the canvas
+    # (very narrow chart), bump to the next nicer multiple.
     if span_years > 10:
-        if span_years > 30:
-            estimated_ticks = min(int(span_years / 10), 12)
-            sample_labels = [
-                f"Jan-{int(min_date.year + i * 10) % 100:02d}"
-                for i in range(estimated_ticks)
-            ]
-            label_angle = calculate_optimal_label_angle(
-                sample_labels, chart_width, estimated_ticks
-            )
-            return DateFormatConfig(
-                format="%b-%y",
-                tick_count=None,
-                label_angle=label_angle,
-                description="Decade ticks (span > 30 years)",
-            )
-        estimated_ticks = min(int(span_years / 5), 12)
+        if span_years > 50:
+            stride_years = 10
+        elif span_years > 15:
+            stride_years = 5
+        else:
+            stride_years = 2
+        max_horiz = _max_ticks_for_width(chart_width, "2025", 0)
+        n_ticks = max(int(span_years / stride_years) + 1, 2)
+        if n_ticks > max_horiz:
+            for nice in (2, 5, 10, 20, 25, 50):
+                if nice > stride_years:
+                    stride_years = nice
+                    n_ticks = max(int(span_years / stride_years) + 1, 2)
+                    if n_ticks <= max_horiz:
+                        break
+        estimated_ticks = max(int(span_years / stride_years), 2)
         sample_labels = [
-            f"Jan-{int(min_date.year + i * 5) % 100:02d}"
+            f"{int(min_date.year + i * stride_years)}"
             for i in range(estimated_ticks)
         ]
         label_angle = calculate_optimal_label_angle(
             sample_labels, chart_width, estimated_ticks
         )
         return DateFormatConfig(
-            format="%b-%y",
+            format="%Y",
             tick_count=None,
             label_angle=label_angle,
-            description="Multi-year ticks (span 10-30 years)",
+            description=f"Multi-year ticks (every {stride_years} years)",
+            tick_step={"interval": "year", "step": stride_years},
         )
 
     # Tick budgets are deliberately conservative: a clean axis has 4-6
@@ -3862,20 +4005,26 @@ def determine_date_format(
         date_diffs = date_series.sort_values().diff().dropna()
         if len(date_diffs) > 0:
             median_diff_days = date_diffs.dt.days.median()
-            # Sub-annual data with sub-10-year span: month-year format.
+            # Sub-annual data with sub-10-year span: pick a tick step,
+            # then choose format based on whether ticks land annually
+            # (every 12+ months -> ``%Y``, "2025") or sub-annually
+            # (-> ``%b-%y``, "Apr-25").
             if 2 <= median_diff_days <= 30 and span_years <= 10:
                 step_months = _step_for_target(span_months, 5)
+                fmt = "%Y" if step_months >= 12 else "%b-%y"
+                sample = "2025" if step_months >= 12 else "Apr-25"
                 # Verify this step actually fits the canvas; double it
                 # if needed (e.g. 1024px chart with 60-month span at
                 # step=6 wants 11 ticks but only fits ~9 horizontally).
                 while True:
                     n_ticks = _ticks_for_step(span_months, step_months)
+                    fmt = "%Y" if step_months >= 12 else "%b-%y"
+                    sample = "2025" if step_months >= 12 else "Apr-25"
                     fits = n_ticks <= _max_ticks_for_width(
-                        chart_width, "Apr-25", 0,
+                        chart_width, sample, 0,
                     )
                     if fits or step_months >= 120:
                         break
-                    # Pick the next-nicer step.
                     for nice in (1, 2, 3, 6, 12, 24, 36, 60, 120):
                         if nice > step_months:
                             step_months = nice
@@ -3884,13 +4033,13 @@ def determine_date_format(
                         break
                 if (
                     _ticks_for_step(span_months, step_months)
-                    > _max_ticks_for_width(chart_width, "Apr-25", 0)
+                    > _max_ticks_for_width(chart_width, sample, 0)
                 ):
                     angle = -45
                 else:
                     angle = 0
                 return DateFormatConfig(
-                    format="%b-%y",
+                    format=fmt,
                     tick_count=None,
                     label_angle=angle,
                     description=(
@@ -3908,20 +4057,24 @@ def determine_date_format(
             step_months = 12
         else:
             step_months = 6
+        fmt = "%Y" if step_months >= 12 else "%b-%y"
+        sample = "2025" if step_months >= 12 else "Apr-25"
         n_ticks = _ticks_for_step(span_months, step_months)
-        max_horiz = _max_ticks_for_width(chart_width, "Apr-25", 0)
+        max_horiz = _max_ticks_for_width(chart_width, sample, 0)
         if n_ticks > max_horiz:
-            # Bump to the next nicer step.
             for nice in (12, 24, 36, 60, 120):
                 if nice > step_months:
                     step_months = nice
+                    fmt = "%Y" if step_months >= 12 else "%b-%y"
+                    sample = "2025" if step_months >= 12 else "Apr-25"
+                    max_horiz = _max_ticks_for_width(chart_width, sample, 0)
                     if _ticks_for_step(span_months, step_months) <= max_horiz:
                         break
             angle = 0 if _ticks_for_step(span_months, step_months) <= max_horiz else -45
         else:
             angle = 0
         return DateFormatConfig(
-            format="%b-%y",
+            format=fmt,
             tick_count=None,
             label_angle=angle,
             description=f"Year-month ticks (every {step_months} months)",
@@ -3932,15 +4085,20 @@ def determine_date_format(
         # Aim for ~4 semi-annual ticks (e.g. 2 years -> 5 ticks every
         # 6 months). For >2 years bump to 6-month or annual.
         step_months = 6 if span_years <= 2.5 else 12
+        fmt = "%Y" if step_months >= 12 else "%b-%y"
+        sample = "2025" if step_months >= 12 else "Apr-25"
         n_ticks = _ticks_for_step(span_months, step_months)
-        max_horiz = _max_ticks_for_width(chart_width, "Apr-25", 0)
+        max_horiz = _max_ticks_for_width(chart_width, sample, 0)
         if n_ticks > max_horiz:
             step_months = 12
+            fmt = "%Y"
+            sample = "2025"
+            max_horiz = _max_ticks_for_width(chart_width, sample, 0)
             angle = 0 if _ticks_for_step(span_months, step_months) <= max_horiz else -45
         else:
             angle = 0
         return DateFormatConfig(
-            format="%b-%y",
+            format=fmt,
             tick_count=None,
             label_angle=angle,
             description=f"Semi-annual to annual ticks (every {step_months} months)",
@@ -4261,6 +4419,7 @@ def get_axis_beautification(
                 tick_count=date_config.tick_count,
                 tick_step=date_config.tick_step,
                 format=date_config.format,
+                label_expr=date_config.label_expr,
             )
         elif pd.api.types.is_numeric_dtype(x_data):
             configs["x"] = AxisConfig(label_angle=0)
@@ -4360,7 +4519,13 @@ def apply_beautification_to_spec(
                 enc["x"]["axis"] = {}
             if x_config.label_angle != 0:
                 enc["x"]["axis"]["labelAngle"] = x_config.label_angle
-            if x_config.format:
+            # ``labelExpr`` takes precedence over ``format`` -- it lets
+            # us produce conditional per-tick labels (e.g. date at
+            # midnight, time elsewhere) that no static format string
+            # can express.
+            if x_config.label_expr:
+                enc["x"]["axis"]["labelExpr"] = x_config.label_expr
+            elif x_config.format:
                 enc["x"]["axis"]["format"] = x_config.format
                 if enc["x"].get("type") == "temporal":
                     enc["x"]["axis"]["formatType"] = "time"

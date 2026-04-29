@@ -2278,6 +2278,101 @@ def _trendline_series(name: str, xs: List[float], ys: List[float],
     return entry
 
 
+_SCATTER_SIZE_PX_MIN_DEFAULT = 6
+_SCATTER_SIZE_PX_MAX_DEFAULT = 28
+
+
+def _resolve_size_scale(
+    df, size_col: str, mapping: Dict[str, Any],
+) -> Tuple[float, float, float, float]:
+    """Compute the data-space (val_lo, val_hi) and pixel-space (px_min, px_max)
+    extents for a scatter ``size`` mapping.
+
+    The data-space range defaults to robust 5th/95th percentile of the
+    finite numeric values in ``df[size_col]`` so a single outlier can't
+    crush the rest of the points into one pixel. Authors can pin the
+    range explicitly via ``mapping.size_lo`` / ``mapping.size_hi`` (in
+    data units) or override the pixel range via ``mapping.size_min`` /
+    ``mapping.size_max`` (in CSS pixels).
+
+    When the column is constant or has fewer than two finite values,
+    ``val_lo == val_hi`` and the caller emits a constant pixel size.
+    """
+    import math
+
+    raw = _col_to_list(df, size_col)
+    nums: List[float] = []
+    for v in raw:
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(f) or math.isinf(f):
+            continue
+        nums.append(f)
+
+    px_min = float(mapping.get("size_min", _SCATTER_SIZE_PX_MIN_DEFAULT))
+    px_max = float(mapping.get("size_max", _SCATTER_SIZE_PX_MAX_DEFAULT))
+    if px_max < px_min:
+        px_min, px_max = px_max, px_min
+    if px_min < 1:
+        px_min = 1.0
+
+    has_lo_pin = "size_lo" in mapping and mapping["size_lo"] is not None
+    has_hi_pin = "size_hi" in mapping and mapping["size_hi"] is not None
+    if has_lo_pin or has_hi_pin:
+        default_lo = float(min(nums)) if nums else 0.0
+        default_hi = float(max(nums)) if nums else 1.0
+        val_lo = float(mapping["size_lo"]) if has_lo_pin else default_lo
+        val_hi = float(mapping["size_hi"]) if has_hi_pin else default_hi
+    elif len(nums) < 2:
+        v = float(nums[0]) if nums else 0.0
+        val_lo = val_hi = v
+    else:
+        ns = sorted(nums)
+        n = len(ns)
+        lo_i = max(0, min(n - 1, int(round(n * 0.05))))
+        hi_i = max(0, min(n - 1, int(round(n * 0.95))))
+        val_lo = float(ns[lo_i])
+        val_hi = float(ns[hi_i])
+        if val_hi <= val_lo:
+            val_lo = float(ns[0])
+            val_hi = float(ns[-1])
+
+    return val_lo, val_hi, px_min, px_max
+
+
+def _scatter_size_formula(
+    val_lo: float, val_hi: float, px_min: float, px_max: float,
+) -> Union[str, float]:
+    """Emit the ``symbolSize`` value for a scatter series with a size column.
+
+    Returns a constant pixel size (rounded mid of the px range) when the
+    data-space extents are degenerate. Otherwise returns a JS function
+    string that linearly interpolates ``val[2]`` from
+    ``[val_lo, val_hi]`` onto ``[px_min, px_max]`` with both ends
+    clamped. NaN / null values fall back to ``px_min``.
+    """
+    val_lo = float(val_lo)
+    val_hi = float(val_hi)
+    px_min = float(px_min)
+    px_max = float(px_max)
+    if val_hi <= val_lo:
+        return float(round((px_min + px_max) / 2.0, 3))
+    return (
+        "function(val){"
+        f"var v = val && val[2]; var lo = {val_lo}; var hi = {val_hi};"
+        f"var pmin = {px_min}; var pmax = {px_max};"
+        "if (v === null || v === undefined || isNaN(v)) return pmin;"
+        "var t = (v - lo) / (hi - lo);"
+        "if (t < 0) t = 0; if (t > 1) t = 1;"
+        "return pmin + t * (pmax - pmin);"
+        "}"
+    )
+
+
 def build_scatter(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str, Any]:
     x = mapping.get("x"); y = mapping.get("y")
     color = mapping.get("color")
@@ -2310,8 +2405,15 @@ def build_scatter(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str,
     else:
         _ensure_columns(df, [x, y], "scatter")
         cols = [x, y]
+        size_formula: Union[str, float] = 10
         if size:
             _ensure_columns(df, [size], "scatter")
+            val_lo, val_hi, px_min, px_max = _resolve_size_scale(
+                df, size, mapping
+            )
+            size_formula = _scatter_size_formula(
+                val_lo, val_hi, px_min, px_max
+            )
         if color:
             _ensure_columns(df, [color], "scatter")
             groups = _unique(_col_to_list(df, color))
@@ -2323,7 +2425,7 @@ def build_scatter(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str,
                 s = {"type": "scatter", "name": str(g), "data": rows,
                       "emphasis": {"focus": "series"}}
                 if size:
-                    s["symbolSize"] = "function(val){ return Math.sqrt(Math.abs(val[2])) * 4; }"
+                    s["symbolSize"] = size_formula
                 else:
                     s["symbolSize"] = 10
                 series.append(s)
@@ -2341,7 +2443,7 @@ def build_scatter(df, mapping: Dict[str, Any], ctx: BuilderContext) -> Dict[str,
             s = {"type": "scatter", "name": str(y), "data": rows,
                   "symbolSize": 10}
             if size:
-                s["symbolSize"] = "function(val){ return Math.sqrt(Math.abs(val[2])) * 4; }"
+                s["symbolSize"] = size_formula
             series.append(s)
 
         if trendline and not trendlines:

@@ -230,26 +230,7 @@ metadata = {
 
 #### 2.3.1 Always-on header chrome
 
-The header's right edge is **shell-injected, not manifest-authored**. PRISM never lists these buttons in JSON; the rendering shell hardcodes them and the validator enforces the metadata that makes them functional. There is no way to suppress the chrome via the manifest.
-
-Left-to-right, the four buttons every persistent dashboard renders:
-
-| # | Button | Behaviour | Gating |
-|---|--------|-----------|--------|
-| 1 | `Methodology` | Click → markdown popup with `metadata.methodology` rendered | Always present; `metadata.methodology` is required so the button always opens to real content |
-| 2 | `Refresh` | Click → POST to `api_url` (default `/api/dashboard/refresh/`) and poll `status_url` until completion. Failures pop the structured error modal with a "Copy markdown for PRISM" button | Requires `metadata.kerberos` + `metadata.dashboard_id`. Non-suppressible from the manifest -- there is no opt-out flag. Every persistent dashboard renders this button; if a server-side refresh is genuinely impossible (registry disabled, runner namespace gap), the click surfaces the failure in the structured error modal |
-| 3 | `Share` / `Sharing` | Click on `Share` → POST `{shared: true}` to the share-toggle endpoint, label flips to `Sharing`. Click on `Sharing` → confirm modal, POST `{shared: false}` | Requires `metadata.kerberos` + `metadata.dashboard_id`. Hidden unless `window.PRISM_VIEWER === metadata.kerberos` (server-side gate is enforced separately by the registry-path construction in §6.8 of `prism/dashboards-portal.md`). Hidden entirely on Observatory dashboards (`PRISM_IS_OBSERVATORY = true`) |
-| 4 | `Download ▾` | Click opens a dropdown with three menu items: `Panel` (full view as a single PNG via html2canvas), `Charts` (one PNG per `widget: chart`), `Excel` (one workbook with one sheet per `widget: table`). The `Excel` item is hidden when no table widgets exist. Click outside / Esc closes the menu | Always present |
-
-The chrome also carries the `theme-toggle` (always on) and the `Data as of <ts>` pill (visible when `metadata.data_as_of` or `generated_at` is set). Share-button auth is server-side too — the share-toggle endpoint always writes `users/{caller}/dashboards/dashboards_registry.json`, so a non-author cannot toggle someone else's state regardless of UI. `header_actions[]` (§8) injects custom buttons to the **left** of this chrome bar; the validator rejects any custom `id` that would collide with a reserved chrome id (full list in §8).
-
-#### 2.3.2 "Why is my Refresh button missing?"
-
-The runtime emits `console.warn('[prism] Refresh button hidden: ...')` naming the missing field(s) whenever the JS gate fires. Single cause:
-
-- **Missing `metadata.kerberos` or `metadata.dashboard_id`.** `compile_dashboard` rejects this at validate time, but legacy `dashboard.html` files from before that guard can still be on S3. Recompile via Tool 2.
-
-There is no manifest-side opt-out: the `metadata.refresh_enabled` field has been retired. Old manifests that still set it validate fine (the field is silently ignored). The button always renders for any persistent dashboard with `kerberos` + `dashboard_id`. If a refresh genuinely cannot run (server-side registry disabled, runner namespace gap), the click surfaces the failure in the error modal; the button does not vanish.
+The header's right edge is shell-injected (Methodology / Refresh / Share / Download / theme-toggle / data-as-of pill). PRISM does not author these buttons. The validator hard-rejects any manifest missing the three required metadata fields above (`kerberos` / `dashboard_id` / `methodology`); set them and the chrome is functional. The retired `metadata.refresh_enabled` flag is silently ignored. `header_actions[]` (§8) injects custom buttons to the LEFT of this chrome bar; the validator rejects any custom `id` colliding with a reserved chrome id (full list in §8).
 
 ### 2.4 `compile_dashboard` parameters
 
@@ -334,41 +315,19 @@ _audit_dashboard_layout(DASHBOARD_PATH, m)
 
 #### 2.5.2 Quarantine, never delete
 
-The audit prints a `s3_manager.move()` recipe rather than running `s3_manager.delete()` itself. Three reasons:
-
-1. **Rogue files sometimes turn out to be the real artefact mis-named.** A `manifest_v2.json` next to `manifest.json` could be the live one and the canonical one is stale. Auto-deleting either is irreversible.
-2. **The audit is a verification step, not a write step.** Mixing verification with destructive S3 ops is a class of bug — verification must be safely re-runnable. Quarantine writes are explicit and authored by PRISM in a follow-up step.
-3. **`archive/<UTC>/` is the only top-level prefix the audit ignores by design.** Quarantined files don't re-trip the audit on the next run, and the refresh runner already ignores `archive/` (it reads only the canonical paths). Once a quarter, sweep `archive/` by hand if storage hygiene matters.
-
-The cleanup pattern when the audit raises:
+When the audit raises, move each rogue path to `archive/<UTC>/` via `s3_manager.move(...)` -- never `s3_manager.delete()`. The audit ignores `archive/<UTC>/` by design, so quarantined files don't re-trip on the next run; the refresh runner ignores `archive/` too.
 
 ```python
-# 1. Run the audit. It raises with a list of rogue paths and a move() recipe in the message.
-try:
-    _audit_dashboard_layout(DASHBOARD_PATH, m)
-except RuntimeError as e:
-    print(e)  # surface to the user; confirm before mass-moving
-
-# 2. Author the moves explicitly. Never run delete().
 ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
 for rogue in ['scripts/build_v2.py', 'manifest_old.json', 'data/haver/cpi.csv']:
     s3_manager.move(f'{DASHBOARD_PATH}/{rogue}',
                      f'{DASHBOARD_PATH}/archive/{ts}/{rogue}')
-
-# 3. Re-run audit; should now pass.
-_audit_dashboard_layout(DASHBOARD_PATH, m)
+_audit_dashboard_layout(DASHBOARD_PATH, m)   # re-run; should now pass
 ```
 
 #### 2.5.3 Inheritance: audit BEFORE you change anything
 
-When PRISM picks up an existing dashboard for any reason, the first action is the audit — not the requested surface change. Two scenarios:
-
-| Scenario | What happens |
-|----------|--------------|
-| Audit passes | Proceed with the requested change. At end of session, re-run audit before Tool 3. |
-| Audit raises | Surface to the user: "I inherited `{dashboard_id}` and the folder has rogue files violating the §2.5 whitelist. Cleaning these up takes priority over the surface change you asked for. Proposed quarantine moves: ... . Confirm to proceed." After cleanup, audit must pass before any code in `pull_data.py` / `build.py` is rewritten — otherwise the surface change ships ON TOP OF a non-compliant folder, which is the exact failure mode this rule prevents. |
-
-Inherited dashboards from before this rule existed (pre-2026-04-28 builds) commonly fail the audit on first inspection. That's expected; the cleanup-first protocol exists for exactly these cases.
+When PRISM picks up an existing dashboard for any reason, run the audit FIRST. If it raises, surface the rogue list to the user with proposed quarantine moves; cleanup takes priority over the requested surface change. Re-run the audit and confirm it passes before any line of `pull_data.py` / `build.py` is rewritten.
 
 ---
 
@@ -446,7 +405,9 @@ Unknown `chart_type` raises `ValueError`. Datetime cols auto-resolve to `xAxis.t
 | `axes` | List of axis spec dicts for N-axis time series. Takes precedence over the legacy 2-axis API |
 | `strokeDash` / `strokeDashScale` / `strokeDashLegend` | Column controlling per-series dash pattern; `{"domain": [...], "range": [[1,0], [8,3]]}` explicit mapping; legend cross-product |
 | `trendline` / `trendlines` (scatter) | `True` adds overall / per-group OLS line |
-| `size` (scatter) | Column driving marker size |
+| `size` (scatter) | Column driving marker size. Auto-scaled to a 6-28 px range using the column's robust 5th/95th percentile, so raw revenue / market-cap / volume columns work without pre-normalising. Override with `size_min` / `size_max` (pixels) and `size_lo` / `size_hi` (data-space pin) — see below. |
+| `size_min` / `size_max` (scatter) | Pixel range for `size` mapping. Defaults: 6 / 28. |
+| `size_lo` / `size_hi` (scatter) | Data-space pin for the `size` mapping. Defaults to the column's 5th/95th percentile. Use when a fixed reference scale matters (e.g. comparing across reruns where the dataset extent shifts). |
 | `bins` / `density` (histogram) | Int or list of bin edges (default 20); `True` normalises counts to density |
 
 **Chart-specific shapes:**
@@ -503,13 +464,7 @@ The compiler truncates long category labels to `category_label_max_px`, sizes `n
 
 **Per-spec overrides.** `palette`, `theme`, `annotations` may live on `spec` to override manifest defaults. Required keys: `chart_type`, `dataset`, `mapping`. Titles / subtitles live at the widget level only — `spec.title` / `spec.subtitle` are rejected by the validator.
 
-**Global decimal cap.** Every numeric value rendered anywhere — value-axis tick labels, tooltips (axis-trigger crosshair tooltips, item tooltips), KPI tiles, table cells, heatmap labels, correlation coefficients, regression statistics, "View raw data" modal, dashboard detail-modal charts — is hard-capped at 2 decimal places. Three layers enforce this:
-
-1. **Author-supplied precision options.** `value_decimals`, `decimals`, `delta_decimals`, `tooltip.decimals`, table `"number:5"`, etc., are clamped through `clamp_decimals` to the cap before reaching any formatter.
-2. **Default tooltip / axis formatters.** Every chart automatically gets a default `axisLabel.formatter` on its value/log axes and a default `tooltip.valueFormatter`, both of which round through `toFixed(MAX_DASHBOARD_DECIMALS)` and strip trailing zeros (`4.5`, not `4.50`). Charts that ship a custom `tooltip.formatter` (full-HTML template) keep their custom formatter — the cap is enforced inside those via `__capDec` on every `toFixed()` literal.
-3. **Runtime guard.** The dashboard JS calls `__ensureTooltipDecimalCap(opt)` inside `materializeOption()` on every render so a chart that somehow reached the runtime without a tooltip `valueFormatter` (hand-edited spec, legacy snapshot) still cannot leak raw 12-digit floats. Same guard runs in the editor and in detail-modal renders.
-
-Author-supplied raw JS function strings (`value_formatter`, `tooltip.formatter`, `axisLabel.formatter`) are NOT inspected — the assumption is that an author writing raw JS knows what they're doing — but Python-side `toFixed(...)` literals authored anywhere in the payload all use `0`, `1`, or `2` explicitly, so the cap holds. The cap value is `config.MAX_DASHBOARD_DECIMALS`; raise it in one place and both Python (compile-time) and JS (runtime) regenerate from it.
+**Global decimal cap.** Every numeric value rendered anywhere is hard-capped at 2 decimal places (`config.MAX_DASHBOARD_DECIMALS`). Author-supplied precision options (`value_decimals`, `decimals`, `delta_decimals`, `tooltip.decimals`, table `"number:5"`, etc.) are clamped to the cap end-to-end. Author-supplied raw JS formatter strings (`value_formatter`, `tooltip.formatter`, `axisLabel.formatter`) are not inspected -- if you pass raw JS, you own its precision.
 
 ### 3.4 Annotations
 
@@ -556,9 +511,7 @@ Stats strip example: `n=247  r=0.68***  R²=0.46  beta=0.42 (SE 0.03)  alpha=1.1
 
 ### 3.6 `correlation_matrix` — N×N heatmap from a column list
 
-"How do these N series co-move?" Builder applies a per-column transform, computes the correlation matrix, emits a diverging heatmap pinned to `[-1, 1]`.
-
-The builder also embeds a runtime sidecar (raw per-column values + epoch-ms times) so the dashboard's three-dots drawer can re-correlate against any **transform**, **rolling window**, or **method** the viewer picks — no script reload, no PRISM round-trip. Mapping `transform` and `window` become the *initial* drawer state, not a pin.
+"How do these N series co-move?" Builder applies a per-column transform, computes the correlation matrix, emits a diverging heatmap pinned to `[-1, 1]`. Mapping `transform`, `window`, and `method` are the INITIAL state of the runtime drawer, not pins -- the viewer can re-correlate against any combination without a script reload.
 
 | Mapping key | Purpose |
 |-------------|---------|
@@ -574,21 +527,9 @@ The builder also embeds a runtime sidecar (raw per-column values + epoch-ms time
 | `value_label_color` | `"auto"` (B/W contrast), hex, or `False` |
 | `colors` / `color_palette` | Override palette (default `gs_diverging`) |
 
-**Runtime drawer (three-dots → controls).** Three live knobs, plus an action bar:
+Use `correlation_matrix` for wide-form time-series panels (author gives columns; builder does math + visualMap). Use `heatmap` for pre-computed bivariate cells (cross-asset returns by month, hit-rate by quintile). Author passes an explicit `subtitle` to suppress the auto-stamped `Pearson · %Δ · 63-day rolling · as of <date>` line.
 
-| Knob | Effect |
-|------|--------|
-| Transform | Re-runs the per-column transform across the **full history** (so `rolling_zscore_252` keeps its full lookback) then re-correlates the visible window. Order-aware transforms (`change`, `pct_change`, `yoy_*`, `rolling_zscore_*`) auto-hide when the chart has no time axis |
-| Window | Slices the post-transform series to the last N days before correlating. Hidden when no time axis. The matrix's first paint already respects `mapping.window`, so authors who pin `window: '63d'` get the rolling matrix at compile-time and the viewer can flip to other lookbacks |
-| Method | `Pearson` or `Spearman`. Method swap is per-render — author's `mapping.method` is the default |
-
-Subtitle auto-stamps `Pearson · %Δ · 63-day rolling · as of 2026-04-22` and updates on every drawer change. When the author passes an explicit `subtitle` on the widget, the auto-stamp is suppressed.
-
-`View data` / `Copy CSV` / `Download CSV` / `Download XLSX` operate on the **runtime** matrix (post Transform + Window + Method), with column names as the row / column headers — what gets exported matches what's on screen.
-
-Cell tooltip prints `<row name> × <col name>: r=0.xx`. Diagonal is always `1.0`. Use `correlation_matrix` for wide-form time-series panels (author gives columns; builder does math + visualMap). Use `heatmap` for pre-computed bivariate cells (cross-asset returns by month, hit-rate by quintile).
-
-Implementation note: the runtime payload (`opt._corr_runtime`) carries ~8 bytes × `N_cols` × `N_obs` of float values plus an `N_obs` epoch-ms times array. For an 8-column 5y daily panel that's ~70 KB / chart. Cap dataset frequency or column count if a dashboard needs many corr matrices.
+Budget: ~70 KB per chart for an 8-column 5y daily panel. Cap dataset frequency or column count if a dashboard needs many corr matrices.
 
 ### 3.7 Computed columns (manifest-level expressions)
 
@@ -1084,9 +1025,7 @@ Supported `where` ops: `==`, `!=`, `>`, `>=`, `<`, `<=`. Dependent filter's exis
 
 Every chart with `time` x-axis ships with two `dataZoom` controls injected at compile time (independent of any `dateRange` filter): `type: "inside"` (mouse wheel / pinch zoom + click-and-drag pan) and `type: "slider"` (draggable slider beneath the grid). Full dataset embedded; slider clips visible window. `grid.bottom` auto-bumps. Builders that already declared their own `dataZoom` (e.g. candlestick) are left alone.
 
-The injected zoom is **per-chart and local by default** -- dragging the slider on one chart does not move the slider on a sibling chart in the same panel, even when both target the same dataset. The window also survives unrelated filter changes: a select / radio / numberRange filter rerendering the chart will re-apply its compile-time spec but preserve the current in-chart zoom window. Three explicit paths can move the window across charts: (a) a `dateRange` global filter dropdown change (§5.1) translates into a `dispatchAction({type:'dataZoom'})` on every targeted chart, (b) an authored `Link` with `sync: ["dataZoom"]` (§6) wires the affected charts into an `echarts.connect()` group so drags propagate live, and (c) the filter-reset button intentionally snaps every chart back to its default window. Everything else stays local.
-
-The slider's `labelFormatter` is auto-selected from the actual data span — `"HH:MM"` for sub-day data, `"Mon dd HH:MM"` for multi-day-but-under-two-weeks, `"Mon dd"` for daily-within-a-year, `"Mon YYYY"` for multi-year. So a 12h intraday chart's slider labels read `"06:30"` / `"18:30"`, a 5y EOD chart's labels read `"Apr 2021"` / `"Apr 2026"`, and so on.
+The injected zoom is **per-chart and local by default** -- dragging the slider on one chart does not move sibling charts. To propagate drags across charts, author a `Link` with `sync: ["dataZoom"]` (§6); a `dateRange` global filter dropdown also moves every targeted chart. Slider tick label format is auto-selected from the data span (no author knob).
 
 `chart_zoom` value:
 
@@ -1527,11 +1466,7 @@ current = (iday_df.ffill().iloc[-1] if iday_df is not None and len(iday_df) > 0
 
 Both `pull_market_data` calls share `name='rates'`, so the metadata sidecar (`rates_metadata.json`) is written / overwritten by whichever call wrote last — both calls describe the same coordinates, so a single sidecar is correct.
 
-**Sub-day timestamps are preserved end-to-end.** The dashboard compiler emits ISO-8601 with time component (and tz offset when present) for any column whose values aren't all calendar-day-aligned, so an intraday `timestamp` column with values like `2026-04-27 06:38:00-04:00` survives as 722 distinct x-values into ECharts. No special manifest configuration is needed — the same `multi_line` chart spec works for daily EOD data and for minute-bar intraday data. Daily / weekly / monthly columns continue to emit as bare `"%Y-%m-%d"` strings (byte-identical to the pre-sub-day-fix behaviour). The slider's `labelFormatter` auto-adapts to the data span (see §5.3): a 12h chart shows `"06:30"` / `"18:30"`, a 5y chart shows `"Apr 2021"` / `"Apr 2026"`. No author-side knob.
-
-If the intraday tab has a global `dateRange` filter targeting it (e.g. `targets: ["*"]` with `default: "1Y"`), the runtime dispatches `[now-365d, now]` into the chart's dataZoom but ECharts clamps the visible window to the actual data extent — the user sees the full intraday session, not a 1-year axis with a tick at the right edge. The previous footgun ("intraday charts collapse to a single tick on the day") is fixed at the serializer; no manifest workaround required.
-
-Compact / sparkline-shaped intraday tiles can drop the slider via `spec.chart_zoom = {"slider": false}` to reclaim the ~28px the slider claims at the bottom — see §5.3.
+The same `multi_line` chart spec works for daily EOD and intraday minute-bar data -- no special manifest configuration. Compact / sparkline-shaped intraday tiles can drop the slider via `spec.chart_zoom = {"slider": false}` to reclaim ~28px (§5.3).
 
 ### 9.5 Refresh-runner namespace gap
 
